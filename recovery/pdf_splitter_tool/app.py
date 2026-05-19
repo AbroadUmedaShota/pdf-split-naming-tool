@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 from pathlib import Path
 from tkinter import BOTH, END, LEFT, RIGHT, VERTICAL, Canvas, Listbox, StringVar, Text, Tk, filedialog, messagebox
 from tkinter import ttk
 
 from .models import Preset, Segment
+from .app_metadata import APP_NAME
 from .presets import PresetRepository, find_preset
 from .processor import PdfProcessor
 from .state import StateManager
@@ -19,7 +21,7 @@ class PdfSplitterApp:
     def __init__(self, root: Tk, work_dir: Path | None = None) -> None:
         self.root = root
         self.work_dir = work_dir or Path.cwd()
-        self.root.title("PDF Split Naming Tool Recovery")
+        self.root.title(APP_NAME)
         self.processor = PdfProcessor()
         self.state_manager = StateManager(self.work_dir)
         self.preset_repo = PresetRepository(self.work_dir / "presets.json")
@@ -482,8 +484,14 @@ class PdfSplitterApp:
             messagebox.showerror("Validation errors", "\n".join(errors))
 
 
-def main() -> None:
+def default_work_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path.cwd()
+
+
+def main(work_dir: Path | None = None) -> None:
     root = Tk()
     root.geometry("1200x820")
-    PdfSplitterApp(root)
+    PdfSplitterApp(root, work_dir or default_work_dir())
     root.mainloop()
