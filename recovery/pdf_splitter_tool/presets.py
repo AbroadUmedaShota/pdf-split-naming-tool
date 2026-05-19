@@ -35,6 +35,7 @@ LEGACY_PRESET = Preset(
 )
 
 DEFAULT_PRESETS = (YOSHIDA_ELSIS_PRESET, LEGACY_PRESET)
+DEFAULT_PRESET_IDS = {preset.id for preset in DEFAULT_PRESETS}
 
 
 class PresetRepository:
