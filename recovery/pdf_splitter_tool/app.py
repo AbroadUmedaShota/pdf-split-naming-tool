@@ -4,12 +4,13 @@ import queue
 import sys
 import threading
 from pathlib import Path
-from tkinter import BOTH, END, LEFT, RIGHT, VERTICAL, Canvas, Listbox, StringVar, Text, Tk, filedialog, messagebox
+from tkinter import BOTH, END, LEFT, RIGHT, VERTICAL, Canvas, Listbox, StringVar, Text, Tk, Toplevel, filedialog, messagebox
 from tkinter import ttk
 
-from .models import Preset, Segment
 from .app_metadata import APP_NAME
-from .presets import PresetRepository, find_preset
+from .models import Preset, Segment
+from .preset_editing import build_preset_from_editor, format_field_rows, format_keywords
+from .presets import DEFAULT_PRESET_IDS, PresetRepository, find_preset
 from .processor import PdfProcessor
 from .state import StateManager
 
@@ -68,6 +69,7 @@ class PdfSplitterApp:
         ttk.Button(toolbar, text="Add PDFs", command=self.select_pdfs).pack(side=LEFT)
         ttk.Button(toolbar, text="Input Folder", command=self.select_folder).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Output Folder", command=self.select_output_dir).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Manage Presets", command=self.open_preset_manager).pack(side=LEFT, padx=4)
 
         self.preset_var = StringVar(value=self.active_preset.name)
         self.preset_combo = ttk.Combobox(
@@ -83,6 +85,21 @@ class PdfSplitterApp:
         self.pdf_list = Listbox(self.step1, height=12)
         self.pdf_list.pack(fill=BOTH, expand=True, pady=8)
         self.pdf_list.bind("<<ListboxSelect>>", self.on_pdf_selected)
+
+    def open_preset_manager(self) -> None:
+        PresetManagerDialog(self)
+
+    def refresh_preset_combo(self) -> None:
+        self.preset_combo["values"] = [preset.name for preset in self.presets]
+        self.preset_var.set(self.active_preset.name)
+
+    def set_active_preset(self, preset_id: str) -> None:
+        self.active_preset = find_preset(self.presets, preset_id)
+        self.active_preset_id = self.active_preset.id
+        self.preset_repo.save(self.presets, self.active_preset_id)
+        self.refresh_preset_combo()
+        self.rebuild_metadata_fields()
+        self.refresh_segment_list()
 
     def _build_step2(self) -> None:
         left = ttk.Frame(self.step2)
@@ -402,10 +419,7 @@ class PdfSplitterApp:
         selected_name = self.preset_var.get()
         for preset in self.presets:
             if preset.name == selected_name:
-                self.active_preset = preset
-                self.active_preset_id = preset.id
-                self.preset_repo.save(self.presets, self.active_preset_id)
-                self.rebuild_metadata_fields()
+                self.set_active_preset(preset.id)
                 return
 
     def refresh_segment_list(self) -> None:
@@ -482,6 +496,166 @@ class PdfSplitterApp:
             self.output_text.insert(END, f"Wrote {final_path}\n")
         if errors:
             messagebox.showerror("Validation errors", "\n".join(errors))
+
+
+class PresetManagerDialog:
+    def __init__(self, app: PdfSplitterApp) -> None:
+        self.app = app
+        self.window = Toplevel(app.root)
+        self.window.title("Manage Presets")
+        self.window.geometry("860x560")
+        self.selected_index: int | None = None
+
+        self.id_var = StringVar()
+        self.name_var = StringVar()
+        self.template_var = StringVar()
+        self.blank_threshold_var = StringVar()
+        self.index_threshold_var = StringVar()
+
+        self._build_ui()
+        self.refresh_list()
+        self.select_preset_by_id(app.active_preset_id)
+        self.window.transient(app.root)
+        self.window.grab_set()
+
+    def _build_ui(self) -> None:
+        left = ttk.Frame(self.window, padding=8)
+        left.pack(side=LEFT, fill="y")
+        self.preset_list = Listbox(left, width=30)
+        self.preset_list.pack(fill=BOTH, expand=True)
+        self.preset_list.bind("<<ListboxSelect>>", self.on_preset_selected)
+        ttk.Button(left, text="New from selected", command=self.new_from_selected).pack(fill="x", pady=(8, 0))
+        ttk.Button(left, text="Delete custom", command=self.delete_selected).pack(fill="x", pady=4)
+
+        form = ttk.Frame(self.window, padding=8)
+        form.pack(side=LEFT, fill=BOTH, expand=True)
+        self._entry_row(form, "Preset ID", self.id_var)
+        self._entry_row(form, "Name", self.name_var)
+        self._entry_row(form, "Naming template", self.template_var)
+        self._entry_row(form, "Blank threshold", self.blank_threshold_var)
+        self._entry_row(form, "Index threshold", self.index_threshold_var)
+
+        ttk.Label(form, text="Fields: key|label|required|default").pack(anchor="w", pady=(8, 2))
+        self.fields_text = Text(form, height=9, wrap="none")
+        self.fields_text.pack(fill=BOTH, expand=True)
+
+        ttk.Label(form, text="Extraction keywords: comma or newline separated").pack(anchor="w", pady=(8, 2))
+        self.keywords_text = Text(form, height=4, wrap="word")
+        self.keywords_text.pack(fill="x")
+
+        buttons = ttk.Frame(form)
+        buttons.pack(fill="x", pady=(10, 0))
+        ttk.Button(buttons, text="Save", command=self.save_current).pack(side=LEFT)
+        ttk.Button(buttons, text="Close", command=self.window.destroy).pack(side=RIGHT)
+
+    def _entry_row(self, parent: ttk.Frame, label: str, variable: StringVar) -> None:
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text=label, width=18).pack(side=LEFT)
+        ttk.Entry(row, textvariable=variable).pack(side=LEFT, fill="x", expand=True)
+
+    def refresh_list(self) -> None:
+        self.preset_list.delete(0, END)
+        for preset in self.app.presets:
+            suffix = " (built-in)" if preset.id in DEFAULT_PRESET_IDS else ""
+            self.preset_list.insert(END, f"{preset.name}{suffix}")
+
+    def select_preset_by_id(self, preset_id: str) -> None:
+        for index, preset in enumerate(self.app.presets):
+            if preset.id == preset_id:
+                self.preset_list.selection_clear(0, END)
+                self.preset_list.selection_set(index)
+                self.load_preset(index)
+                return
+
+    def on_preset_selected(self, _event) -> None:
+        selection = self.preset_list.curselection()
+        if selection:
+            self.load_preset(selection[0])
+
+    def load_preset(self, index: int) -> None:
+        self.selected_index = index
+        preset = self.app.presets[index]
+        self.id_var.set(preset.id)
+        self.name_var.set(preset.name)
+        self.template_var.set(preset.naming_template)
+        self.blank_threshold_var.set(str(preset.blank_threshold))
+        self.index_threshold_var.set(str(preset.index_threshold))
+        self.fields_text.delete("1.0", END)
+        self.fields_text.insert("1.0", format_field_rows(preset.fields))
+        self.keywords_text.delete("1.0", END)
+        self.keywords_text.insert("1.0", format_keywords(preset.extraction_keywords))
+
+    def new_from_selected(self) -> None:
+        source = self.app.presets[self.selected_index] if self.selected_index is not None else self.app.active_preset
+        base_id = source.id + "-custom"
+        preset_ids = {preset.id for preset in self.app.presets}
+        candidate = base_id
+        counter = 2
+        while candidate in preset_ids:
+            candidate = f"{base_id}-{counter}"
+            counter += 1
+        self.selected_index = None
+        self.id_var.set(candidate)
+        self.name_var.set(source.name + " Copy")
+        self.template_var.set(source.naming_template)
+        self.blank_threshold_var.set(str(source.blank_threshold))
+        self.index_threshold_var.set(str(source.index_threshold))
+        self.fields_text.delete("1.0", END)
+        self.fields_text.insert("1.0", format_field_rows(source.fields))
+        self.keywords_text.delete("1.0", END)
+        self.keywords_text.insert("1.0", format_keywords(source.extraction_keywords))
+
+    def save_current(self) -> None:
+        try:
+            preset = build_preset_from_editor(
+                preset_id=self.id_var.get(),
+                name=self.name_var.get(),
+                field_rows=self.fields_text.get("1.0", "end-1c"),
+                naming_template=self.template_var.get(),
+                extraction_keywords=self.keywords_text.get("1.0", "end-1c"),
+                blank_threshold=self.blank_threshold_var.get(),
+                index_threshold=self.index_threshold_var.get(),
+            )
+        except ValueError as exc:
+            messagebox.showerror("Preset error", str(exc), parent=self.window)
+            return
+        if preset.id in DEFAULT_PRESET_IDS:
+            messagebox.showerror(
+                "Preset error",
+                "Built-in preset IDs are protected. Use New from selected and save with a different ID.",
+                parent=self.window,
+            )
+            return
+
+        for index, existing in enumerate(self.app.presets):
+            if existing.id == preset.id:
+                self.app.presets[index] = preset
+                break
+        else:
+            self.app.presets.append(preset)
+
+        self.app.set_active_preset(preset.id)
+        self.refresh_list()
+        self.select_preset_by_id(preset.id)
+        messagebox.showinfo("Preset saved", f"Saved preset: {preset.name}", parent=self.window)
+
+    def delete_selected(self) -> None:
+        if self.selected_index is None:
+            return
+        preset = self.app.presets[self.selected_index]
+        if preset.id in DEFAULT_PRESET_IDS:
+            messagebox.showerror("Preset error", "Built-in presets cannot be deleted.", parent=self.window)
+            return
+        if not messagebox.askyesno("Delete preset", f"Delete preset '{preset.name}'?", parent=self.window):
+            return
+        self.app.presets.pop(self.selected_index)
+        next_active = self.app.active_preset_id
+        if preset.id == self.app.active_preset_id:
+            next_active = self.app.presets[0].id
+        self.app.set_active_preset(next_active)
+        self.refresh_list()
+        self.select_preset_by_id(next_active)
 
 
 def default_work_dir() -> Path:

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from pdf_splitter_tool.models import MetadataField, Preset
 from pdf_splitter_tool.presets import PresetRepository, YOSHIDA_ELSIS_PRESET, find_preset
 from pdf_splitter_tool.state import StateManager
 
@@ -65,6 +66,30 @@ def test_preset_repository_refreshes_builtin_yoshida_labels(tmp_path: Path) -> N
         "会社名（任意）",
         "契約書名（任意）",
     ]
+
+
+def test_preset_repository_saves_and_loads_custom_preset(tmp_path: Path) -> None:
+    path = tmp_path / "presets.json"
+    repo = PresetRepository(path)
+    presets, _active_id = repo.load()
+    custom = Preset(
+        id="future-case",
+        name="Future Case",
+        fields=(MetadataField("box_no", "箱No", required=True), MetadataField("seq", "連番", required=True)),
+        naming_template="{box_no}_{seq}.pdf",
+        extraction_keywords=("契約", "agreement"),
+        blank_threshold=0.98,
+        index_threshold=0.75,
+    )
+
+    repo.save([*presets, custom], custom.id)
+    loaded, loaded_active_id = repo.load()
+    loaded_custom = find_preset(loaded, loaded_active_id)
+
+    assert loaded_active_id == custom.id
+    assert loaded_custom.name == "Future Case"
+    assert loaded_custom.extraction_keywords == ("契約", "agreement")
+    assert loaded_custom.blank_threshold == 0.98
 
 
 def test_state_manager_writes_state_and_backup(tmp_path: Path) -> None:
