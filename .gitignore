@@ -5,6 +5,9 @@ artifacts/
 # Python generated files
 __pycache__/
 *.py[cod]
+.pytest_cache/
+recovery/build/
+recovery/dist/
 
 # OS/editor files
 .DS_Store
