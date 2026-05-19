@@ -1,0 +1,11 @@
+# Local/source-recovery data
+data/
+artifacts/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# OS/editor files
+.DS_Store
+Thumbs.db
