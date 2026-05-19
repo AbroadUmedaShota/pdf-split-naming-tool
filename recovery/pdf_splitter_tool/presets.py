@@ -8,16 +8,16 @@ from .models import MetadataField, Preset
 
 YOSHIDA_ELSIS_PRESET = Preset(
     id="yoshida-elsis",
-    name="Yoshida Elsis",
+    name="吉田エルシス",
     fields=(
-        MetadataField("box_no", "Box No", required=True),
-        MetadataField("binder_no", "Binder No", required=True),
-        MetadataField("seq", "Sequence", required=True),
-        MetadataField("company", "Company", required=False),
-        MetadataField("doc", "Document", required=False),
+        MetadataField("box_no", "箱No", required=True),
+        MetadataField("binder_no", "バインダーNo", required=True),
+        MetadataField("seq", "連番", required=True),
+        MetadataField("company", "会社名（任意）", required=False),
+        MetadataField("doc", "契約書名（任意）", required=False),
     ),
     naming_template="{box_no:0>2}_{binder_no:0>2}_{seq:0>3}.pdf",
-    extraction_keywords=("box", "binder", "contract", "agreement"),
+    extraction_keywords=("箱", "バインダー", "契約", "契約書", "agreement"),
 )
 
 LEGACY_PRESET = Preset(
@@ -71,7 +71,7 @@ class PresetRepository:
     def _with_defaults(self, presets: list[Preset]) -> list[Preset]:
         by_id = {preset.id: preset for preset in presets}
         for preset in DEFAULT_PRESETS:
-            by_id.setdefault(preset.id, preset)
+            by_id[preset.id] = preset
         return list(by_id.values())
 
 
