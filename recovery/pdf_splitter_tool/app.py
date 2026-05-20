@@ -1127,6 +1127,17 @@ class PdfSplitterApp:
                         self.page_jump_var.set(str(self.current_page))
                         self.sync_page_list_selection()
                         self.render_current_page_async()
+                elif kind == "ocr_prerequisite":
+                    target = payload
+                    self.finish_active_job()
+                    if target == "search":
+                        self.search_hit_pages.clear()
+                    elif target == "index":
+                        self.index_candidate_pages.clear()
+                    self.refresh_page_list()
+                    self.status_var.set(OCR_PREREQUISITE_MESSAGE)
+                    self.ocr_text.delete("1.0", END)
+                    self.ocr_text.insert("1.0", OCR_PREREQUISITE_MESSAGE)
                 elif kind == "error":
                     self.finish_active_job()
                     self.status_var.set(str(payload))
@@ -1355,13 +1366,6 @@ class PdfSplitterApp:
         query = self.search_var.get().strip().lower()
         if not query:
             return
-        if not self.current_pdf_has_text_layer:
-            self.search_hit_pages.clear()
-            self.refresh_page_list()
-            self.status_var.set(OCR_PREREQUISITE_MESSAGE)
-            self.ocr_text.delete("1.0", END)
-            self.ocr_text.insert("1.0", OCR_PREREQUISITE_MESSAGE)
-            return
         cancel_event = self.start_background_job("検索")
         if cancel_event is None:
             return
@@ -1369,6 +1373,9 @@ class PdfSplitterApp:
 
         def worker() -> None:
             try:
+                if not self.processor.has_text_layer(pdf_path):
+                    self.worker_queue.put(("ocr_prerequisite", "search"))
+                    return
                 hits = self.processor.search_text_pages(
                     pdf_path,
                     query,
@@ -1387,13 +1394,6 @@ class PdfSplitterApp:
         keywords = tuple(keyword.lower() for keyword in self.active_preset.extraction_keywords if keyword.strip())
         if not keywords:
             return
-        if not self.current_pdf_has_text_layer:
-            self.index_candidate_pages.clear()
-            self.refresh_page_list()
-            self.status_var.set(OCR_PREREQUISITE_MESSAGE)
-            self.ocr_text.delete("1.0", END)
-            self.ocr_text.insert("1.0", OCR_PREREQUISITE_MESSAGE)
-            return
         cancel_event = self.start_background_job("インデックス検索")
         if cancel_event is None:
             return
@@ -1401,6 +1401,9 @@ class PdfSplitterApp:
 
         def worker() -> None:
             try:
+                if not self.processor.has_text_layer(pdf_path):
+                    self.worker_queue.put(("ocr_prerequisite", "index"))
+                    return
                 hits = self.processor.index_candidate_pages(
                     pdf_path,
                     keywords,

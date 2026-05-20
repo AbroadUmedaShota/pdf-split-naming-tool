@@ -33,6 +33,16 @@ def make_image_only_pdf(path: Path) -> None:
     doc.close()
 
 
+def make_text_after_blank_pdf(path: Path) -> None:
+    doc = fitz.open()
+    for _ in range(5):
+        doc.new_page()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Searchable text on page 6")
+    doc.save(path)
+    doc.close()
+
+
 def make_blank_precision_pdf(path: Path) -> None:
     doc = fitz.open()
     doc.new_page()
@@ -124,6 +134,17 @@ def test_batch_text_and_index_search(tmp_path: Path) -> None:
 
     assert processor.search_text_pages(source, "Page 3") == [3]
     assert processor.index_candidate_pages(source, ("Page 2", "Page 5")) == [2, 5]
+
+
+def test_batch_text_search_checks_beyond_initial_preview_pages(tmp_path: Path) -> None:
+    source = tmp_path / "text_after_blank.pdf"
+    make_text_after_blank_pdf(source)
+    processor = PdfProcessor()
+
+    assert not processor.has_text_layer(source, max_pages=5)
+    assert processor.has_text_layer(source)
+    assert processor.search_text_pages(source, "Searchable") == [6]
+    assert processor.index_candidate_pages(source, ("Searchable",)) == [6]
 
 
 def test_text_layer_detection_and_prerequisite_message(tmp_path: Path) -> None:
