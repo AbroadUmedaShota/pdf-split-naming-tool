@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from pdf_splitter_tool.models import MetadataField, Preset, Segment
+from pdf_splitter_tool.output_controller import build_output_preflight_view
 from pdf_splitter_tool.presets import YOSHIDA_ELSIS_PRESET
 from pdf_splitter_tool.workflow import apply_common_metadata, check_segment_outputs, error_messages, resequence_segments
 
@@ -59,3 +60,22 @@ def test_template_key_error_is_actionable(tmp_path: Path) -> None:
     checks = check_segment_outputs([Segment(tmp_path / "source.pdf", 1, 1, {"seq": "1"})], preset, tmp_path)
 
     assert checks[0].messages == ("命名テンプレートの項目 unknown が入力項目にありません",)
+
+
+def test_output_preflight_view_reports_ready_and_invalid(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    segments = [
+        Segment(source, 1, 1, {"box_no": "1", "binder_no": "2", "seq": "3"}),
+        Segment(source, 2, 2, {"box_no": "1", "seq": "4"}),
+    ]
+    checks = check_segment_outputs(segments, YOSHIDA_ELSIS_PRESET, tmp_path)
+
+    view = build_output_preflight_view(checks, tmp_path)
+
+    assert view.ready_count == 1
+    assert view.invalid_count == 1
+    assert not view.can_run
+    assert view.status_text == "要修正があります"
+    assert view.summary_text == f"出力予定: 1件 / 要修正: 1件 / 保存先: {tmp_path}"
+    assert any("01_02_003.pdf" in line.text and line.tag == "ok" for line in view.lines)
+    assert any("バインダーNoを入力してください" in line.text and line.tag == "error" for line in view.lines)

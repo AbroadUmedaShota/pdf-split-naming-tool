@@ -10,6 +10,7 @@ from tkinter import ttk
 
 from .app_metadata import APP_NAME
 from .models import Segment
+from .output_controller import build_output_preflight_view
 from .presets import PresetRepository, find_preset
 from .processor import OCR_PREREQUISITE_MESSAGE, PdfProcessor
 from .state import StateManager
@@ -1577,33 +1578,12 @@ class PdfSplitterApp:
     def refresh_output_summary(self) -> None:
         self.output_text.delete("1.0", END)
         checks = check_segment_outputs(self.segments, self.active_preset, self.output_dir, self.processor)
-        ready = sum(1 for check in checks if check.ok)
-        invalid = len(checks) - ready
-        self.output_check_summary_var.set(f"出力予定: {ready}件 / 要修正: {invalid}件 / 保存先: {self.output_dir}")
-        self.output_text.insert(END, "出力前チェックリスト\n", "heading")
-        self.output_text.insert(END, f"[OK] 出力先: {self.output_dir}\n", "ok")
-        if checks:
-            self.output_text.insert(END, f"[OK] 出力対象: {len(checks)}件\n", "ok")
-        else:
-            self.output_text.insert(END, "[NG] 出力対象がありません。Step 2で分割を作成してください。\n", "error")
-        if invalid:
-            self.output_text.insert(END, f"[NG] 要修正: {invalid}件。Step 3で未入力や命名エラーを修正してください。\n", "error")
-        else:
-            self.output_text.insert(END, "[OK] 未入力・命名エラーなし\n", "ok" if checks else "warn")
-        self.output_text.insert(END, "[OK] 同名ファイルがある場合は _2, _3 の連番で重複を回避します。\n\n", "ok")
-        self.output_text.insert(END, "出力予定一覧\n", "heading")
-        for check in checks:
-            if check.ok:
-                self.output_text.insert(END, f"[出力可能] {check.segment.start_page}-{check.segment.end_page} -> {check.filename}\n", "ok")
-            else:
-                self.output_text.insert(
-                    END,
-                    f"[要修正] {check.segment.start_page}-{check.segment.end_page} -> {' / '.join(check.messages)}\n",
-                    "error",
-                )
-        can_run = bool(checks) and invalid == 0
-        self.run_output_button.configure(state="normal" if can_run else "disabled")
-        self.output_status_var.set("出力可能" if can_run else "要修正があります")
+        view = build_output_preflight_view(checks, self.output_dir)
+        self.output_check_summary_var.set(view.summary_text)
+        for line in view.lines:
+            self.output_text.insert(END, line.text, line.tag)
+        self.run_output_button.configure(state="normal" if view.can_run else "disabled")
+        self.output_status_var.set(view.status_text)
         self._update_workflow_status()
 
     def run_output(self) -> None:
