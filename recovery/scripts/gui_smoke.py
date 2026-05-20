@@ -17,7 +17,8 @@ RECOVERY_ROOT = Path(__file__).resolve().parents[1]
 if str(RECOVERY_ROOT) not in sys.path:
     sys.path.insert(0, str(RECOVERY_ROOT))
 
-from pdf_splitter_tool.app import PdfSplitterApp, PresetManagerDialog
+from pdf_splitter_tool.app import PdfSplitterApp
+from pdf_splitter_tool.preset_manager_dialog import PresetManagerDialog
 
 
 def make_sample_pdf(path: Path) -> None:
