@@ -5,6 +5,16 @@ from pathlib import Path
 from pdf_splitter_tool.models import MetadataField, Preset, Segment
 from pdf_splitter_tool.output_controller import build_output_preflight_view
 from pdf_splitter_tool.presets import YOSHIDA_ELSIS_PRESET
+from pdf_splitter_tool.step2_controller import (
+    candidate_pages,
+    current_page_state_text,
+    page_badges,
+    page_list_label,
+    segment_for_page,
+    segment_state_text,
+    split_boundary_pages,
+    visible_page_numbers,
+)
 from pdf_splitter_tool.workflow import apply_common_metadata, check_segment_outputs, error_messages, resequence_segments
 
 
@@ -79,3 +89,25 @@ def test_output_preflight_view_reports_ready_and_invalid(tmp_path: Path) -> None
     assert view.summary_text == f"出力予定: 1件 / 要修正: 1件 / 保存先: {tmp_path}"
     assert any("01_02_003.pdf" in line.text and line.tag == "ok" for line in view.lines)
     assert any("バインダーNoを入力してください" in line.text and line.tag == "error" for line in view.lines)
+
+
+def test_step2_page_state_helpers(tmp_path: Path) -> None:
+    segments = [Segment(tmp_path / "source.pdf", 1, 2), Segment(tmp_path / "source.pdf", 3, 5)]
+    boundaries = split_boundary_pages(segments, page_count=5)
+
+    assert boundaries == {3}
+    assert candidate_pages({1, 3}, {2}, {5}) == {1, 2, 3, 5}
+    assert page_badges(3, {3}, {3}, set(), boundaries) == ["白紙", "検索", "分割前"]
+    assert page_list_label(3, ["白紙", "検索", "分割前"]) == "   3ページ [白紙 検索 分割前]"
+    assert visible_page_numbers(5, {2, 5}, candidates_only=True) == [2, 5]
+    assert visible_page_numbers(3, set(), candidates_only=False) == [1, 2, 3]
+    assert segment_for_page(segments, 4) == segments[1]
+    assert segment_state_text(segments, 6, 8) == "未確定範囲: 6-8ページ"
+    assert current_page_state_text(
+        ["検索"],
+        current_page=1,
+        has_current_pdf=True,
+        has_text_layer=False,
+        has_search_query_hit=True,
+        hit_count=2,
+    ) == "検索 / OCR検索には事前OCR済みPDFが必要 / ページ内ヒット 2件 / 先頭ページのため前分割不可"

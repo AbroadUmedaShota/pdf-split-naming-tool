@@ -14,6 +14,16 @@ from .output_controller import build_output_preflight_view
 from .presets import PresetRepository, find_preset
 from .processor import OCR_PREREQUISITE_MESSAGE, PdfProcessor
 from .state import StateManager
+from .step2_controller import (
+    candidate_pages as build_candidate_pages,
+    current_page_state_text,
+    page_badges as build_page_badges,
+    page_list_label as build_page_list_label,
+    segment_for_page as find_segment_for_page,
+    segment_state_text,
+    split_boundary_pages as build_split_boundary_pages,
+    visible_page_numbers,
+)
 from .ui_theme import (
     UI_BORDER,
     UI_DANGER,
@@ -816,10 +826,7 @@ class PdfSplitterApp:
     def refresh_page_list(self) -> None:
         self.page_list.delete(0, END)
         candidate_pages = self.candidate_pages()
-        if self.show_candidates_only_var.get():
-            pages = [page_no for page_no in range(1, self.current_page_count + 1) if page_no in candidate_pages]
-        else:
-            pages = list(range(1, self.current_page_count + 1))
+        pages = visible_page_numbers(self.current_page_count, candidate_pages, self.show_candidates_only_var.get())
         self.page_list_page_numbers = pages
         for page_no in pages:
             self.page_list.insert(END, self.page_list_label(page_no))
@@ -851,65 +858,49 @@ class PdfSplitterApp:
         self.refresh_step2_sidebars()
 
     def split_boundary_pages(self) -> set[int]:
-        boundaries: set[int] = set()
-        for segment in self.segments:
-            boundary_page = segment.end_page + 1
-            if 1 < boundary_page <= self.current_page_count:
-                boundaries.add(boundary_page)
-        return boundaries
+        return build_split_boundary_pages(self.segments, self.current_page_count)
 
     def candidate_pages(self) -> set[int]:
-        return self.search_hit_pages | self.blank_candidate_pages | self.index_candidate_pages
+        return build_candidate_pages(self.search_hit_pages, self.blank_candidate_pages, self.index_candidate_pages)
 
     def page_badges(self, page_no: int) -> list[str]:
-        badges = []
-        if page_no in self.blank_candidate_pages:
-            badges.append("白紙")
-        if page_no in self.search_hit_pages:
-            badges.append("検索")
-        if page_no in self.index_candidate_pages:
-            badges.append("索引")
-        if page_no in self.split_boundary_pages():
-            badges.append("分割前")
-        return badges
+        return build_page_badges(
+            page_no,
+            self.search_hit_pages,
+            self.blank_candidate_pages,
+            self.index_candidate_pages,
+            self.split_boundary_pages(),
+        )
 
     def page_list_label(self, page_no: int) -> str:
-        badges = self.page_badges(page_no)
-        suffix = f" [{' '.join(badges)}]" if badges else ""
-        return f"{page_no:>4}ページ{suffix}"
+        return build_page_list_label(page_no, self.page_badges(page_no))
 
     def segment_for_page(self, page_no: int) -> Segment | None:
-        for segment in self.segments:
-            if segment.start_page <= page_no <= segment.end_page:
-                return segment
-        return None
+        return find_segment_for_page(self.segments, page_no)
 
     def refresh_step2_sidebars(self) -> None:
         if not hasattr(self, "split_list"):
             return
         self.current_page_var.set(f"現在 {self.current_page} / {self.current_page_count or '-'} ページ")
         badges = self.page_badges(self.current_page)
-        state = " / ".join(badges) if badges else "通常ページ"
-        if self.current_pdf is not None and not self.current_pdf_has_text_layer:
-            state += " / OCR検索には事前OCR済みPDFが必要"
+        hit_count = None
+        has_hit_count = False
         if self.search_var.get().strip() and self.current_page in self.search_hit_pages:
             try:
                 hit_count = len(self.processor.search_text_rects(self.current_pdf, self.current_page, self.search_var.get())) if self.current_pdf else 0
-                state += f" / ページ内ヒット {hit_count}件"
+                has_hit_count = True
             except Exception:
-                state += " / ページ内ヒット確認不可"
-        if self.current_page <= 1:
-            state += " / 先頭ページのため前分割不可"
+                hit_count = None
+        state = current_page_state_text(
+            badges,
+            current_page=self.current_page,
+            has_current_pdf=self.current_pdf is not None,
+            has_text_layer=self.current_pdf_has_text_layer,
+            has_search_query_hit=bool(self.search_var.get().strip() and self.current_page in self.search_hit_pages),
+            hit_count=hit_count if has_hit_count else None,
+        )
         self.current_page_state_var.set(state)
-        segment = self.segment_for_page(self.current_page)
-        if segment is None:
-            start = max((item.end_page for item in self.segments), default=0) + 1
-            if self.current_page_count:
-                self.current_segment_var.set(f"未確定範囲: {start}-{self.current_page_count}ページ")
-            else:
-                self.current_segment_var.set("PDF未選択")
-        else:
-            self.current_segment_var.set(f"所属セグメント: {segment.start_page}-{segment.end_page}ページ")
+        self.current_segment_var.set(segment_state_text(self.segments, self.current_page, self.current_page_count))
 
         boundaries = sorted(self.split_boundary_pages())
         self.split_summary_var.set(f"分割位置: {len(boundaries)}件 / セグメント: {len(self.segments)}件")
