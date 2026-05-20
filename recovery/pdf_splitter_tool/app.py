@@ -12,7 +12,7 @@ from .app_metadata import APP_NAME
 from .models import Preset, Segment
 from .preset_editing import build_preset_from_editor, format_keywords
 from .presets import DEFAULT_PRESET_IDS, PresetRepository, find_preset
-from .processor import PdfProcessor
+from .processor import OCR_PREREQUISITE_MESSAGE, PdfProcessor
 from .state import StateManager
 from .workflow import apply_common_metadata, check_segment_outputs, error_messages, resequence_segments
 
@@ -92,6 +92,7 @@ class PdfSplitterApp:
         self.step3_suggestion_var = StringVar(value="入力補助候補: 未生成")
         self.output_progress_var = StringVar(value="出力待機中")
         self.state_status_var = StringVar(value="状態未保存")
+        self.current_pdf_has_text_layer = False
 
         self._build_ui()
         self._bind_keys()
@@ -324,6 +325,7 @@ class PdfSplitterApp:
             self.current_page = max(1, int(state.get("current_page", 1)))
             if self.current_pdf is not None:
                 self.current_page_count = self.processor.page_count(self.current_pdf)
+                self.current_pdf_has_text_layer = self.processor.has_text_layer(self.current_pdf, max_pages=5)
                 self.current_page = min(self.current_page, self.current_page_count)
                 self.page_jump_var.set(str(self.current_page))
             self.refresh_pdf_list()
@@ -803,6 +805,7 @@ class PdfSplitterApp:
                 self.set_current_pdf(self.current_pdf)
             else:
                 self.current_page_count = 0
+                self.current_pdf_has_text_layer = False
                 self.preview_canvas.delete("all")
                 self.ocr_text.delete("1.0", END)
         self.refresh_pdf_list()
@@ -817,6 +820,7 @@ class PdfSplitterApp:
         self.current_pdf = None
         self.current_page = 1
         self.current_page_count = 0
+        self.current_pdf_has_text_layer = False
         self.segments.clear()
         self.search_hit_pages.clear()
         self.blank_candidate_pages.clear()
@@ -850,10 +854,12 @@ class PdfSplitterApp:
         self.index_candidate_pages.clear()
         try:
             self.current_page_count = self.processor.page_count(path)
+            self.current_pdf_has_text_layer = self.processor.has_text_layer(path, max_pages=5)
             self.refresh_pdf_list()
         except Exception as exc:
             messagebox.showerror("PDFエラー", str(exc))
             self.current_page_count = 0
+            self.current_pdf_has_text_layer = False
         self.refresh_page_list()
         self.render_current_page_async()
         self._update_workflow_status()
@@ -947,6 +953,8 @@ class PdfSplitterApp:
         self.current_page_var.set(f"現在 {self.current_page} / {self.current_page_count or '-'} ページ")
         badges = self.page_badges(self.current_page)
         state = " / ".join(badges) if badges else "通常ページ"
+        if self.current_pdf is not None and not self.current_pdf_has_text_layer:
+            state += " / OCR検索には事前OCR済みPDFが必要"
         if self.search_var.get().strip() and self.current_page in self.search_hit_pages:
             try:
                 hit_count = len(self.processor.search_text_rects(self.current_pdf, self.current_page, self.search_var.get())) if self.current_pdf else 0
@@ -1319,6 +1327,13 @@ class PdfSplitterApp:
         query = self.search_var.get().strip().lower()
         if not query:
             return
+        if not self.current_pdf_has_text_layer:
+            self.search_hit_pages.clear()
+            self.refresh_page_list()
+            self.status_var.set(OCR_PREREQUISITE_MESSAGE)
+            self.ocr_text.delete("1.0", END)
+            self.ocr_text.insert("1.0", OCR_PREREQUISITE_MESSAGE)
+            return
         cancel_event = self.start_background_job("検索")
         if cancel_event is None:
             return
@@ -1343,6 +1358,13 @@ class PdfSplitterApp:
             return
         keywords = tuple(keyword.lower() for keyword in self.active_preset.extraction_keywords if keyword.strip())
         if not keywords:
+            return
+        if not self.current_pdf_has_text_layer:
+            self.index_candidate_pages.clear()
+            self.refresh_page_list()
+            self.status_var.set(OCR_PREREQUISITE_MESSAGE)
+            self.ocr_text.delete("1.0", END)
+            self.ocr_text.insert("1.0", OCR_PREREQUISITE_MESSAGE)
             return
         cancel_event = self.start_background_job("インデックス検索")
         if cancel_event is None:
@@ -1430,6 +1452,9 @@ class PdfSplitterApp:
         return self.active_preset.fields[0].key if self.active_preset.fields else None
 
     def transfer_selected_ocr_text(self) -> None:
+        if self.current_pdf is not None and not self.current_pdf_has_text_layer:
+            messagebox.showinfo("OCR転記", OCR_PREREQUISITE_MESSAGE)
+            return
         text = self.selected_ocr_text()
         if not text:
             messagebox.showinfo("OCR転記", "OCR本文で転記したい文字を選択してください。")

@@ -18,6 +18,7 @@ except Exception:  # pragma: no cover - depends on local runtime
 
 INVALID_FILENAME_CHARS = r'<>:"/\|?*'
 MAX_FILENAME_LENGTH = 180
+OCR_PREREQUISITE_MESSAGE = "OCR検索・転記には、事前OCR済みPDFまたはテキスト層のあるPDFを使用してください。"
 
 
 class LruCache:
@@ -160,7 +161,7 @@ class PdfProcessor:
         return pixmap
 
     def is_blank_page(self, pdf_path: Path, page_no: int, threshold: float = 0.985) -> bool:
-        if self.extract_page_text(pdf_path, page_no).strip():
+        if self.extract_raw_page_text(pdf_path, page_no).strip():
             return False
         pixmap = self.render_thumbnail_pixmap(pdf_path, page_no, zoom=0.12)
         return self.is_blank_pixmap(pixmap, threshold)
@@ -200,6 +201,8 @@ class PdfProcessor:
         query = query.strip().lower()
         if not query:
             return []
+        if not self.has_text_layer(pdf_path):
+            return []
         hits: list[int] = []
         with fitz.open(pdf_path) as doc:
             total = doc.page_count
@@ -225,6 +228,8 @@ class PdfProcessor:
             raise RuntimeError("PyMuPDF is required for OCR/text extraction.")
         normalized = tuple(keyword.strip().lower() for keyword in keywords if keyword.strip())
         if not normalized:
+            return []
+        if not self.has_text_layer(pdf_path):
             return []
         hits: list[int] = []
         with fitz.open(pdf_path) as doc:
@@ -268,11 +273,29 @@ class PdfProcessor:
         return pages
 
     @staticmethod
-    def extract_page_text(pdf_path: Path, page_no: int) -> str:
+    def has_text_layer(pdf_path: Path, max_pages: int | None = None) -> bool:
+        if fitz is None:
+            raise RuntimeError("PyMuPDF is required for OCR/text extraction.")
+        with fitz.open(pdf_path) as doc:
+            page_count = doc.page_count if max_pages is None else min(doc.page_count, max_pages)
+            for index in range(page_count):
+                if doc.load_page(index).get_text("text").strip():
+                    return True
+        return False
+
+    @staticmethod
+    def extract_raw_page_text(pdf_path: Path, page_no: int) -> str:
         if fitz is None:
             raise RuntimeError("PyMuPDF is required for OCR/text extraction.")
         with fitz.open(pdf_path) as doc:
             return doc.load_page(page_no - 1).get_text("text")
+
+    @staticmethod
+    def extract_page_text(pdf_path: Path, page_no: int) -> str:
+        text = PdfProcessor.extract_raw_page_text(pdf_path, page_no)
+        if text.strip():
+            return text
+        return OCR_PREREQUISITE_MESSAGE
 
     @staticmethod
     def search_text_rects(pdf_path: Path, page_no: int, query: str) -> list[tuple[float, float, float, float]]:
@@ -283,6 +306,8 @@ class PdfProcessor:
             return []
         with fitz.open(pdf_path) as doc:
             page = doc.load_page(page_no - 1)
+            if not page.get_text("text").strip():
+                return []
             return [(rect.x0, rect.y0, rect.x1, rect.y1) for rect in page.search_for(query)]
 
     @staticmethod
