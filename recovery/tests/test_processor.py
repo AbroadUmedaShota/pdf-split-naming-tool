@@ -25,6 +25,22 @@ def make_mixed_blank_pdf(path: Path) -> None:
     doc.close()
 
 
+def make_blank_precision_pdf(path: Path) -> None:
+    doc = fitz.open()
+    doc.new_page()
+    text_page = doc.new_page()
+    text_page.insert_text((72, 72), "Not blank")
+    line_page = doc.new_page()
+    line_page.draw_line((72, 72), (520, 72), color=(0, 0, 0), width=1)
+    noise_page = doc.new_page()
+    for index in range(60):
+        x = 72 + (index % 20) * 18
+        y = 72 + (index // 20) * 24
+        noise_page.draw_rect(fitz.Rect(x, y, x + 2, y + 2), color=(0.55, 0.55, 0.55), fill=(0.55, 0.55, 0.55))
+    doc.save(path)
+    doc.close()
+
+
 def test_yoshida_filename_excludes_company_and_doc() -> None:
     result = PdfProcessor.build_filename_templated(
         YOSHIDA_ELSIS_PRESET,
@@ -91,3 +107,37 @@ def test_blank_page_detection(tmp_path: Path) -> None:
 
     assert processor.is_blank_page(source, 1)
     assert not processor.is_blank_page(source, 2)
+
+
+def test_batch_text_and_index_search(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    make_pdf(source, 5)
+    processor = PdfProcessor()
+
+    assert processor.search_text_pages(source, "Page 3") == [3]
+    assert processor.index_candidate_pages(source, ("Page 2", "Page 5")) == [2, 5]
+
+
+def test_batch_blank_detection_is_conservative(tmp_path: Path) -> None:
+    source = tmp_path / "precision.pdf"
+    make_blank_precision_pdf(source)
+    processor = PdfProcessor()
+
+    assert processor.blank_pages(source) == [1]
+
+
+def test_batch_operations_report_progress_and_cancel(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    make_pdf(source, 5)
+    processor = PdfProcessor()
+    progress: list[tuple[int, int]] = []
+
+    hits = processor.search_text_pages(
+        source,
+        "Page",
+        progress=lambda current, total: progress.append((current, total)),
+        cancel=lambda: len(progress) >= 2,
+    )
+
+    assert hits == [1, 2]
+    assert progress[-1] == (2, 5)
