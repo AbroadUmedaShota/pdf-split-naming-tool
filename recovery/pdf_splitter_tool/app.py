@@ -18,6 +18,19 @@ from .workflow import apply_common_metadata, check_segment_outputs, error_messag
 
 TEXT_WIDGET_CLASSES = {"Entry", "TEntry", "Text", "Spinbox", "TCombobox"}
 
+UI_BG = "#f5f7fb"
+UI_SURFACE = "#ffffff"
+UI_SURFACE_MUTED = "#f8fafc"
+UI_BORDER = "#d7dee8"
+UI_TEXT = "#172033"
+UI_MUTED_TEXT = "#5b667a"
+UI_PRIMARY = "#2563eb"
+UI_PRIMARY_HOVER = "#1d4ed8"
+UI_READY = "#0f766e"
+UI_WARNING = "#b45309"
+UI_DANGER = "#b42318"
+UI_PREVIEW_BG = "#111827"
+
 
 class PdfSplitterApp:
     def __init__(self, root: Tk, work_dir: Path | None = None) -> None:
@@ -114,13 +127,72 @@ class PdfSplitterApp:
             style.theme_use("clam")
         except Exception:
             pass
-        style.configure("AppTitle.TLabel", font=("", 16, "bold"))
-        style.configure("AppSummary.TLabel", foreground="#374151")
-        style.configure("StepStatus.TLabel", background="#eef2f7", foreground="#1f2937")
-        style.configure("SectionTitle.TLabel", font=("", 12, "bold"))
-        style.configure("Hint.TLabel", foreground="#4b5563")
-        style.configure("Footer.TLabel", foreground="#4b5563")
-        style.configure("Primary.TButton", font=("", 9, "bold"))
+        self.root.configure(background=UI_BG)
+        style.configure(".", background=UI_BG, foreground=UI_TEXT, font=("", 9))
+        style.configure("TFrame", background=UI_BG)
+        style.configure("TLabel", background=UI_BG, foreground=UI_TEXT)
+        style.configure("AppTitle.TLabel", font=("", 17, "bold"), foreground=UI_TEXT)
+        style.configure("AppSummary.TLabel", foreground=UI_MUTED_TEXT)
+        style.configure("StepStatus.TLabel", background="#e9f1ff", foreground="#1e3a8a", relief="flat")
+        style.configure("SectionTitle.TLabel", font=("", 12, "bold"), foreground=UI_TEXT)
+        style.configure("Hint.TLabel", foreground=UI_MUTED_TEXT)
+        style.configure("Footer.TLabel", foreground=UI_MUTED_TEXT)
+        style.configure("TNotebook", background=UI_BG, borderwidth=0)
+        style.configure("TNotebook.Tab", padding=(14, 7), background="#e8edf5", foreground=UI_MUTED_TEXT)
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", UI_SURFACE), ("active", "#f1f5f9")],
+            foreground=[("selected", UI_PRIMARY), ("active", UI_TEXT)],
+        )
+        style.configure("TButton", padding=(10, 6), background=UI_SURFACE_MUTED, bordercolor=UI_BORDER, focusthickness=1)
+        style.map("TButton", background=[("active", "#e8eef8")])
+        style.configure(
+            "Primary.TButton",
+            font=("", 9, "bold"),
+            foreground="#ffffff",
+            background=UI_PRIMARY,
+            bordercolor=UI_PRIMARY,
+        )
+        style.map(
+            "Primary.TButton",
+            foreground=[("disabled", "#dbeafe"), ("active", "#ffffff")],
+            background=[("disabled", "#93c5fd"), ("active", UI_PRIMARY_HOVER)],
+        )
+        style.configure("TEntry", fieldbackground=UI_SURFACE, bordercolor=UI_BORDER, lightcolor=UI_BORDER, darkcolor=UI_BORDER)
+        style.configure("TCombobox", fieldbackground=UI_SURFACE, bordercolor=UI_BORDER)
+        style.configure("TLabelframe", background=UI_SURFACE, bordercolor=UI_BORDER, relief="solid")
+        style.configure("TLabelframe.Label", background=UI_SURFACE, foreground=UI_TEXT, font=("", 10, "bold"))
+        style.configure("Treeview", background=UI_SURFACE, fieldbackground=UI_SURFACE, foreground=UI_TEXT, rowheight=24, bordercolor=UI_BORDER)
+        style.configure("Treeview.Heading", background="#eef2f7", foreground=UI_TEXT, font=("", 9, "bold"))
+        style.map("Treeview", background=[("selected", "#dbeafe")], foreground=[("selected", UI_TEXT)])
+
+    def _style_listbox(self, listbox: Listbox) -> None:
+        listbox.configure(
+            background=UI_SURFACE,
+            foreground=UI_TEXT,
+            selectbackground="#dbeafe",
+            selectforeground=UI_TEXT,
+            highlightthickness=1,
+            highlightbackground=UI_BORDER,
+            highlightcolor=UI_PRIMARY,
+            borderwidth=0,
+            relief="flat",
+            activestyle="none",
+        )
+
+    def _style_text(self, text: Text) -> None:
+        text.configure(
+            background=UI_SURFACE,
+            foreground=UI_TEXT,
+            insertbackground=UI_TEXT,
+            selectbackground="#dbeafe",
+            selectforeground=UI_TEXT,
+            highlightthickness=1,
+            highlightbackground=UI_BORDER,
+            highlightcolor=UI_PRIMARY,
+            borderwidth=0,
+            relief="flat",
+        )
 
     def _add_section_header(self, parent: ttk.Frame, title: str, hint: str) -> None:
         frame = ttk.Frame(parent)
@@ -185,6 +257,7 @@ class PdfSplitterApp:
             pady=(8, 0),
         )
         self.pdf_list = Listbox(self.step1, height=12)
+        self._style_listbox(self.pdf_list)
         self.pdf_list.pack(fill=BOTH, expand=True, pady=8)
         self.pdf_list.bind("<<ListboxSelect>>", self.on_pdf_selected)
 
@@ -225,6 +298,7 @@ class PdfSplitterApp:
             command=self.refresh_page_list,
         ).pack(side=RIGHT)
         self.page_list = Listbox(left, width=30)
+        self._style_listbox(self.page_list)
         self.page_list.pack(fill="y", expand=True)
         self.page_list.bind("<<ListboxSelect>>", self.on_page_selected)
 
@@ -244,7 +318,17 @@ class PdfSplitterApp:
             pady=(4, 0),
         )
 
-        self.preview_canvas = Canvas(center, background="#222", height=520, highlightthickness=1, takefocus=True)
+        self.preview_canvas = Canvas(
+            center,
+            background=UI_PREVIEW_BG,
+            height=520,
+            highlightthickness=1,
+            highlightbackground=UI_BORDER,
+            highlightcolor=UI_PRIMARY,
+            borderwidth=0,
+            relief="flat",
+            takefocus=True,
+        )
         self.preview_canvas.pack(fill=BOTH, expand=True, pady=8)
         self.preview_canvas.bind("<Button-1>", lambda _event: self.preview_canvas.focus_set())
         self.status_var = StringVar(value="PDF未選択")
@@ -280,6 +364,7 @@ class PdfSplitterApp:
         decision_tabs.add(split_tab, text="分割位置")
         ttk.Label(split_tab, textvariable=self.split_summary_var).pack(anchor="w")
         self.split_list = Listbox(split_tab, width=36, height=8)
+        self._style_listbox(self.split_list)
         self.split_list.pack(fill=BOTH, expand=True, pady=(4, 6))
         ttk.Button(split_tab, text="現在ページの前に分割", command=self.add_split_before_current_page).pack(fill="x")
         ttk.Button(split_tab, text="最後の分割を取り消す", command=self.undo_last_split).pack(fill="x", pady=(4, 0))
@@ -289,6 +374,7 @@ class PdfSplitterApp:
         decision_tabs.add(candidate_tab, text="候補")
         ttk.Label(candidate_tab, textvariable=self.candidate_summary_var).pack(anchor="w")
         self.candidate_list = Listbox(candidate_tab, width=36, height=8)
+        self._style_listbox(self.candidate_list)
         self.candidate_list.pack(fill=BOTH, expand=True, pady=(4, 6))
         self.candidate_list.bind("<<ListboxSelect>>", self.on_candidate_selected)
         ttk.Button(candidate_tab, text="候補ページの前に分割", command=self.add_split_before_current_page).pack(fill="x")
@@ -296,6 +382,7 @@ class PdfSplitterApp:
         ocr_tab = ttk.Frame(decision_tabs, padding=6)
         decision_tabs.add(ocr_tab, text="OCR本文")
         self.ocr_text = Text(ocr_tab, height=12, wrap="word")
+        self._style_text(self.ocr_text)
         self.ocr_text.pack(fill=BOTH, expand=True)
 
     def _build_step3(self) -> None:
@@ -308,6 +395,7 @@ class PdfSplitterApp:
         left.pack(side=LEFT, fill="y")
         ttk.Label(left, text="セグメント一覧", style="Hint.TLabel").pack(anchor="w")
         self.segment_list = Listbox(left, width=44)
+        self._style_listbox(self.segment_list)
         self.segment_list.pack(side=LEFT, fill="y")
         self.segment_list.bind("<<ListboxSelect>>", self.on_segment_selected)
 
@@ -353,6 +441,7 @@ class PdfSplitterApp:
         self.output_status_var = StringVar(value="出力前チェックを実行してください")
         ttk.Label(toolbar, textvariable=self.output_status_var).pack(side=LEFT, padx=8)
         self.output_text = Text(self.step4, height=24)
+        self._style_text(self.output_text)
         self.output_text.pack(fill=BOTH, expand=True, pady=8)
 
     def _bind_keys(self) -> None:
@@ -994,6 +1083,7 @@ class PresetManagerDialog:
         left = ttk.Frame(self.window, padding=8)
         left.pack(side=LEFT, fill="y")
         self.preset_list = Listbox(left, width=30)
+        self.app._style_listbox(self.preset_list)
         self.preset_list.pack(fill=BOTH, expand=True)
         self.preset_list.bind("<<ListboxSelect>>", self.on_preset_selected)
         ttk.Button(left, text="コピーして新規作成", command=self.new_from_selected).pack(fill="x", pady=(8, 0))
@@ -1043,6 +1133,7 @@ class PresetManagerDialog:
 
         ttk.Label(form, text="抽出キーワード（カンマまたは改行区切り）").pack(anchor="w", pady=(8, 2))
         self.keywords_text = Text(form, height=4, wrap="word")
+        self.app._style_text(self.keywords_text)
         self.keywords_text.pack(fill="x")
         self.form_widgets.append(self.keywords_text)
 
