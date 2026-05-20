@@ -73,6 +73,8 @@ class PdfSplitterApp:
         self.current_segment_var = StringVar(value="セグメント未作成")
         self.split_summary_var = StringVar(value="分割位置: 0件")
         self.candidate_summary_var = StringVar(value="候補: 0件")
+        self.metadata_summary_var = StringVar(value="セグメント未作成")
+        self.output_check_summary_var = StringVar(value="出力前チェックを実行してください")
 
         self._build_ui()
         self._bind_keys()
@@ -393,11 +395,29 @@ class PdfSplitterApp:
         )
         left = ttk.Frame(self.step3)
         left.pack(side=LEFT, fill="y")
-        ttk.Label(left, text="セグメント一覧", style="Hint.TLabel").pack(anchor="w")
-        self.segment_list = Listbox(left, width=44)
-        self._style_listbox(self.segment_list)
-        self.segment_list.pack(side=LEFT, fill="y")
+        ttk.Label(left, textvariable=self.metadata_summary_var, style="Hint.TLabel").pack(anchor="w")
+        self.segment_list = ttk.Treeview(
+            left,
+            columns=("no", "pages", "box", "binder", "seq", "filename", "status"),
+            show="headings",
+            height=20,
+        )
+        for column, title, width in (
+            ("no", "#", 42),
+            ("pages", "ページ", 80),
+            ("box", "箱No", 70),
+            ("binder", "バインダー", 90),
+            ("seq", "連番", 70),
+            ("filename", "出力名", 170),
+            ("status", "状態", 80),
+        ):
+            self.segment_list.heading(column, text=title)
+            self.segment_list.column(column, width=width, stretch=(column == "filename"))
+        self.segment_list.tag_configure("ready", foreground=UI_READY)
+        self.segment_list.tag_configure("invalid", foreground=UI_DANGER)
+        self.segment_list.pack(side=LEFT, fill=BOTH, expand=True)
         self.segment_list.bind("<<ListboxSelect>>", self.on_segment_selected)
+        self.segment_list.bind("<<TreeviewSelect>>", self.on_segment_selected)
 
         right = ttk.Frame(self.step3, padding=8)
         right.pack(side=LEFT, fill=BOTH, expand=True)
@@ -440,9 +460,14 @@ class PdfSplitterApp:
         self.run_output_button.pack(side=LEFT, padx=4)
         self.output_status_var = StringVar(value="出力前チェックを実行してください")
         ttk.Label(toolbar, textvariable=self.output_status_var).pack(side=LEFT, padx=8)
+        ttk.Label(self.step4, textvariable=self.output_check_summary_var, style="Hint.TLabel").pack(anchor="w", pady=(8, 0))
         self.output_text = Text(self.step4, height=24)
         self._style_text(self.output_text)
         self.output_text.pack(fill=BOTH, expand=True, pady=8)
+        self.output_text.tag_configure("ok", foreground=UI_READY)
+        self.output_text.tag_configure("warn", foreground=UI_WARNING)
+        self.output_text.tag_configure("error", foreground=UI_DANGER)
+        self.output_text.tag_configure("heading", foreground=UI_TEXT, font=("", 10, "bold"))
 
     def _bind_keys(self) -> None:
         self.root.bind_all("<space>", self.on_space_key)
@@ -917,26 +942,50 @@ class PdfSplitterApp:
                 return
 
     def refresh_segment_list(self) -> None:
-        self.segment_list.delete(0, END)
+        self.segment_list.delete(*self.segment_list.get_children())
         checks = check_segment_outputs(self.segments, self.active_preset, self.output_dir, self.processor)
-        for check in checks:
+        ready = 0
+        for index, check in enumerate(checks):
             status = "出力可能" if check.ok else "要入力"
+            if check.ok:
+                ready += 1
             filename = check.filename if check.ok else "未入力あり"
-            label = f"{check.segment.start_page}-{check.segment.end_page}: {status} | {filename}"
-            self.segment_list.insert(END, label)
+            metadata = check.segment.metadata
+            self.segment_list.insert(
+                "",
+                END,
+                iid=str(index),
+                values=(
+                    index + 1,
+                    f"{check.segment.start_page}-{check.segment.end_page}",
+                    metadata.get("box_no", ""),
+                    metadata.get("binder_no", ""),
+                    metadata.get("seq", ""),
+                    filename,
+                    status,
+                ),
+                tags=("ready" if check.ok else "invalid",),
+            )
+        invalid = len(checks) - ready
+        self.metadata_summary_var.set(f"セグメント: {len(checks)}件 / 出力可能: {ready}件 / 要入力: {invalid}件")
+        if self.current_segment_index is not None and str(self.current_segment_index) in self.segment_list.get_children():
+            self.segment_list.selection_set(str(self.current_segment_index))
 
     def on_segment_selected(self, _event) -> None:
-        selection = self.segment_list.curselection()
-        self.current_segment_index = selection[0] if selection else None
+        selection = self.segment_list.selection()
+        self.current_segment_index = int(selection[0]) if selection else None
         self.rebuild_metadata_fields()
 
     def rebuild_metadata_fields(self) -> None:
         self.rebuild_common_fields()
         for child in self.metadata_frame.winfo_children():
             child.destroy()
+        if self.current_segment_index is not None and self.current_segment_index >= len(self.segments):
+            self.current_segment_index = None
         if self.current_segment_index is None and self.segments:
             self.current_segment_index = 0
-            self.segment_list.selection_set(0)
+            if "0" in self.segment_list.get_children():
+                self.segment_list.selection_set("0")
         if self.current_segment_index is None or not self.segments:
             ttk.Label(self.metadata_frame, text="セグメントが選択されていません").pack()
             return
@@ -1020,16 +1069,27 @@ class PdfSplitterApp:
         checks = check_segment_outputs(self.segments, self.active_preset, self.output_dir, self.processor)
         ready = sum(1 for check in checks if check.ok)
         invalid = len(checks) - ready
-        self.output_text.insert(END, f"出力先: {self.output_dir}\n")
-        self.output_text.insert(END, f"出力予定: {ready}件 / 要修正: {invalid}件\n")
-        self.output_text.insert(END, "同名ファイルがある場合は _2, _3 の連番で重複を回避します。\n\n")
+        self.output_check_summary_var.set(f"出力予定: {ready}件 / 要修正: {invalid}件 / 保存先: {self.output_dir}")
+        self.output_text.insert(END, "出力前チェックリスト\n", "heading")
+        self.output_text.insert(END, f"[OK] 出力先: {self.output_dir}\n", "ok")
+        if checks:
+            self.output_text.insert(END, f"[OK] 出力対象: {len(checks)}件\n", "ok")
+        else:
+            self.output_text.insert(END, "[NG] 出力対象がありません。Step 2で分割を作成してください。\n", "error")
+        if invalid:
+            self.output_text.insert(END, f"[NG] 要修正: {invalid}件。Step 3で未入力や命名エラーを修正してください。\n", "error")
+        else:
+            self.output_text.insert(END, "[OK] 未入力・命名エラーなし\n", "ok" if checks else "warn")
+        self.output_text.insert(END, "[OK] 同名ファイルがある場合は _2, _3 の連番で重複を回避します。\n\n", "ok")
+        self.output_text.insert(END, "出力予定一覧\n", "heading")
         for check in checks:
             if check.ok:
-                self.output_text.insert(END, f"[出力可能] {check.segment.start_page}-{check.segment.end_page} -> {check.filename}\n")
+                self.output_text.insert(END, f"[出力可能] {check.segment.start_page}-{check.segment.end_page} -> {check.filename}\n", "ok")
             else:
                 self.output_text.insert(
                     END,
                     f"[要修正] {check.segment.start_page}-{check.segment.end_page} -> {' / '.join(check.messages)}\n",
+                    "error",
                 )
         can_run = bool(checks) and invalid == 0
         self.run_output_button.configure(state="normal" if can_run else "disabled")
@@ -1047,7 +1107,8 @@ class PdfSplitterApp:
             if check.output_path is None:
                 continue
             final_path = self.processor.split_pdf(check.segment, check.output_path)
-            self.output_text.insert(END, f"出力しました: {final_path}\n")
+            self.output_text.insert(END, f"出力しました: {final_path}\n", "ok")
+        self.output_check_summary_var.set(f"出力完了: {len(checks)}件 / 保存先: {self.output_dir}")
         self._update_workflow_status()
 
 
@@ -1068,6 +1129,7 @@ class PresetManagerDialog:
         self.field_label_var = StringVar()
         self.field_required_var = StringVar(value="false")
         self.field_default_var = StringVar()
+        self.readonly_notice_var = StringVar()
         self.form_widgets: list[object] = []
         self.field_buttons: list[object] = []
         self.save_button = None
@@ -1098,8 +1160,12 @@ class PresetManagerDialog:
         self._entry_row(form, "白紙しきい値", self.blank_threshold_var)
         self._entry_row(form, "インデックスしきい値", self.index_threshold_var)
 
+        ttk.Label(form, textvariable=self.readonly_notice_var, style="Hint.TLabel", wraplength=560).pack(anchor="w", pady=(4, 0))
         self.template_help_var = StringVar()
         ttk.Label(form, textvariable=self.template_help_var).pack(anchor="w", pady=(4, 2))
+        ttk.Label(form, text="変数をクリックすると命名テンプレートへ挿入します。", style="Hint.TLabel").pack(anchor="w")
+        self.template_vars_frame = ttk.Frame(form)
+        self.template_vars_frame.pack(fill="x", pady=(2, 6))
 
         ttk.Label(form, text="入力項目").pack(anchor="w", pady=(8, 2))
         self.fields_tree = ttk.Treeview(
@@ -1149,6 +1215,8 @@ class PresetManagerDialog:
         ttk.Label(row, text=label, width=18).pack(side=LEFT)
         entry = ttk.Entry(row, textvariable=variable)
         entry.pack(side=LEFT, fill="x", expand=True)
+        if label == "命名テンプレート":
+            self.template_entry = entry
         self.form_widgets.append(entry)
 
     def _small_entry(self, parent: ttk.Frame, label: str, variable: StringVar, width: int) -> None:
@@ -1188,7 +1256,13 @@ class PresetManagerDialog:
         self.load_fields(preset)
         self.keywords_text.delete("1.0", END)
         self.keywords_text.insert("1.0", format_keywords(preset.extraction_keywords))
-        self.set_readonly(preset.id in DEFAULT_PRESET_IDS)
+        readonly = preset.id in DEFAULT_PRESET_IDS
+        self.readonly_notice_var.set(
+            "組み込みプリセットです。直接編集せず、左の「コピーして新規作成」から案件別に調整してください。"
+            if readonly
+            else "カスタムプリセットです。案件に合わせて編集できます。"
+        )
+        self.set_readonly(readonly)
 
     def new_from_selected(self) -> None:
         source = self.app.presets[self.selected_index] if self.selected_index is not None else self.app.active_preset
@@ -1209,6 +1283,7 @@ class PresetManagerDialog:
         self.load_fields(source)
         self.keywords_text.delete("1.0", END)
         self.keywords_text.insert("1.0", format_keywords(source.extraction_keywords))
+        self.readonly_notice_var.set("コピーを作成しました。項目や命名テンプレートを編集して保存してください。")
         self.set_readonly(False)
 
     def load_fields(self, preset: Preset) -> None:
@@ -1232,6 +1307,25 @@ class PresetManagerDialog:
         keys = [str(self.fields_tree.item(item_id, "values")[0]) for item_id in self.fields_tree.get_children()]
         values = ", ".join("{" + key + "}" for key in keys)
         self.template_help_var.set(f"テンプレートで使える変数: {values or 'なし'}")
+        if hasattr(self, "template_vars_frame"):
+            for child in self.template_vars_frame.winfo_children():
+                child.destroy()
+            for key in keys:
+                button = ttk.Button(
+                    self.template_vars_frame,
+                    text="{" + key + "}",
+                    command=lambda value=key: self.insert_template_variable(value),
+                )
+                button.pack(side=LEFT, padx=(0, 4), pady=2)
+
+    def insert_template_variable(self, key: str) -> None:
+        if getattr(self, "template_entry", None) is not None and self.template_entry.cget("state") == "disabled":
+            return
+        value = "{" + key + "}"
+        try:
+            self.template_entry.insert("insert", value)
+        except Exception:
+            self.template_var.set(self.template_var.get() + value)
 
     def on_field_selected(self, _event) -> None:
         selection = self.fields_tree.selection()
