@@ -21,6 +21,7 @@ from pdf_splitter_tool.workflow import (
     apply_common_metadata,
     check_segment_outputs,
     error_messages,
+    metadata_suggestions_from_text,
     output_action_key,
     resequence_segments,
 )
@@ -39,6 +40,12 @@ def test_apply_common_metadata_and_resequence_segments(tmp_path: Path) -> None:
     assert [segment.metadata["box_no"] for segment in segments] == ["1", "1"]
     assert [segment.metadata["binder_no"] for segment in segments] == ["2", "2"]
     assert [segment.metadata["seq"] for segment in segments] == ["3", "5"]
+
+
+def test_metadata_suggestions_from_text_are_copy_friendly() -> None:
+    text = "\n  株式会社A  \n\n契約書\n株式会社A\n箱No 01\nバインダー 02\n追加行\n"
+
+    assert metadata_suggestions_from_text(text, limit=4) == ["株式会社A", "契約書", "箱No 01", "バインダー 02"]
 
 
 def test_check_segment_outputs_reports_ready_and_invalid(tmp_path: Path) -> None:
