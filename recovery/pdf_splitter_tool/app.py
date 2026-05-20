@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import queue
+import os
 import sys
 import threading
 from pathlib import Path
-from tkinter import BOTH, END, LEFT, RIGHT, VERTICAL, BooleanVar, Canvas, Listbox, StringVar, Text, Tk, Toplevel, filedialog, messagebox
+from tkinter import BOTH, END, LEFT, RIGHT, VERTICAL, BooleanVar, Canvas, DoubleVar, Listbox, StringVar, Text, Tk, Toplevel, filedialog, messagebox, simpledialog
 from tkinter import ttk
 
 from .app_metadata import APP_NAME
@@ -52,13 +53,20 @@ class PdfSplitterApp:
         self.current_segment_index: int | None = None
         self.metadata_vars: dict[str, StringVar] = {}
         self.common_metadata_vars: dict[str, StringVar] = {}
+        self.step1_common_metadata_vars: dict[str, StringVar] = {}
         self.worker_queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self._preview_image = None
+        self._preview_offset = (8, 8)
+        self._preview_zoom = 1.2
         self._render_generation = 0
         self._render_lock = threading.Lock()
         self._pending_render = False
         self.active_job_cancel: threading.Event | None = None
         self.active_job_name = ""
+        self.load_cancel_event: threading.Event | None = None
+        self.undo_stack: list[list[Segment]] = []
+        self.redo_stack: list[list[Segment]] = []
+        self._restoring_state = False
         self.workflow_summary_var = StringVar()
         self.footer_status_var = StringVar()
         self.step_status_vars: list[StringVar] = []
@@ -75,10 +83,20 @@ class PdfSplitterApp:
         self.candidate_summary_var = StringVar(value="候補: 0件")
         self.metadata_summary_var = StringVar(value="セグメント未作成")
         self.output_check_summary_var = StringVar(value="出力前チェックを実行してください")
+        self.load_status_var = StringVar(value="読込待機中")
+        self.auto_sort_var = BooleanVar(value=True)
+        self.zoom_var = DoubleVar(value=120.0)
+        self.zoom_mode_var = StringVar(value="手動")
+        self.page_jump_var = StringVar(value="1")
+        self.ocr_transfer_field_var = StringVar()
+        self.step3_suggestion_var = StringVar(value="入力補助候補: 未生成")
+        self.output_progress_var = StringVar(value="出力待機中")
+        self.state_status_var = StringVar(value="状態未保存")
 
         self._build_ui()
         self._bind_keys()
         self._update_workflow_status()
+        self.root.after(50, self.load_state_on_startup)
         self._poll_worker_queue()
 
     def _build_ui(self) -> None:
@@ -230,6 +248,98 @@ class PdfSplitterApp:
         self.workflow_summary_var.set(f"{current_name} / {self.active_preset.name}")
         self.footer_status_var.set(f"出力先: {self.output_dir}    作業フォルダ: {self.work_dir}")
 
+    def build_state_payload(self) -> dict[str, object]:
+        return {
+            "version": 2,
+            "active_preset_id": self.active_preset_id,
+            "pdf_paths": [str(path) for path in self.pdf_paths],
+            "current_pdf": str(self.current_pdf) if self.current_pdf else "",
+            "current_page": self.current_page,
+            "output_dir": str(self.output_dir),
+            "segments": [
+                {
+                    "pdf_path": str(segment.pdf_path),
+                    "start_page": segment.start_page,
+                    "end_page": segment.end_page,
+                    "metadata": dict(segment.metadata),
+                }
+                for segment in self.segments
+            ],
+            "step1_common_metadata": {key: var.get() for key, var in self.step1_common_metadata_vars.items()},
+        }
+
+    def save_state(self) -> None:
+        try:
+            self.state_manager.save(self.build_state_payload())
+            self.state_status_var.set("作業状態を保存しました。")
+            self.footer_status_var.set(f"作業状態を保存しました: {self.state_manager.state_path}")
+        except Exception as exc:
+            messagebox.showerror("状態保存", str(exc))
+
+    def load_state_on_startup(self) -> None:
+        try:
+            state = self.state_manager.load()
+        except Exception as exc:
+            self.state_status_var.set(f"状態復元をスキップしました: {exc}")
+            return
+        if not state:
+            return
+        if state.get("version") != 2:
+            self.state_status_var.set("旧形式の状態ファイルは復元対象外です。")
+            return
+        self.restore_state(state)
+
+    def restore_state(self, state: dict[str, object]) -> None:
+        self._restoring_state = True
+        try:
+            preset_id = str(state.get("active_preset_id", self.active_preset_id))
+            self.active_preset = find_preset(self.presets, preset_id)
+            self.active_preset_id = self.active_preset.id
+            self.refresh_preset_combo()
+            self.rebuild_step1_common_fields()
+            self.refresh_ocr_transfer_fields()
+            self.pdf_paths = [Path(path) for path in state.get("pdf_paths", []) if Path(str(path)).exists()]
+            self.output_dir = Path(str(state.get("output_dir", self.output_dir)))
+            self.segments = []
+            valid_paths = set(self.pdf_paths)
+            for item in state.get("segments", []):
+                if not isinstance(item, dict):
+                    continue
+                pdf_path = Path(str(item.get("pdf_path", "")))
+                if pdf_path not in valid_paths:
+                    continue
+                self.segments.append(
+                    Segment(
+                        pdf_path,
+                        int(item.get("start_page", 1)),
+                        int(item.get("end_page", 1)),
+                        dict(item.get("metadata", {})),
+                    )
+                )
+            for key, value in dict(state.get("step1_common_metadata", {})).items():
+                if key in self.step1_common_metadata_vars:
+                    self.step1_common_metadata_vars[key].set(str(value))
+            current_pdf = Path(str(state.get("current_pdf", "")))
+            self.current_pdf = current_pdf if current_pdf in valid_paths else (self.pdf_paths[0] if self.pdf_paths else None)
+            self.current_page = max(1, int(state.get("current_page", 1)))
+            if self.current_pdf is not None:
+                self.current_page_count = self.processor.page_count(self.current_pdf)
+                self.current_page = min(self.current_page, self.current_page_count)
+                self.page_jump_var.set(str(self.current_page))
+            self.refresh_pdf_list()
+            self.refresh_page_list()
+            self.refresh_segment_list()
+            self.rebuild_metadata_fields()
+            self.refresh_output_summary()
+            if self.current_pdf is not None:
+                self.render_current_page_async()
+            self.state_status_var.set("前回状態を復元しました")
+            self._update_workflow_status()
+        except Exception as exc:
+            self.state_status_var.set(f"状態復元に失敗しました: {exc}")
+        finally:
+            self._restoring_state = False
+
     def _build_step1(self) -> None:
         self._add_section_header(
             self.step1,
@@ -238,8 +348,10 @@ class PdfSplitterApp:
         )
         toolbar = ttk.Frame(self.step1)
         toolbar.pack(fill="x")
-        ttk.Button(toolbar, text="PDFを追加", command=self.select_pdfs, style="Primary.TButton").pack(side=LEFT)
-        ttk.Button(toolbar, text="入力フォルダ", command=self.select_folder).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="PDFを個別に選択", command=self.select_pdfs, style="Primary.TButton").pack(side=LEFT)
+        ttk.Button(toolbar, text="入力フォルダを選択", command=self.select_folder).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="置換読込(PDF)", command=self.replace_with_pdfs).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="置換読込(フォルダ)", command=self.replace_with_folder).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="出力フォルダ", command=self.select_output_dir).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="プリセット管理", command=self.open_preset_manager).pack(side=LEFT, padx=4)
 
@@ -254,6 +366,24 @@ class PdfSplitterApp:
         self.preset_combo.pack(side=RIGHT)
         self.preset_combo.bind("<<ComboboxSelected>>", self.on_preset_selected)
 
+        common = ttk.LabelFrame(self.step1, text="共通項目（下書き）", padding=8)
+        common.pack(fill="x", pady=(8, 0))
+        ttk.Label(
+            common,
+            text="ここで入力した値は下書きです。「共通項目を全PDFへ適用」で初めて分割済みセグメントへ反映されます。",
+            style="Hint.TLabel",
+        ).pack(anchor="w")
+        self.step1_common_fields_frame = ttk.Frame(common)
+        self.step1_common_fields_frame.pack(fill="x", pady=(6, 0))
+        common_buttons = ttk.Frame(common)
+        common_buttons.pack(fill="x", pady=(6, 0))
+        ttk.Button(common_buttons, text="共通項目を全PDFへ適用", command=self.apply_step1_common_metadata).pack(side=LEFT)
+        ttk.Checkbutton(common_buttons, text="ファイル名で自動ソート", variable=self.auto_sort_var).pack(side=LEFT, padx=8)
+        ttk.Label(common_buttons, textvariable=self.load_status_var, style="Hint.TLabel").pack(side=LEFT, padx=8)
+        self.cancel_load_button = ttk.Button(common_buttons, text="中断", command=self.cancel_pdf_loading, state="disabled")
+        self.cancel_load_button.pack(side=RIGHT)
+        self.rebuild_step1_common_fields()
+
         ttk.Label(self.step1, text="PDF一覧 - ファイル名、ページ数、保存場所を確認できます。", style="Hint.TLabel").pack(
             anchor="w",
             pady=(8, 0),
@@ -262,6 +392,12 @@ class PdfSplitterApp:
         self._style_listbox(self.pdf_list)
         self.pdf_list.pack(fill=BOTH, expand=True, pady=8)
         self.pdf_list.bind("<<ListboxSelect>>", self.on_pdf_selected)
+        pdf_buttons = ttk.Frame(self.step1)
+        pdf_buttons.pack(fill="x")
+        ttk.Button(pdf_buttons, text="選択解除", command=self.remove_selected_pdf).pack(side=LEFT)
+        ttk.Button(pdf_buttons, text="全クリア", command=self.clear_pdf_selection).pack(side=LEFT, padx=4)
+        ttk.Button(pdf_buttons, text="状態を保存", command=self.save_state).pack(side=RIGHT)
+        ttk.Label(pdf_buttons, textvariable=self.state_status_var, style="Hint.TLabel").pack(side=RIGHT, padx=8)
 
     def open_preset_manager(self) -> None:
         PresetManagerDialog(self)
@@ -275,8 +411,41 @@ class PdfSplitterApp:
         self.active_preset_id = self.active_preset.id
         self.preset_repo.save(self.presets, self.active_preset_id)
         self.refresh_preset_combo()
+        self.rebuild_step1_common_fields()
+        self.refresh_ocr_transfer_fields()
         self.rebuild_metadata_fields()
         self.refresh_segment_list()
+        self._update_workflow_status()
+
+    def rebuild_step1_common_fields(self) -> None:
+        if not hasattr(self, "step1_common_fields_frame"):
+            return
+        for child in self.step1_common_fields_frame.winfo_children():
+            child.destroy()
+        self.step1_common_metadata_vars = {}
+        for index, field in enumerate(field for field in self.active_preset.fields if field.key != "seq"):
+            row = ttk.Frame(self.step1_common_fields_frame)
+            row.grid(row=index // 3, column=index % 3, sticky="ew", padx=(0, 12), pady=2)
+            ttk.Label(row, text=field.label, width=14).pack(side=LEFT)
+            var = StringVar(value=field.default)
+            self.step1_common_metadata_vars[field.key] = var
+            ttk.Entry(row, textvariable=var, width=18).pack(side=LEFT)
+        for column in range(3):
+            self.step1_common_fields_frame.columnconfigure(column, weight=1)
+
+    def apply_step1_common_metadata(self) -> None:
+        values = {key: var.get() for key, var in self.step1_common_metadata_vars.items() if var.get().strip()}
+        if not values:
+            messagebox.showinfo("共通項目", "反映する値が入力されていません。")
+            return
+        if not self.segments:
+            messagebox.showinfo("共通項目", "分割済みセグメントがありません。Step 2で分割を作成後に反映してください。")
+            return
+        apply_common_metadata(self.segments, values)
+        self.refresh_segment_list()
+        self.rebuild_metadata_fields()
+        self.refresh_output_summary()
+        self.state_status_var.set("共通項目を分割済みセグメントへ反映しました")
         self._update_workflow_status()
 
     def _build_step2(self) -> None:
@@ -315,6 +484,16 @@ class PdfSplitterApp:
             side=RIGHT,
             padx=4,
         )
+        nav_row = ttk.Frame(center)
+        nav_row.pack(fill="x", pady=(4, 0))
+        ttk.Label(nav_row, text="ページ指定").pack(side=LEFT)
+        ttk.Entry(nav_row, textvariable=self.page_jump_var, width=8).pack(side=LEFT, padx=(4, 2))
+        ttk.Button(nav_row, text="移動", command=self.go_to_page).pack(side=LEFT)
+        ttk.Label(nav_row, text="ズーム").pack(side=LEFT, padx=(14, 2))
+        ttk.Scale(nav_row, from_=60, to=220, variable=self.zoom_var, command=self.on_zoom_changed, length=140).pack(side=LEFT)
+        ttk.Button(nav_row, text="幅に合わせる", command=lambda: self.set_zoom_mode("幅")).pack(side=LEFT, padx=4)
+        ttk.Button(nav_row, text="全体表示", command=lambda: self.set_zoom_mode("全体")).pack(side=LEFT)
+        ttk.Label(nav_row, textvariable=self.zoom_mode_var, style="Hint.TLabel").pack(side=LEFT, padx=8)
         ttk.Label(center, text="←/→でページ移動。入力欄・OCR本文にフォーカス中は通常入力を優先します。", style="Hint.TLabel").pack(
             anchor="w",
             pady=(4, 0),
@@ -369,8 +548,15 @@ class PdfSplitterApp:
         self._style_listbox(self.split_list)
         self.split_list.pack(fill=BOTH, expand=True, pady=(4, 6))
         ttk.Button(split_tab, text="現在ページの前に分割", command=self.add_split_before_current_page).pack(fill="x")
+        ttk.Button(split_tab, text="選択した分割を削除", command=self.delete_selected_split).pack(fill="x", pady=(4, 0))
         ttk.Button(split_tab, text="最後の分割を取り消す", command=self.undo_last_split).pack(fill="x", pady=(4, 0))
+        undo_row = ttk.Frame(split_tab)
+        undo_row.pack(fill="x", pady=(4, 0))
+        ttk.Button(undo_row, text="Undo", command=self.undo_segments).pack(side=LEFT, fill="x", expand=True)
+        ttk.Button(undo_row, text="Redo", command=self.redo_segments).pack(side=LEFT, fill="x", expand=True, padx=(4, 0))
         ttk.Button(split_tab, text="1ページごとに分割", command=lambda: self.split_by_n_pages(1)).pack(fill="x", pady=(4, 0))
+        ttk.Button(split_tab, text="参照元フォルダを開く", command=self.open_current_pdf_folder).pack(fill="x", pady=(4, 0))
+        ttk.Button(split_tab, text="このファイルを改名", command=self.rename_current_pdf_file).pack(fill="x", pady=(4, 0))
 
         candidate_tab = ttk.Frame(decision_tabs, padding=6)
         decision_tabs.add(candidate_tab, text="候補")
@@ -386,6 +572,12 @@ class PdfSplitterApp:
         self.ocr_text = Text(ocr_tab, height=12, wrap="word")
         self._style_text(self.ocr_text)
         self.ocr_text.pack(fill=BOTH, expand=True)
+        transfer = ttk.Frame(ocr_tab)
+        transfer.pack(fill="x", pady=(6, 0))
+        self.ocr_transfer_combo = ttk.Combobox(transfer, textvariable=self.ocr_transfer_field_var, state="readonly", width=18)
+        self.ocr_transfer_combo.pack(side=LEFT)
+        ttk.Button(transfer, text="選択OCRを転記", command=self.transfer_selected_ocr_text).pack(side=LEFT, padx=4)
+        self.refresh_ocr_transfer_fields()
 
     def _build_step3(self) -> None:
         self._add_section_header(
@@ -435,6 +627,13 @@ class PdfSplitterApp:
         ttk.Entry(seq_row, textvariable=self.seq_step_var, width=8).pack(side=LEFT)
         ttk.Button(seq_row, text="共通値を全件へ反映", command=self.apply_common_metadata_to_segments).pack(side=LEFT, padx=8)
         ttk.Button(seq_row, text="連番を再採番", command=self.resequence_segment_metadata).pack(side=LEFT)
+        assist_row = ttk.Frame(self.bulk_frame)
+        assist_row.pack(fill="x", pady=(6, 0))
+        ttk.Button(assist_row, text="前行メタデータコピー", command=self.copy_previous_segment_metadata).pack(side=LEFT)
+        ttk.Button(assist_row, text="次の要修正へ移動", command=self.select_next_invalid_segment).pack(side=LEFT, padx=4)
+        ttk.Button(assist_row, text="入力補助候補を更新", command=self.refresh_metadata_suggestions).pack(side=LEFT)
+        ttk.Button(assist_row, text="出力予定フォルダを開く", command=self.open_output_folder).pack(side=LEFT, padx=4)
+        ttk.Label(self.bulk_frame, textvariable=self.step3_suggestion_var, style="Hint.TLabel", wraplength=560).pack(anchor="w", pady=(6, 0))
 
         self.metadata_frame = ttk.LabelFrame(right, text="選択セグメント", padding=8)
         self.metadata_frame.pack(fill=BOTH, expand=True, pady=(8, 0))
@@ -458,8 +657,10 @@ class PdfSplitterApp:
             style="Primary.TButton",
         )
         self.run_output_button.pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="出力フォルダを開く", command=self.open_output_folder).pack(side=LEFT)
         self.output_status_var = StringVar(value="出力前チェックを実行してください")
         ttk.Label(toolbar, textvariable=self.output_status_var).pack(side=LEFT, padx=8)
+        ttk.Label(toolbar, textvariable=self.output_progress_var, style="Hint.TLabel").pack(side=LEFT)
         ttk.Label(self.step4, textvariable=self.output_check_summary_var, style="Hint.TLabel").pack(anchor="w", pady=(8, 0))
         self.output_text = Text(self.step4, height=24)
         self._style_text(self.output_text)
@@ -473,6 +674,10 @@ class PdfSplitterApp:
         self.root.bind_all("<space>", self.on_space_key)
         self.root.bind_all("<Left>", self.on_left_key)
         self.root.bind_all("<Right>", self.on_right_key)
+        self.root.bind_all("<Control-s>", self.on_save_key)
+        self.root.bind_all("<Control-z>", self.on_undo_key)
+        self.root.bind_all("<Control-y>", self.on_redo_key)
+        self.root.bind_all("<Delete>", self.on_delete_key)
 
     def _is_shortcut_blocking_focus_widget(self) -> bool:
         focused = self.root.focus_get()
@@ -501,6 +706,28 @@ class PdfSplitterApp:
         self.next_page()
         return "break"
 
+    def on_save_key(self, event) -> str:
+        self.save_state()
+        return "break"
+
+    def on_undo_key(self, event) -> str | None:
+        if self.notebook.index(self.notebook.select()) != 1 or self._is_shortcut_blocking_focus_widget():
+            return None
+        self.undo_segments()
+        return "break"
+
+    def on_redo_key(self, event) -> str | None:
+        if self.notebook.index(self.notebook.select()) != 1 or self._is_shortcut_blocking_focus_widget():
+            return None
+        self.redo_segments()
+        return "break"
+
+    def on_delete_key(self, event) -> str | None:
+        if self.notebook.index(self.notebook.select()) != 1 or self._is_shortcut_blocking_focus_widget():
+            return None
+        self.delete_selected_split()
+        return "break"
+
     def _on_tab_changed(self, _event) -> None:
         if self.notebook.index(self.notebook.select()) == 1:
             self.root.after(50, self.preview_canvas.focus_set)
@@ -520,15 +747,86 @@ class PdfSplitterApp:
     def select_folder(self) -> None:
         folder = filedialog.askdirectory()
         if folder:
-            self.add_pdf_paths(sorted(Path(folder).glob("*.pdf")))
+            self.add_pdf_paths(list(Path(folder).glob("*.pdf")))
+
+    def replace_with_pdfs(self) -> None:
+        paths = filedialog.askopenfilenames(filetypes=[("PDF files", "*.pdf")])
+        if paths:
+            self.clear_pdf_selection(confirm=False)
+            self.add_pdf_paths([Path(path) for path in paths])
+
+    def replace_with_folder(self) -> None:
+        folder = filedialog.askdirectory()
+        if folder:
+            self.clear_pdf_selection(confirm=False)
+            self.add_pdf_paths(list(Path(folder).glob("*.pdf")))
 
     def add_pdf_paths(self, paths: list[Path]) -> None:
-        for path in paths:
+        if self.auto_sort_var.get():
+            paths = sorted(paths, key=lambda item: item.name.lower())
+        self.load_cancel_event = threading.Event()
+        self.cancel_load_button.configure(state="normal")
+        total = len(paths)
+        for index, path in enumerate(paths, start=1):
+            if self.load_cancel_event.is_set():
+                self.load_status_var.set(f"読込中断: {index - 1}/{total}件")
+                break
             if path not in self.pdf_paths:
                 self.pdf_paths.append(path)
                 self.pdf_list.insert(END, f"{path.name} | 未読込 | {path}")
+            self.load_status_var.set(f"読込進捗: {index}/{total}件")
+            self.root.update_idletasks()
+        self.cancel_load_button.configure(state="disabled")
+        self.load_cancel_event = None
         if self.pdf_paths and self.current_pdf is None:
             self.set_current_pdf(self.pdf_paths[0])
+        self.refresh_pdf_list()
+        if total:
+            self.load_status_var.set(f"読込完了: {len(self.pdf_paths)}件")
+        self._update_workflow_status()
+
+    def cancel_pdf_loading(self) -> None:
+        if self.load_cancel_event is not None:
+            self.load_cancel_event.set()
+
+    def remove_selected_pdf(self) -> None:
+        selection = self.pdf_list.curselection()
+        if not selection:
+            return
+        index = selection[0]
+        path = self.pdf_paths[index]
+        self.pdf_paths.pop(index)
+        self.segments = [segment for segment in self.segments if segment.pdf_path != path]
+        if self.current_pdf == path:
+            self.current_pdf = self.pdf_paths[0] if self.pdf_paths else None
+            if self.current_pdf is not None:
+                self.set_current_pdf(self.current_pdf)
+            else:
+                self.current_page_count = 0
+                self.preview_canvas.delete("all")
+                self.ocr_text.delete("1.0", END)
+        self.refresh_pdf_list()
+        self.refresh_page_list()
+        self.refresh_segment_list()
+        self._update_workflow_status()
+
+    def clear_pdf_selection(self, confirm: bool = True) -> None:
+        if confirm and self.pdf_paths and not messagebox.askyesno("全クリア", "PDF選択、分割、候補情報をすべてクリアします。よろしいですか。"):
+            return
+        self.pdf_paths.clear()
+        self.current_pdf = None
+        self.current_page = 1
+        self.current_page_count = 0
+        self.segments.clear()
+        self.search_hit_pages.clear()
+        self.blank_candidate_pages.clear()
+        self.index_candidate_pages.clear()
+        self.pdf_list.delete(0, END)
+        self.page_list.delete(0, END)
+        self.preview_canvas.delete("all")
+        self.ocr_text.delete("1.0", END)
+        self.refresh_segment_list()
+        self.refresh_step2_sidebars()
         self._update_workflow_status()
 
     def select_output_dir(self) -> None:
@@ -546,6 +844,7 @@ class PdfSplitterApp:
     def set_current_pdf(self, path: Path) -> None:
         self.current_pdf = path
         self.current_page = 1
+        self.page_jump_var.set("1")
         self.search_hit_pages.clear()
         self.blank_candidate_pages.clear()
         self.index_candidate_pages.clear()
@@ -590,6 +889,7 @@ class PdfSplitterApp:
         selection = self.page_list.curselection()
         if selection:
             self.current_page = self.page_list_page_numbers[selection[0]]
+            self.page_jump_var.set(str(self.current_page))
             self.refresh_step2_sidebars()
             self.render_current_page_async()
 
@@ -597,6 +897,7 @@ class PdfSplitterApp:
         selection = self.candidate_list.curselection()
         if selection and selection[0] < len(self.candidate_list_page_numbers):
             self.current_page = self.candidate_list_page_numbers[selection[0]]
+            self.page_jump_var.set(str(self.current_page))
             self.sync_page_list_selection()
             self.render_current_page_async()
 
@@ -646,6 +947,12 @@ class PdfSplitterApp:
         self.current_page_var.set(f"現在 {self.current_page} / {self.current_page_count or '-'} ページ")
         badges = self.page_badges(self.current_page)
         state = " / ".join(badges) if badges else "通常ページ"
+        if self.search_var.get().strip() and self.current_page in self.search_hit_pages:
+            try:
+                hit_count = len(self.processor.search_text_rects(self.current_pdf, self.current_page, self.search_var.get())) if self.current_pdf else 0
+                state += f" / ページ内ヒット {hit_count}件"
+            except Exception:
+                state += " / ページ内ヒット確認不可"
         if self.current_page <= 1:
             state += " / 先頭ページのため前分割不可"
         self.current_page_state_var.set(state)
@@ -695,10 +1002,13 @@ class PdfSplitterApp:
 
         def worker() -> None:
             try:
-                zoom = 0.9 if self.current_page_count >= 200 else 1.2
+                zoom = self.effective_zoom()
                 pixmap = self.processor.render_page_pixmap(pdf_path, page_no, zoom=zoom)
                 text = self.processor.extract_page_text(pdf_path, page_no)
-                self.worker_queue.put(("rendered", (generation, page_no, pixmap, text)))
+                rects = []
+                if self.search_var.get().strip() and page_no in self.search_hit_pages:
+                    rects = self.processor.search_text_rects(pdf_path, page_no, self.search_var.get())
+                self.worker_queue.put(("rendered", (generation, page_no, zoom, pixmap, text, rects)))
             except Exception as exc:
                 self.worker_queue.put(("error", str(exc)))
             finally:
@@ -709,25 +1019,58 @@ class PdfSplitterApp:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _display_pixmap(self, pixmap) -> None:
+    def effective_zoom(self) -> float:
+        if self.zoom_mode_var.get() == "幅" and self.current_page_count >= 200:
+            return 0.9
+        if self.zoom_mode_var.get() == "全体":
+            return 0.75
+        return max(0.6, min(2.2, self.zoom_var.get() / 100))
+
+    def on_zoom_changed(self, _value: str) -> None:
+        self.zoom_mode_var.set(f"手動 {int(self.zoom_var.get())}%")
+        self.render_current_page_async()
+
+    def set_zoom_mode(self, mode: str) -> None:
+        self.zoom_mode_var.set(mode)
+        if mode == "幅":
+            self.zoom_var.set(90 if self.current_page_count >= 200 else 120)
+        elif mode == "全体":
+            self.zoom_var.set(75)
+        self.render_current_page_async()
+
+    def _display_pixmap(self, zoom: float, pixmap, highlight_rects: list[tuple[float, float, float, float]]) -> None:
         from PIL import Image, ImageTk
 
         image = Image.frombytes("RGB", [pixmap.width, pixmap.height], pixmap.samples)
         self._preview_image = ImageTk.PhotoImage(image)
+        self._preview_zoom = zoom
         self.preview_canvas.delete("all")
-        self.preview_canvas.create_image(8, 8, image=self._preview_image, anchor="nw")
+        offset_x, offset_y = self._preview_offset
+        self.preview_canvas.create_image(offset_x, offset_y, image=self._preview_image, anchor="nw")
+        for x0, y0, x1, y1 in highlight_rects:
+            self.preview_canvas.create_rectangle(
+                offset_x + x0 * zoom,
+                offset_y + y0 * zoom,
+                offset_x + x1 * zoom,
+                offset_y + y1 * zoom,
+                fill="#fde68a",
+                outline="#f59e0b",
+                stipple="gray50",
+                tags=("search_highlight",),
+            )
 
     def _poll_worker_queue(self) -> None:
         try:
             while True:
                 kind, payload = self.worker_queue.get_nowait()
                 if kind == "rendered":
-                    generation, page_no, pixmap, text = payload
+                    generation, page_no, zoom, pixmap, text, rects = payload
                     if generation == self._render_generation and page_no == self.current_page:
-                        self._display_pixmap(pixmap)
+                        self._display_pixmap(zoom, pixmap, rects)
                         self.ocr_text.delete("1.0", END)
                         self.ocr_text.insert("1.0", text)
-                        self.status_var.set(f"{page_no}/{self.current_page_count}ページ")
+                        hit_text = f" / 検索ハイライト {len(rects)}件" if rects else ""
+                        self.status_var.set(f"{page_no}/{self.current_page_count}ページ{hit_text}")
                         if self.active_job_cancel is None:
                             self.warm_thumbnail_window(page_no)
                 elif kind == "render_again":
@@ -744,6 +1087,7 @@ class PdfSplitterApp:
                     self.status_var.set(f"{prefix}: {len(hits)}件")
                     if hits:
                         self.current_page = hits[0]
+                        self.page_jump_var.set(str(self.current_page))
                         self.sync_page_list_selection()
                         self.render_current_page_async()
                 elif kind == "blank_done":
@@ -762,6 +1106,7 @@ class PdfSplitterApp:
                     self.status_var.set(f"{prefix}: {', '.join(map(str, hits[:20])) or 'なし'}")
                     if hits:
                         self.current_page = hits[0]
+                        self.page_jump_var.set(str(self.current_page))
                         self.sync_page_list_selection()
                         self.render_current_page_async()
                 elif kind == "error":
@@ -800,14 +1145,45 @@ class PdfSplitterApp:
     def prev_page(self) -> None:
         if self.current_page > 1:
             self.current_page -= 1
+            self.page_jump_var.set(str(self.current_page))
             self.sync_page_list_selection()
             self.render_current_page_async()
 
     def next_page(self) -> None:
         if self.current_page < self.current_page_count:
             self.current_page += 1
+            self.page_jump_var.set(str(self.current_page))
             self.sync_page_list_selection()
             self.render_current_page_async()
+
+    def go_to_page(self) -> None:
+        if self.current_page_count <= 0:
+            return
+        try:
+            page_no = int(self.page_jump_var.get())
+        except ValueError:
+            messagebox.showerror("ページ移動", "ページ番号は数値で入力してください。")
+            return
+        self.current_page = max(1, min(self.current_page_count, page_no))
+        self.page_jump_var.set(str(self.current_page))
+        self.sync_page_list_selection()
+        self.render_current_page_async()
+
+    def snapshot_segments_for_undo(self) -> None:
+        if self._restoring_state:
+            return
+        copied = [Segment(segment.pdf_path, segment.start_page, segment.end_page, dict(segment.metadata)) for segment in self.segments]
+        self.undo_stack.append(copied)
+        if len(self.undo_stack) > 40:
+            self.undo_stack.pop(0)
+        self.redo_stack.clear()
+
+    def restore_segments_snapshot(self, snapshot: list[Segment]) -> None:
+        self.segments = [Segment(segment.pdf_path, segment.start_page, segment.end_page, dict(segment.metadata)) for segment in snapshot]
+        self.refresh_page_list()
+        self.refresh_segment_list()
+        self.refresh_output_summary()
+        self._update_workflow_status()
 
     def add_split_before_current_page(self) -> None:
         if self.current_pdf is None or self.current_page <= 1:
@@ -816,6 +1192,7 @@ class PdfSplitterApp:
         start_page = previous_end + 1
         end_page = self.current_page - 1
         if start_page <= end_page:
+            self.snapshot_segments_for_undo()
             metadata = self.active_preset.default_metadata()
             metadata["seq"] = str(len(self.segments) + 1)
             self.segments.append(Segment(self.current_pdf, start_page, end_page, metadata))
@@ -826,14 +1203,45 @@ class PdfSplitterApp:
     def undo_last_split(self) -> None:
         if not self.segments:
             return
+        self.snapshot_segments_for_undo()
         self.segments.pop()
         self.refresh_page_list()
         self.refresh_segment_list()
         self._update_workflow_status()
 
+    def delete_selected_split(self) -> None:
+        selection = self.split_list.curselection()
+        boundaries = sorted(self.split_boundary_pages())
+        if not selection or not boundaries or selection[0] >= len(boundaries):
+            return
+        boundary = boundaries[selection[0]]
+        delete_index = next((index for index, segment in enumerate(self.segments) if segment.end_page + 1 == boundary), None)
+        if delete_index is None:
+            return
+        self.snapshot_segments_for_undo()
+        self.segments.pop(delete_index)
+        self.refresh_page_list()
+        self.refresh_segment_list()
+        self._update_workflow_status()
+
+    def undo_segments(self) -> None:
+        if not self.undo_stack:
+            return
+        current = [Segment(segment.pdf_path, segment.start_page, segment.end_page, dict(segment.metadata)) for segment in self.segments]
+        self.redo_stack.append(current)
+        self.restore_segments_snapshot(self.undo_stack.pop())
+
+    def redo_segments(self) -> None:
+        if not self.redo_stack:
+            return
+        current = [Segment(segment.pdf_path, segment.start_page, segment.end_page, dict(segment.metadata)) for segment in self.segments]
+        self.undo_stack.append(current)
+        self.restore_segments_snapshot(self.redo_stack.pop())
+
     def split_by_n_pages(self, pages_per_segment: int) -> None:
         if self.current_pdf is None or self.current_page_count == 0:
             return
+        self.snapshot_segments_for_undo()
         self.segments = self.processor.build_segments_by_n_pages(
             self.current_pdf,
             self.current_page_count,
@@ -845,6 +1253,65 @@ class PdfSplitterApp:
         self.refresh_page_list()
         self.refresh_segment_list()
         self._update_workflow_status()
+
+    def open_current_pdf_folder(self) -> None:
+        if self.current_pdf is None:
+            messagebox.showinfo("参照元フォルダ", "PDFが選択されていません。")
+            return
+        self.open_folder(self.current_pdf.parent)
+
+    def open_output_folder(self) -> None:
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.open_folder(self.output_dir)
+
+    def open_folder(self, path: Path) -> None:
+        try:
+            os.startfile(path)
+        except Exception as exc:
+            messagebox.showerror("フォルダを開けません", str(exc))
+
+    def rename_current_pdf_file(self) -> None:
+        if self.current_pdf is None:
+            return
+        current = self.current_pdf
+        new_name = simpledialog.askstring("ファイル名変更", "新しいPDFファイル名を入力してください。", initialvalue=current.name)
+        if not new_name:
+            return
+        if not new_name.lower().endswith(".pdf"):
+            new_name += ".pdf"
+        safe_name, warnings = self.processor.sanitize_filename(new_name)
+        target = current.with_name(safe_name)
+        if target == current:
+            return
+        if target.exists():
+            messagebox.showerror("ファイル名変更", "同名ファイルが既に存在します。")
+            return
+        if not messagebox.askyesno("ファイル名変更", "元PDFのファイル名だけを変更します。PDF本文は変更しません。よろしいですか。"):
+            return
+        try:
+            current.rename(target)
+        except Exception as exc:
+            messagebox.showerror("ファイル名変更", str(exc))
+            return
+        self.remap_pdf_references(current, target)
+        note = "（使用できない文字を置換しました）" if warnings else ""
+        self.status_var.set(f"ファイル名を変更しました: {target.name}{note}")
+
+    def remap_pdf_references(self, old_path: Path, new_path: Path) -> None:
+        self.pdf_paths = [new_path if path == old_path else path for path in self.pdf_paths]
+        for segment in self.segments:
+            if segment.pdf_path == old_path:
+                segment.pdf_path = new_path
+        self.current_pdf = new_path if self.current_pdf == old_path else self.current_pdf
+        self.search_hit_pages.clear()
+        self.blank_candidate_pages.clear()
+        self.index_candidate_pages.clear()
+        self.processor.preview_cache.clear()
+        self.processor.thumbnail_cache.clear()
+        self.refresh_pdf_list()
+        self.refresh_page_list()
+        self.refresh_segment_list()
+        self.render_current_page_async()
 
     def start_text_search(self) -> None:
         if self.current_pdf is None:
@@ -941,6 +1408,48 @@ class PdfSplitterApp:
                 self.set_active_preset(preset.id)
                 return
 
+    def refresh_ocr_transfer_fields(self) -> None:
+        if not hasattr(self, "ocr_transfer_combo"):
+            return
+        values = [f"{field.label} ({field.key})" for field in self.active_preset.fields]
+        self.ocr_transfer_combo["values"] = values
+        if values and not self.ocr_transfer_field_var.get():
+            priority = next((value for value in values if "(box_no)" in value), values[0])
+            self.ocr_transfer_field_var.set(priority)
+
+    def selected_ocr_text(self) -> str:
+        try:
+            return self.ocr_text.get("sel.first", "sel.last").strip()
+        except Exception:
+            return ""
+
+    def selected_ocr_transfer_key(self) -> str | None:
+        selected = self.ocr_transfer_field_var.get()
+        if "(" in selected and selected.endswith(")"):
+            return selected.rsplit("(", 1)[1][:-1]
+        return self.active_preset.fields[0].key if self.active_preset.fields else None
+
+    def transfer_selected_ocr_text(self) -> None:
+        text = self.selected_ocr_text()
+        if not text:
+            messagebox.showinfo("OCR転記", "OCR本文で転記したい文字を選択してください。")
+            return
+        if self.current_segment_index is None or not self.segments:
+            messagebox.showinfo("OCR転記", "Step 3で転記先のセグメントを選択してください。")
+            return
+        key = self.selected_ocr_transfer_key()
+        if key is None:
+            messagebox.showinfo("OCR転記", "転記先の入力項目がありません。")
+            return
+        self.segments[self.current_segment_index].metadata[key] = text
+        if key in self.metadata_vars:
+            self.metadata_vars[key].set(text)
+        self.refresh_segment_list()
+        self.rebuild_metadata_fields()
+        self.refresh_output_summary()
+        self.status_var.set(f"OCR選択テキストを {key} へ転記しました")
+        self._update_workflow_status()
+
     def refresh_segment_list(self) -> None:
         self.segment_list.delete(*self.segment_list.get_children())
         checks = check_segment_outputs(self.segments, self.active_preset, self.output_dir, self.processor)
@@ -1030,6 +1539,45 @@ class PdfSplitterApp:
         self.refresh_output_summary()
         self._update_workflow_status()
 
+    def copy_previous_segment_metadata(self) -> None:
+        if self.current_segment_index is None or self.current_segment_index <= 0:
+            messagebox.showinfo("前行コピー", "コピー元となる前行がありません。")
+            return
+        previous = self.segments[self.current_segment_index - 1]
+        current = self.segments[self.current_segment_index]
+        for key, value in previous.metadata.items():
+            if key != "seq":
+                current.metadata[key] = value
+        self.refresh_segment_list()
+        self.rebuild_metadata_fields()
+        self.refresh_output_summary()
+        self._update_workflow_status()
+
+    def select_next_invalid_segment(self) -> None:
+        checks = check_segment_outputs(self.segments, self.active_preset, self.output_dir, self.processor)
+        if not checks:
+            messagebox.showinfo("未入力ナビ", "確認するセグメントがありません。")
+            return
+        start = 0 if self.current_segment_index is None else self.current_segment_index + 1
+        order = list(range(start, len(checks))) + list(range(0, start))
+        for index in order:
+            if not checks[index].ok:
+                self.current_segment_index = index
+                self.segment_list.selection_set(str(index))
+                self.segment_list.see(str(index))
+                self.rebuild_metadata_fields()
+                return
+        messagebox.showinfo("未入力ナビ", "要修正のセグメントはありません。")
+
+    def refresh_metadata_suggestions(self) -> None:
+        text = self.ocr_text.get("1.0", END).strip()
+        if not text:
+            self.step3_suggestion_var.set("入力補助候補: OCR本文がありません。")
+            return
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        candidates = lines[:5]
+        self.step3_suggestion_var.set("入力補助候補: " + (" / ".join(candidates) if candidates else "候補なし"))
+
     def resequence_segment_metadata(self) -> None:
         if not self.segments:
             messagebox.showinfo("連番再採番", "再採番するセグメントがありません。")
@@ -1103,12 +1651,30 @@ class PdfSplitterApp:
             messagebox.showerror("出力できません", "未入力または命名エラーのあるセグメントを修正してください。")
             self.refresh_output_summary()
             return
-        for check in checks:
+        self.run_output_button.configure(state="disabled")
+        self.output_text.insert(END, "\n一括出力ログ\n", "heading")
+        success = 0
+        failed = 0
+        for index, check in enumerate(checks, start=1):
+            self.output_progress_var.set(f"出力中: {index}/{len(checks)} {check.filename}")
+            self.output_status_var.set("一括実行中")
+            self.root.update_idletasks()
             if check.output_path is None:
+                failed += 1
+                self.output_text.insert(END, f"スキップ: {check.segment.start_page}-{check.segment.end_page}\n", "warn")
                 continue
-            final_path = self.processor.split_pdf(check.segment, check.output_path)
-            self.output_text.insert(END, f"出力しました: {final_path}\n", "ok")
-        self.output_check_summary_var.set(f"出力完了: {len(checks)}件 / 保存先: {self.output_dir}")
+            try:
+                final_path = self.processor.split_pdf(check.segment, check.output_path)
+                digest = self.processor.calculate_sha256(final_path)
+                success += 1
+                self.output_text.insert(END, f"成功: {final_path} sha256={digest}\n", "ok")
+            except Exception as exc:
+                failed += 1
+                self.output_text.insert(END, f"出力失敗: {check.filename} {exc}\n", "error")
+        self.output_progress_var.set(f"処理終了: 成功 {success}件 / 失敗 {failed}件")
+        self.output_status_var.set("出力完了" if failed == 0 else "エラー終了")
+        self.output_check_summary_var.set(f"出力完了: 成功 {success}件 / 失敗 {failed}件 / 保存先: {self.output_dir}")
+        self.run_output_button.configure(state="normal" if failed == 0 else "disabled")
         self._update_workflow_status()
 
 

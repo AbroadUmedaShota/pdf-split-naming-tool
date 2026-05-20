@@ -100,3 +100,13 @@ def test_state_manager_writes_state_and_backup(tmp_path: Path) -> None:
 
     assert manager.load()["value"] == "second"
     assert manager.backup_path.exists()
+
+
+def test_state_manager_falls_back_to_backup_when_state_is_broken(tmp_path: Path) -> None:
+    manager = StateManager(tmp_path)
+
+    manager.save({"version": 2, "value": "backup"})
+    manager.save({"version": 2, "value": "current"})
+    manager.state_path.write_text("{broken", encoding="utf-8")
+
+    assert manager.load()["value"] == "backup"
