@@ -9,10 +9,11 @@ from tkinter import ttk
 
 from .app_metadata import APP_NAME
 from .models import Preset, Segment
-from .preset_editing import build_preset_from_editor, format_field_rows, format_keywords
+from .preset_editing import build_preset_from_editor, format_keywords
 from .presets import DEFAULT_PRESET_IDS, PresetRepository, find_preset
 from .processor import PdfProcessor
 from .state import StateManager
+from .workflow import apply_common_metadata, check_segment_outputs, error_messages, resequence_segments
 
 
 TEXT_WIDGET_CLASSES = {"Entry", "TEntry", "Text", "Spinbox", "TCombobox"}
@@ -37,8 +38,14 @@ class PdfSplitterApp:
         self.segments: list[Segment] = []
         self.current_segment_index: int | None = None
         self.metadata_vars: dict[str, StringVar] = {}
+        self.common_metadata_vars: dict[str, StringVar] = {}
         self.worker_queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self._preview_image = None
+        self._render_generation = 0
+        self._render_lock = threading.Lock()
+        self._pending_render = False
+        self.active_job_cancel: threading.Event | None = None
+        self.active_job_name = ""
 
         self._build_ui()
         self._bind_keys()
@@ -52,10 +59,10 @@ class PdfSplitterApp:
         self.step2 = ttk.Frame(self.notebook, padding=8)
         self.step3 = ttk.Frame(self.notebook, padding=8)
         self.step4 = ttk.Frame(self.notebook, padding=8)
-        self.notebook.add(self.step1, text="1 Select")
-        self.notebook.add(self.step2, text="2 Split")
-        self.notebook.add(self.step3, text="3 Metadata")
-        self.notebook.add(self.step4, text="4 Output")
+        self.notebook.add(self.step1, text="1 PDF選択")
+        self.notebook.add(self.step2, text="2 分割")
+        self.notebook.add(self.step3, text="3 入力")
+        self.notebook.add(self.step4, text="4 出力")
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         self._build_step1()
@@ -66,10 +73,10 @@ class PdfSplitterApp:
     def _build_step1(self) -> None:
         toolbar = ttk.Frame(self.step1)
         toolbar.pack(fill="x")
-        ttk.Button(toolbar, text="Add PDFs", command=self.select_pdfs).pack(side=LEFT)
-        ttk.Button(toolbar, text="Input Folder", command=self.select_folder).pack(side=LEFT, padx=4)
-        ttk.Button(toolbar, text="Output Folder", command=self.select_output_dir).pack(side=LEFT, padx=4)
-        ttk.Button(toolbar, text="Manage Presets", command=self.open_preset_manager).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="PDFを追加", command=self.select_pdfs).pack(side=LEFT)
+        ttk.Button(toolbar, text="入力フォルダ", command=self.select_folder).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="出力フォルダ", command=self.select_output_dir).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="プリセット管理", command=self.open_preset_manager).pack(side=LEFT, padx=4)
 
         self.preset_var = StringVar(value=self.active_preset.name)
         self.preset_combo = ttk.Combobox(
@@ -112,17 +119,22 @@ class PdfSplitterApp:
         right.pack(side=LEFT, fill=BOTH, expand=True, padx=8)
         nav = ttk.Frame(right)
         nav.pack(fill="x")
-        ttk.Button(nav, text="Prev", command=self.prev_page).pack(side=LEFT)
-        ttk.Button(nav, text="Next", command=self.next_page).pack(side=LEFT, padx=4)
-        ttk.Button(nav, text="Split Before Page", command=self.add_split_before_current_page).pack(side=LEFT, padx=4)
-        ttk.Button(nav, text="Split by 1 Page", command=lambda: self.split_by_n_pages(1)).pack(side=LEFT, padx=4)
-        ttk.Button(nav, text="Blank Scan", command=self.start_blank_scan).pack(side=LEFT, padx=4)
+        ttk.Button(nav, text="前ページ", command=self.prev_page).pack(side=LEFT)
+        ttk.Button(nav, text="次ページ", command=self.next_page).pack(side=LEFT, padx=4)
+        ttk.Button(nav, text="現在ページの前で分割", command=self.add_split_before_current_page).pack(side=LEFT, padx=4)
+        ttk.Button(nav, text="1ページごとに分割", command=lambda: self.split_by_n_pages(1)).pack(side=LEFT, padx=4)
+        self.blank_button = ttk.Button(nav, text="白紙検出", command=self.start_blank_scan)
+        self.blank_button.pack(side=LEFT, padx=4)
+        self.cancel_job_button = ttk.Button(nav, text="処理中止", command=self.cancel_active_job, state="disabled")
+        self.cancel_job_button.pack(side=LEFT, padx=4)
 
         self.search_var = StringVar()
         self.search_entry = ttk.Entry(nav, textvariable=self.search_var, width=24)
         self.search_entry.pack(side=RIGHT)
-        ttk.Button(nav, text="Search", command=self.start_text_search).pack(side=RIGHT, padx=4)
-        ttk.Button(nav, text="Index", command=self.start_index_candidate_search).pack(side=RIGHT, padx=4)
+        self.search_button = ttk.Button(nav, text="検索", command=self.start_text_search)
+        self.search_button.pack(side=RIGHT, padx=4)
+        self.index_button = ttk.Button(nav, text="インデックス", command=self.start_index_candidate_search)
+        self.index_button.pack(side=RIGHT, padx=4)
 
         self.preview_canvas = Canvas(right, background="#222", height=520, highlightthickness=1, takefocus=True)
         self.preview_canvas.pack(fill=BOTH, expand=True, pady=8)
@@ -130,7 +142,7 @@ class PdfSplitterApp:
 
         self.ocr_text = Text(right, height=8, wrap="word")
         self.ocr_text.pack(fill="x")
-        self.status_var = StringVar(value="No PDF loaded")
+        self.status_var = StringVar(value="PDF未選択")
         ttk.Label(right, textvariable=self.status_var).pack(fill="x")
 
     def _build_step3(self) -> None:
@@ -138,16 +150,36 @@ class PdfSplitterApp:
         self.segment_list.pack(side=LEFT, fill="y")
         self.segment_list.bind("<<ListboxSelect>>", self.on_segment_selected)
 
-        self.metadata_frame = ttk.Frame(self.step3, padding=8)
-        self.metadata_frame.pack(side=LEFT, fill=BOTH, expand=True)
+        right = ttk.Frame(self.step3, padding=8)
+        right.pack(side=LEFT, fill=BOTH, expand=True)
+        self.bulk_frame = ttk.LabelFrame(right, text="一括入力", padding=8)
+        self.bulk_frame.pack(fill="x")
+        self.common_fields_frame = ttk.Frame(self.bulk_frame)
+        self.common_fields_frame.pack(fill="x")
+        seq_row = ttk.Frame(self.bulk_frame)
+        seq_row.pack(fill="x", pady=(6, 0))
+        self.seq_start_var = StringVar(value="1")
+        self.seq_step_var = StringVar(value="1")
+        ttk.Label(seq_row, text="連番開始", width=10).pack(side=LEFT)
+        ttk.Entry(seq_row, textvariable=self.seq_start_var, width=8).pack(side=LEFT)
+        ttk.Label(seq_row, text="増分", width=6).pack(side=LEFT, padx=(8, 0))
+        ttk.Entry(seq_row, textvariable=self.seq_step_var, width=8).pack(side=LEFT)
+        ttk.Button(seq_row, text="共通値を全件へ反映", command=self.apply_common_metadata_to_segments).pack(side=LEFT, padx=8)
+        ttk.Button(seq_row, text="連番を再採番", command=self.resequence_segment_metadata).pack(side=LEFT)
+
+        self.metadata_frame = ttk.LabelFrame(right, text="選択セグメント", padding=8)
+        self.metadata_frame.pack(fill=BOTH, expand=True, pady=(8, 0))
         self.filename_preview_var = StringVar()
         ttk.Label(self.metadata_frame, textvariable=self.filename_preview_var).pack(fill="x", pady=8)
 
     def _build_step4(self) -> None:
         toolbar = ttk.Frame(self.step4)
         toolbar.pack(fill="x")
-        ttk.Button(toolbar, text="Validate", command=self.refresh_output_summary).pack(side=LEFT)
-        ttk.Button(toolbar, text="Run Output", command=self.run_output).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="出力前チェック", command=self.refresh_output_summary).pack(side=LEFT)
+        self.run_output_button = ttk.Button(toolbar, text="出力実行", command=self.run_output, state="disabled")
+        self.run_output_button.pack(side=LEFT, padx=4)
+        self.output_status_var = StringVar(value="出力前チェックを実行してください")
+        ttk.Label(toolbar, textvariable=self.output_status_var).pack(side=LEFT, padx=8)
         self.output_text = Text(self.step4, height=24)
         self.output_text.pack(fill=BOTH, expand=True, pady=8)
 
@@ -207,7 +239,7 @@ class PdfSplitterApp:
         for path in paths:
             if path not in self.pdf_paths:
                 self.pdf_paths.append(path)
-                self.pdf_list.insert(END, str(path))
+                self.pdf_list.insert(END, f"{path.name} | 未読込 | {path}")
         if self.pdf_paths and self.current_pdf is None:
             self.set_current_pdf(self.pdf_paths[0])
 
@@ -226,16 +258,29 @@ class PdfSplitterApp:
         self.current_page = 1
         try:
             self.current_page_count = self.processor.page_count(path)
+            self.refresh_pdf_list()
         except Exception as exc:
-            messagebox.showerror("PDF error", str(exc))
+            messagebox.showerror("PDFエラー", str(exc))
             self.current_page_count = 0
         self.refresh_page_list()
         self.render_current_page_async()
 
+    def refresh_pdf_list(self) -> None:
+        self.pdf_list.delete(0, END)
+        for path in self.pdf_paths:
+            if path == self.current_pdf and self.current_page_count:
+                status = f"{self.current_page_count}ページ"
+            else:
+                try:
+                    status = f"{self.processor.page_count(path)}ページ"
+                except Exception:
+                    status = "読込エラー"
+            self.pdf_list.insert(END, f"{path.name} | {status} | {path.parent}")
+
     def refresh_page_list(self) -> None:
         self.page_list.delete(0, END)
         for page_no in range(1, self.current_page_count + 1):
-            self.page_list.insert(END, f"Page {page_no}")
+            self.page_list.insert(END, f"{page_no}ページ")
         if self.current_page_count:
             self.page_list.selection_set(self.current_page - 1)
 
@@ -250,15 +295,26 @@ class PdfSplitterApp:
             return
         pdf_path = self.current_pdf
         page_no = self.current_page
-        self.status_var.set(f"Rendering page {page_no}/{self.current_page_count}")
+        self._render_generation += 1
+        generation = self._render_generation
+        self.status_var.set(f"{page_no}/{self.current_page_count}ページを表示中")
+        if not self._render_lock.acquire(blocking=False):
+            self._pending_render = True
+            return
 
         def worker() -> None:
             try:
-                pixmap = self.processor.render_page_pixmap(pdf_path, page_no)
+                zoom = 0.9 if self.current_page_count >= 200 else 1.2
+                pixmap = self.processor.render_page_pixmap(pdf_path, page_no, zoom=zoom)
                 text = self.processor.extract_page_text(pdf_path, page_no)
-                self.worker_queue.put(("rendered", (page_no, pixmap, text)))
+                self.worker_queue.put(("rendered", (generation, page_no, pixmap, text)))
             except Exception as exc:
                 self.worker_queue.put(("error", str(exc)))
+            finally:
+                self._render_lock.release()
+                if self._pending_render:
+                    self._pending_render = False
+                    self.worker_queue.put(("render_again", None))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -275,33 +331,72 @@ class PdfSplitterApp:
             while True:
                 kind, payload = self.worker_queue.get_nowait()
                 if kind == "rendered":
-                    page_no, pixmap, text = payload
-                    if page_no == self.current_page:
+                    generation, page_no, pixmap, text = payload
+                    if generation == self._render_generation and page_no == self.current_page:
                         self._display_pixmap(pixmap)
                         self.ocr_text.delete("1.0", END)
                         self.ocr_text.insert("1.0", text)
-                        self.status_var.set(f"Page {page_no}/{self.current_page_count}")
-                        self.warm_thumbnail_window(page_no)
+                        self.status_var.set(f"{page_no}/{self.current_page_count}ページ")
+                        if self.active_job_cancel is None:
+                            self.warm_thumbnail_window(page_no)
+                elif kind == "render_again":
+                    self.render_current_page_async()
+                elif kind == "job_progress":
+                    name, current, total = payload
+                    self.status_var.set(f"{name}: {current}/{total}ページ")
                 elif kind == "search_done":
-                    hits = payload
-                    self.status_var.set(f"Search hits: {len(hits)}")
+                    hits, canceled = payload
+                    self.finish_active_job()
+                    prefix = "検索を中止しました" if canceled else "検索完了"
+                    self.status_var.set(f"{prefix}: {len(hits)}件")
                     if hits:
                         self.current_page = hits[0]
                         self.render_current_page_async()
                 elif kind == "blank_done":
-                    pages = payload
-                    self.status_var.set(f"Blank candidates: {', '.join(map(str, pages[:20]))}")
+                    pages, canceled = payload
+                    self.finish_active_job()
+                    prefix = "白紙検出を中止しました" if canceled else "白紙候補"
+                    self.status_var.set(f"{prefix}: {', '.join(map(str, pages[:20])) or 'なし'}")
                 elif kind == "index_done":
-                    hits = payload
-                    self.status_var.set(f"Index candidates: {', '.join(map(str, hits[:20]))}")
+                    hits, canceled = payload
+                    self.finish_active_job()
+                    prefix = "インデックス検索を中止しました" if canceled else "インデックス候補"
+                    self.status_var.set(f"{prefix}: {', '.join(map(str, hits[:20])) or 'なし'}")
                     if hits:
                         self.current_page = hits[0]
                         self.render_current_page_async()
                 elif kind == "error":
+                    self.finish_active_job()
                     self.status_var.set(str(payload))
         except queue.Empty:
             pass
         self.root.after(100, self._poll_worker_queue)
+
+    def start_background_job(self, name: str) -> threading.Event | None:
+        if self.active_job_cancel is not None:
+            messagebox.showinfo("処理中", f"{self.active_job_name}が実行中です。完了または中止してから再実行してください。")
+            return None
+        cancel_event = threading.Event()
+        self.active_job_cancel = cancel_event
+        self.active_job_name = name
+        self.cancel_job_button.configure(state="normal")
+        self.search_button.configure(state="disabled")
+        self.index_button.configure(state="disabled")
+        self.blank_button.configure(state="disabled")
+        return cancel_event
+
+    def finish_active_job(self) -> None:
+        self.active_job_cancel = None
+        self.active_job_name = ""
+        self.cancel_job_button.configure(state="disabled")
+        self.search_button.configure(state="normal")
+        self.index_button.configure(state="normal")
+        self.blank_button.configure(state="normal")
+
+    def cancel_active_job(self) -> None:
+        if self.active_job_cancel is not None:
+            self.active_job_cancel.set()
+            self.status_var.set(f"{self.active_job_name}を中止しています")
 
     def prev_page(self) -> None:
         if self.current_page > 1:
@@ -348,16 +443,22 @@ class PdfSplitterApp:
         query = self.search_var.get().strip().lower()
         if not query:
             return
+        cancel_event = self.start_background_job("検索")
+        if cancel_event is None:
+            return
         pdf_path = self.current_pdf
-        page_count = self.current_page_count
 
         def worker() -> None:
-            hits: list[int] = []
-            for page_no in range(1, page_count + 1):
-                text = self.processor.extract_page_text(pdf_path, page_no).lower()
-                if query in text:
-                    hits.append(page_no)
-            self.worker_queue.put(("search_done", hits))
+            try:
+                hits = self.processor.search_text_pages(
+                    pdf_path,
+                    query,
+                    progress=lambda current, total: self.worker_queue.put(("job_progress", ("検索", current, total))),
+                    cancel=cancel_event.is_set,
+                )
+                self.worker_queue.put(("search_done", (hits, cancel_event.is_set())))
+            except Exception as exc:
+                self.worker_queue.put(("error", str(exc)))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -367,16 +468,22 @@ class PdfSplitterApp:
         keywords = tuple(keyword.lower() for keyword in self.active_preset.extraction_keywords if keyword.strip())
         if not keywords:
             return
+        cancel_event = self.start_background_job("インデックス検索")
+        if cancel_event is None:
+            return
         pdf_path = self.current_pdf
-        page_count = self.current_page_count
 
         def worker() -> None:
-            hits: list[int] = []
-            for page_no in range(1, page_count + 1):
-                text = self.processor.extract_page_text(pdf_path, page_no).lower()
-                if any(keyword in text for keyword in keywords):
-                    hits.append(page_no)
-            self.worker_queue.put(("index_done", hits))
+            try:
+                hits = self.processor.index_candidate_pages(
+                    pdf_path,
+                    keywords,
+                    progress=lambda current, total: self.worker_queue.put(("job_progress", ("インデックス検索", current, total))),
+                    cancel=cancel_event.is_set,
+                )
+                self.worker_queue.put(("index_done", (hits, cancel_event.is_set())))
+            except Exception as exc:
+                self.worker_queue.put(("error", str(exc)))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -398,20 +505,23 @@ class PdfSplitterApp:
     def start_blank_scan(self) -> None:
         if self.current_pdf is None:
             return
+        cancel_event = self.start_background_job("白紙検出")
+        if cancel_event is None:
+            return
         pdf_path = self.current_pdf
-        page_count = self.current_page_count
         threshold = self.active_preset.blank_threshold
 
         def worker() -> None:
-            pages: list[int] = []
-            for page_no in range(1, page_count + 1):
-                try:
-                    if self.processor.is_blank_page(pdf_path, page_no, threshold):
-                        pages.append(page_no)
-                except Exception as exc:
-                    self.worker_queue.put(("error", str(exc)))
-                    return
-            self.worker_queue.put(("blank_done", pages))
+            try:
+                pages = self.processor.blank_pages(
+                    pdf_path,
+                    threshold,
+                    progress=lambda current, total: self.worker_queue.put(("job_progress", ("白紙検出", current, total))),
+                    cancel=cancel_event.is_set,
+                )
+                self.worker_queue.put(("blank_done", (pages, cancel_event.is_set())))
+            except Exception as exc:
+                self.worker_queue.put(("error", str(exc)))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -424,9 +534,11 @@ class PdfSplitterApp:
 
     def refresh_segment_list(self) -> None:
         self.segment_list.delete(0, END)
-        for segment in self.segments:
-            result = self.processor.build_filename_templated(self.active_preset, segment.metadata)
-            label = f"{segment.start_page}-{segment.end_page}: {result.normalized_filename or 'invalid'}"
+        checks = check_segment_outputs(self.segments, self.active_preset, self.output_dir, self.processor)
+        for check in checks:
+            status = "出力可能" if check.ok else "要入力"
+            filename = check.filename if check.ok else "未入力あり"
+            label = f"{check.segment.start_page}-{check.segment.end_page}: {status} | {filename}"
             self.segment_list.insert(END, label)
 
     def on_segment_selected(self, _event) -> None:
@@ -435,13 +547,14 @@ class PdfSplitterApp:
         self.rebuild_metadata_fields()
 
     def rebuild_metadata_fields(self) -> None:
+        self.rebuild_common_fields()
         for child in self.metadata_frame.winfo_children():
             child.destroy()
         if self.current_segment_index is None and self.segments:
             self.current_segment_index = 0
             self.segment_list.selection_set(0)
         if self.current_segment_index is None or not self.segments:
-            ttk.Label(self.metadata_frame, text="No segment selected").pack()
+            ttk.Label(self.metadata_frame, text="セグメントが選択されていません").pack()
             return
         segment = self.segments[self.current_segment_index]
         self.metadata_vars = {}
@@ -458,6 +571,46 @@ class PdfSplitterApp:
         ttk.Label(self.metadata_frame, textvariable=self.filename_preview_var).pack(fill="x", pady=8)
         self.update_filename_preview()
 
+    def rebuild_common_fields(self) -> None:
+        for child in self.common_fields_frame.winfo_children():
+            child.destroy()
+        self.common_metadata_vars = {}
+        editable_fields = [field for field in self.active_preset.fields if field.key != "seq"]
+        for index, field in enumerate(editable_fields):
+            row = ttk.Frame(self.common_fields_frame)
+            row.grid(row=index // 2, column=index % 2, sticky="ew", padx=(0, 12), pady=2)
+            ttk.Label(row, text=field.label, width=16).pack(side=LEFT)
+            var = StringVar(value=field.default)
+            self.common_metadata_vars[field.key] = var
+            ttk.Entry(row, textvariable=var, width=24).pack(side=LEFT)
+        self.common_fields_frame.columnconfigure(0, weight=1)
+        self.common_fields_frame.columnconfigure(1, weight=1)
+
+    def apply_common_metadata_to_segments(self) -> None:
+        if not self.segments:
+            messagebox.showinfo("一括入力", "反映するセグメントがありません。")
+            return
+        values = {key: value.get() for key, value in self.common_metadata_vars.items() if value.get().strip()}
+        apply_common_metadata(self.segments, values)
+        self.refresh_segment_list()
+        self.rebuild_metadata_fields()
+        self.refresh_output_summary()
+
+    def resequence_segment_metadata(self) -> None:
+        if not self.segments:
+            messagebox.showinfo("連番再採番", "再採番するセグメントがありません。")
+            return
+        try:
+            start = int(self.seq_start_var.get())
+            step = int(self.seq_step_var.get())
+        except ValueError:
+            messagebox.showerror("連番再採番", "連番開始と増分は数値で入力してください。")
+            return
+        resequence_segments(self.segments, start=start, step=step)
+        self.refresh_segment_list()
+        self.rebuild_metadata_fields()
+        self.refresh_output_summary()
+
     def on_metadata_changed(self, key: str, value: StringVar) -> None:
         if self.current_segment_index is None:
             return
@@ -471,38 +624,49 @@ class PdfSplitterApp:
         segment = self.segments[self.current_segment_index]
         result = self.processor.build_filename_templated(self.active_preset, segment.metadata)
         if result.ok:
-            self.filename_preview_var.set(f"Output: {result.normalized_filename}")
+            self.filename_preview_var.set(f"出力名: {result.normalized_filename}")
         else:
-            self.filename_preview_var.set("Errors: " + ", ".join(result.errors))
+            self.filename_preview_var.set("要修正: " + " / ".join(error_messages(self.active_preset, result.errors)))
 
     def refresh_output_summary(self) -> None:
         self.output_text.delete("1.0", END)
-        for segment in self.segments:
-            result = self.processor.build_filename_templated(self.active_preset, segment.metadata)
-            if result.ok:
-                self.output_text.insert(END, f"{segment.start_page}-{segment.end_page} -> {result.normalized_filename}\n")
+        checks = check_segment_outputs(self.segments, self.active_preset, self.output_dir, self.processor)
+        ready = sum(1 for check in checks if check.ok)
+        invalid = len(checks) - ready
+        self.output_text.insert(END, f"出力先: {self.output_dir}\n")
+        self.output_text.insert(END, f"出力予定: {ready}件 / 要修正: {invalid}件\n")
+        self.output_text.insert(END, "同名ファイルがある場合は _2, _3 の連番で重複を回避します。\n\n")
+        for check in checks:
+            if check.ok:
+                self.output_text.insert(END, f"[出力可能] {check.segment.start_page}-{check.segment.end_page} -> {check.filename}\n")
             else:
-                self.output_text.insert(END, f"{segment.start_page}-{segment.end_page} ERR {result.errors}\n")
+                self.output_text.insert(
+                    END,
+                    f"[要修正] {check.segment.start_page}-{check.segment.end_page} -> {' / '.join(check.messages)}\n",
+                )
+        can_run = bool(checks) and invalid == 0
+        self.run_output_button.configure(state="normal" if can_run else "disabled")
+        self.output_status_var.set("出力可能" if can_run else "要修正があります")
 
     def run_output(self) -> None:
-        errors: list[str] = []
-        for segment in self.segments:
-            result = self.processor.build_filename_templated(self.active_preset, segment.metadata)
-            if not result.ok:
-                errors.extend(result.errors)
+        checks = check_segment_outputs(self.segments, self.active_preset, self.output_dir, self.processor)
+        invalid = [check for check in checks if not check.ok]
+        if invalid:
+            messagebox.showerror("出力できません", "未入力または命名エラーのあるセグメントを修正してください。")
+            self.refresh_output_summary()
+            return
+        for check in checks:
+            if check.output_path is None:
                 continue
-            output_path = self.output_dir / result.normalized_filename
-            final_path = self.processor.split_pdf(segment, output_path)
-            self.output_text.insert(END, f"Wrote {final_path}\n")
-        if errors:
-            messagebox.showerror("Validation errors", "\n".join(errors))
+            final_path = self.processor.split_pdf(check.segment, check.output_path)
+            self.output_text.insert(END, f"出力しました: {final_path}\n")
 
 
 class PresetManagerDialog:
     def __init__(self, app: PdfSplitterApp) -> None:
         self.app = app
         self.window = Toplevel(app.root)
-        self.window.title("Manage Presets")
+        self.window.title("プリセット管理")
         self.window.geometry("860x560")
         self.selected_index: int | None = None
 
@@ -511,6 +675,14 @@ class PresetManagerDialog:
         self.template_var = StringVar()
         self.blank_threshold_var = StringVar()
         self.index_threshold_var = StringVar()
+        self.field_key_var = StringVar()
+        self.field_label_var = StringVar()
+        self.field_required_var = StringVar(value="false")
+        self.field_default_var = StringVar()
+        self.form_widgets: list[object] = []
+        self.field_buttons: list[object] = []
+        self.save_button = None
+        self.delete_button = None
 
         self._build_ui()
         self.refresh_list()
@@ -524,40 +696,80 @@ class PresetManagerDialog:
         self.preset_list = Listbox(left, width=30)
         self.preset_list.pack(fill=BOTH, expand=True)
         self.preset_list.bind("<<ListboxSelect>>", self.on_preset_selected)
-        ttk.Button(left, text="New from selected", command=self.new_from_selected).pack(fill="x", pady=(8, 0))
-        ttk.Button(left, text="Delete custom", command=self.delete_selected).pack(fill="x", pady=4)
+        ttk.Button(left, text="コピーして新規作成", command=self.new_from_selected).pack(fill="x", pady=(8, 0))
+        self.delete_button = ttk.Button(left, text="カスタム削除", command=self.delete_selected)
+        self.delete_button.pack(fill="x", pady=4)
 
         form = ttk.Frame(self.window, padding=8)
         form.pack(side=LEFT, fill=BOTH, expand=True)
-        self._entry_row(form, "Preset ID", self.id_var)
-        self._entry_row(form, "Name", self.name_var)
-        self._entry_row(form, "Naming template", self.template_var)
-        self._entry_row(form, "Blank threshold", self.blank_threshold_var)
-        self._entry_row(form, "Index threshold", self.index_threshold_var)
+        self._entry_row(form, "プリセットID", self.id_var)
+        self._entry_row(form, "表示名", self.name_var)
+        self._entry_row(form, "命名テンプレート", self.template_var)
+        self._entry_row(form, "白紙しきい値", self.blank_threshold_var)
+        self._entry_row(form, "インデックスしきい値", self.index_threshold_var)
 
-        ttk.Label(form, text="Fields: key|label|required|default").pack(anchor="w", pady=(8, 2))
-        self.fields_text = Text(form, height=9, wrap="none")
-        self.fields_text.pack(fill=BOTH, expand=True)
+        self.template_help_var = StringVar()
+        ttk.Label(form, textvariable=self.template_help_var).pack(anchor="w", pady=(4, 2))
 
-        ttk.Label(form, text="Extraction keywords: comma or newline separated").pack(anchor="w", pady=(8, 2))
+        ttk.Label(form, text="入力項目").pack(anchor="w", pady=(8, 2))
+        self.fields_tree = ttk.Treeview(
+            form,
+            columns=("key", "label", "required", "default"),
+            show="headings",
+            height=7,
+        )
+        for column, title, width in (
+            ("key", "項目キー", 120),
+            ("label", "表示名", 180),
+            ("required", "必須", 70),
+            ("default", "初期値", 120),
+        ):
+            self.fields_tree.heading(column, text=title)
+            self.fields_tree.column(column, width=width)
+        self.fields_tree.pack(fill=BOTH, expand=True)
+        self.fields_tree.bind("<<TreeviewSelect>>", self.on_field_selected)
+
+        field_editor = ttk.Frame(form)
+        field_editor.pack(fill="x", pady=(4, 8))
+        self._small_entry(field_editor, "項目キー", self.field_key_var, 12)
+        self._small_entry(field_editor, "表示名", self.field_label_var, 18)
+        self._small_entry(field_editor, "必須", self.field_required_var, 8)
+        self._small_entry(field_editor, "初期値", self.field_default_var, 12)
+        add_button = ttk.Button(field_editor, text="項目を追加/更新", command=self.upsert_field)
+        add_button.pack(side=LEFT, padx=4)
+        remove_button = ttk.Button(field_editor, text="選択項目を削除", command=self.delete_field)
+        remove_button.pack(side=LEFT, padx=4)
+        self.field_buttons.extend([add_button, remove_button])
+
+        ttk.Label(form, text="抽出キーワード（カンマまたは改行区切り）").pack(anchor="w", pady=(8, 2))
         self.keywords_text = Text(form, height=4, wrap="word")
         self.keywords_text.pack(fill="x")
+        self.form_widgets.append(self.keywords_text)
 
         buttons = ttk.Frame(form)
         buttons.pack(fill="x", pady=(10, 0))
-        ttk.Button(buttons, text="Save", command=self.save_current).pack(side=LEFT)
-        ttk.Button(buttons, text="Close", command=self.window.destroy).pack(side=RIGHT)
+        self.save_button = ttk.Button(buttons, text="保存", command=self.save_current)
+        self.save_button.pack(side=LEFT)
+        ttk.Button(buttons, text="閉じる", command=self.window.destroy).pack(side=RIGHT)
 
     def _entry_row(self, parent: ttk.Frame, label: str, variable: StringVar) -> None:
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=2)
         ttk.Label(row, text=label, width=18).pack(side=LEFT)
-        ttk.Entry(row, textvariable=variable).pack(side=LEFT, fill="x", expand=True)
+        entry = ttk.Entry(row, textvariable=variable)
+        entry.pack(side=LEFT, fill="x", expand=True)
+        self.form_widgets.append(entry)
+
+    def _small_entry(self, parent: ttk.Frame, label: str, variable: StringVar, width: int) -> None:
+        ttk.Label(parent, text=label).pack(side=LEFT, padx=(0, 2))
+        entry = ttk.Entry(parent, textvariable=variable, width=width)
+        entry.pack(side=LEFT, padx=(0, 6))
+        self.field_buttons.append(entry)
 
     def refresh_list(self) -> None:
         self.preset_list.delete(0, END)
         for preset in self.app.presets:
-            suffix = " (built-in)" if preset.id in DEFAULT_PRESET_IDS else ""
+            suffix = "（組み込み・読取専用）" if preset.id in DEFAULT_PRESET_IDS else ""
             self.preset_list.insert(END, f"{preset.name}{suffix}")
 
     def select_preset_by_id(self, preset_id: str) -> None:
@@ -576,18 +788,20 @@ class PresetManagerDialog:
     def load_preset(self, index: int) -> None:
         self.selected_index = index
         preset = self.app.presets[index]
+        self.set_readonly(False)
         self.id_var.set(preset.id)
         self.name_var.set(preset.name)
         self.template_var.set(preset.naming_template)
         self.blank_threshold_var.set(str(preset.blank_threshold))
         self.index_threshold_var.set(str(preset.index_threshold))
-        self.fields_text.delete("1.0", END)
-        self.fields_text.insert("1.0", format_field_rows(preset.fields))
+        self.load_fields(preset)
         self.keywords_text.delete("1.0", END)
         self.keywords_text.insert("1.0", format_keywords(preset.extraction_keywords))
+        self.set_readonly(preset.id in DEFAULT_PRESET_IDS)
 
     def new_from_selected(self) -> None:
         source = self.app.presets[self.selected_index] if self.selected_index is not None else self.app.active_preset
+        self.set_readonly(False)
         base_id = source.id + "-custom"
         preset_ids = {preset.id for preset in self.app.presets}
         candidate = base_id
@@ -597,33 +811,99 @@ class PresetManagerDialog:
             counter += 1
         self.selected_index = None
         self.id_var.set(candidate)
-        self.name_var.set(source.name + " Copy")
+        self.name_var.set(source.name + " コピー")
         self.template_var.set(source.naming_template)
         self.blank_threshold_var.set(str(source.blank_threshold))
         self.index_threshold_var.set(str(source.index_threshold))
-        self.fields_text.delete("1.0", END)
-        self.fields_text.insert("1.0", format_field_rows(source.fields))
+        self.load_fields(source)
         self.keywords_text.delete("1.0", END)
         self.keywords_text.insert("1.0", format_keywords(source.extraction_keywords))
+        self.set_readonly(False)
+
+    def load_fields(self, preset: Preset) -> None:
+        self.fields_tree.delete(*self.fields_tree.get_children())
+        for field in preset.fields:
+            self.fields_tree.insert(
+                "",
+                END,
+                values=(field.key, field.label, "true" if field.required else "false", field.default),
+            )
+        self.refresh_template_help()
+
+    def field_rows_from_table(self) -> str:
+        rows = []
+        for item_id in self.fields_tree.get_children():
+            key, label, required, default = self.fields_tree.item(item_id, "values")
+            rows.append("|".join((str(key), str(label), str(required), str(default))))
+        return "\n".join(rows)
+
+    def refresh_template_help(self) -> None:
+        keys = [str(self.fields_tree.item(item_id, "values")[0]) for item_id in self.fields_tree.get_children()]
+        values = ", ".join("{" + key + "}" for key in keys)
+        self.template_help_var.set(f"テンプレートで使える変数: {values or 'なし'}")
+
+    def on_field_selected(self, _event) -> None:
+        selection = self.fields_tree.selection()
+        if not selection:
+            return
+        key, label, required, default = self.fields_tree.item(selection[0], "values")
+        self.field_key_var.set(str(key))
+        self.field_label_var.set(str(label))
+        self.field_required_var.set(str(required))
+        self.field_default_var.set(str(default))
+
+    def upsert_field(self) -> None:
+        key = self.field_key_var.get().strip()
+        label = self.field_label_var.get().strip()
+        required = self.field_required_var.get().strip() or "false"
+        default = self.field_default_var.get()
+        if not key or not label:
+            messagebox.showerror("入力項目", "項目キーと表示名を入力してください。", parent=self.window)
+            return
+        for item_id in self.fields_tree.get_children():
+            values = self.fields_tree.item(item_id, "values")
+            if values and values[0] == key:
+                self.fields_tree.item(item_id, values=(key, label, required, default))
+                self.refresh_template_help()
+                return
+        self.fields_tree.insert("", END, values=(key, label, required, default))
+        self.refresh_template_help()
+
+    def delete_field(self) -> None:
+        for item_id in self.fields_tree.selection():
+            self.fields_tree.delete(item_id)
+        self.refresh_template_help()
+
+    def set_readonly(self, readonly: bool) -> None:
+        state = "disabled" if readonly else "normal"
+        for widget in self.form_widgets:
+            widget.configure(state=state)
+        for widget in self.field_buttons:
+            widget.configure(state=state)
+        self.fields_tree.configure(selectmode="browse")
+        if self.save_button is not None:
+            self.save_button.configure(state=state)
+        if self.delete_button is not None:
+            self.delete_button.configure(state="disabled" if readonly else "normal")
 
     def save_current(self) -> None:
         try:
             preset = build_preset_from_editor(
                 preset_id=self.id_var.get(),
                 name=self.name_var.get(),
-                field_rows=self.fields_text.get("1.0", "end-1c"),
+                field_rows=self.field_rows_from_table(),
                 naming_template=self.template_var.get(),
                 extraction_keywords=self.keywords_text.get("1.0", "end-1c"),
                 blank_threshold=self.blank_threshold_var.get(),
                 index_threshold=self.index_threshold_var.get(),
             )
         except ValueError as exc:
-            messagebox.showerror("Preset error", str(exc), parent=self.window)
+            messagebox.showerror("プリセットエラー", str(exc), parent=self.window)
             return
         if preset.id in DEFAULT_PRESET_IDS:
             messagebox.showerror(
-                "Preset error",
-                "Built-in preset IDs are protected. Use New from selected and save with a different ID.",
+                "プリセットエラー",
+                "組み込みプリセットは保護されています。コピーして新規作成してから保存してください。",
                 parent=self.window,
             )
             return
@@ -638,16 +918,16 @@ class PresetManagerDialog:
         self.app.set_active_preset(preset.id)
         self.refresh_list()
         self.select_preset_by_id(preset.id)
-        messagebox.showinfo("Preset saved", f"Saved preset: {preset.name}", parent=self.window)
+        messagebox.showinfo("プリセット保存", f"保存しました: {preset.name}", parent=self.window)
 
     def delete_selected(self) -> None:
         if self.selected_index is None:
             return
         preset = self.app.presets[self.selected_index]
         if preset.id in DEFAULT_PRESET_IDS:
-            messagebox.showerror("Preset error", "Built-in presets cannot be deleted.", parent=self.window)
+            messagebox.showerror("プリセットエラー", "組み込みプリセットは削除できません。", parent=self.window)
             return
-        if not messagebox.askyesno("Delete preset", f"Delete preset '{preset.name}'?", parent=self.window):
+        if not messagebox.askyesno("プリセット削除", f"'{preset.name}' を削除しますか？", parent=self.window):
             return
         self.app.presets.pop(self.selected_index)
         next_active = self.app.active_preset_id

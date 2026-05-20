@@ -22,7 +22,7 @@ def test_parse_field_rows_supports_required_and_optional_fields() -> None:
 
 
 def test_parse_field_rows_rejects_duplicate_keys() -> None:
-    with pytest.raises(ValueError, match="duplicate"):
+    with pytest.raises(ValueError, match="重複"):
         parse_field_rows("seq|連番|true|\nseq|連番2|false|")
 
 

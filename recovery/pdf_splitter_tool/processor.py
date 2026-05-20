@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
+import time
 from collections import OrderedDict
 from pathlib import Path
 from string import Formatter
-from typing import Any
+from typing import Any, Callable
 
 from .models import FilenameBuildResult, Preset, Segment
 
@@ -123,6 +124,14 @@ class PdfProcessor:
         with fitz.open(pdf_path) as doc:
             return doc.page_count
 
+    @staticmethod
+    def release_memory() -> None:
+        if fitz is not None:
+            try:
+                fitz.TOOLS.store_shrink(100)
+            except Exception:
+                pass
+
     def render_page_pixmap(self, pdf_path: Path, page_no: int, zoom: float = 1.2):
         if fitz is None:
             raise RuntimeError("PyMuPDF is required for PDF rendering.")
@@ -153,11 +162,109 @@ class PdfProcessor:
         if self.extract_page_text(pdf_path, page_no).strip():
             return False
         pixmap = self.render_thumbnail_pixmap(pdf_path, page_no, zoom=0.12)
+        return self.is_blank_pixmap(pixmap, threshold)
+
+    @staticmethod
+    def is_blank_pixmap(pixmap, threshold: float = 0.985) -> bool:
         samples = pixmap.samples
         if not samples:
             return False
-        bright = sum(1 for value in samples if value >= 245)
-        return (bright / len(samples)) >= threshold
+        from PIL import Image
+
+        image = Image.frombytes("RGB", (pixmap.width, pixmap.height), samples)
+        histogram = image.histogram()
+        channel_size = 256
+        bright = 0
+        dark = 0
+        for offset in (0, channel_size, channel_size * 2):
+            bright += sum(histogram[offset + 245 : offset + 256])
+            dark += sum(histogram[offset : offset + 221])
+        total = pixmap.width * pixmap.height * 3
+        non_bright = total - bright
+        return (
+            (bright / total) >= threshold
+            and (dark / total) <= 0.0002
+            and (non_bright / total) <= 0.005
+        )
+
+    def search_text_pages(
+        self,
+        pdf_path: Path,
+        query: str,
+        progress: Callable[[int, int], None] | None = None,
+        cancel: Callable[[], bool] | None = None,
+    ) -> list[int]:
+        if fitz is None:
+            raise RuntimeError("PyMuPDF is required for OCR/text extraction.")
+        query = query.strip().lower()
+        if not query:
+            return []
+        hits: list[int] = []
+        with fitz.open(pdf_path) as doc:
+            total = doc.page_count
+            for index, page in enumerate(doc, start=1):
+                if cancel and cancel():
+                    break
+                if query in page.get_text("text").lower():
+                    hits.append(index)
+                if progress:
+                    progress(index, total)
+                time.sleep(0.001)
+        self.release_memory()
+        return hits
+
+    def index_candidate_pages(
+        self,
+        pdf_path: Path,
+        keywords: tuple[str, ...],
+        progress: Callable[[int, int], None] | None = None,
+        cancel: Callable[[], bool] | None = None,
+    ) -> list[int]:
+        if fitz is None:
+            raise RuntimeError("PyMuPDF is required for OCR/text extraction.")
+        normalized = tuple(keyword.strip().lower() for keyword in keywords if keyword.strip())
+        if not normalized:
+            return []
+        hits: list[int] = []
+        with fitz.open(pdf_path) as doc:
+            total = doc.page_count
+            for index, page in enumerate(doc, start=1):
+                if cancel and cancel():
+                    break
+                text = page.get_text("text").lower()
+                if any(keyword in text for keyword in normalized):
+                    hits.append(index)
+                if progress:
+                    progress(index, total)
+                time.sleep(0.001)
+        self.release_memory()
+        return hits
+
+    def blank_pages(
+        self,
+        pdf_path: Path,
+        threshold: float = 0.985,
+        progress: Callable[[int, int], None] | None = None,
+        cancel: Callable[[], bool] | None = None,
+    ) -> list[int]:
+        if fitz is None:
+            raise RuntimeError("PyMuPDF is required for PDF rendering.")
+        pages: list[int] = []
+        with fitz.open(pdf_path) as doc:
+            total = doc.page_count
+            for index, page in enumerate(doc, start=1):
+                if cancel and cancel():
+                    break
+                if not page.get_text("text").strip():
+                    pixmap = page.get_pixmap(matrix=fitz.Matrix(0.12, 0.12), alpha=False)
+                    self.thumbnail_cache.set((str(pdf_path), index, 0.12), pixmap)
+                    if self.is_blank_pixmap(pixmap, threshold):
+                        pages.append(index)
+                if progress:
+                    progress(index, total)
+                time.sleep(0.001)
+        self.release_memory()
+        return pages
 
     @staticmethod
     def extract_page_text(pdf_path: Path, page_no: int) -> str:
