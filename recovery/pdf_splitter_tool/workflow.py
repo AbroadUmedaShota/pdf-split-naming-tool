@@ -73,6 +73,20 @@ def resequence_segments(segments: list[Segment], key: str = "seq", start: int = 
         value += step
 
 
+def metadata_suggestions_from_text(text: str, limit: int = 5) -> list[str]:
+    suggestions: list[str] = []
+    seen: set[str] = set()
+    for line in text.splitlines():
+        candidate = line.strip()
+        if not candidate or candidate in seen:
+            continue
+        suggestions.append(candidate)
+        seen.add(candidate)
+        if len(suggestions) >= limit:
+            break
+    return suggestions
+
+
 def check_segment_outputs(
     segments: list[Segment],
     preset: Preset,
