@@ -4,7 +4,7 @@ import fitz
 
 from pdf_splitter_tool.models import Segment
 from pdf_splitter_tool.presets import YOSHIDA_ELSIS_PRESET
-from pdf_splitter_tool.processor import LruCache, PdfProcessor
+from pdf_splitter_tool.processor import LruCache, OCR_PREREQUISITE_MESSAGE, PdfProcessor
 
 
 def make_pdf(path: Path, pages: int) -> None:
@@ -21,6 +21,14 @@ def make_mixed_blank_pdf(path: Path) -> None:
     doc.new_page()
     page = doc.new_page()
     page.insert_text((72, 72), "Not blank")
+    doc.save(path)
+    doc.close()
+
+
+def make_image_only_pdf(path: Path) -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.draw_rect(fitz.Rect(72, 72, 180, 140), color=(0, 0, 0), fill=(0, 0, 0))
     doc.save(path)
     doc.close()
 
@@ -116,6 +124,19 @@ def test_batch_text_and_index_search(tmp_path: Path) -> None:
 
     assert processor.search_text_pages(source, "Page 3") == [3]
     assert processor.index_candidate_pages(source, ("Page 2", "Page 5")) == [2, 5]
+
+
+def test_text_layer_detection_and_prerequisite_message(tmp_path: Path) -> None:
+    text_pdf = tmp_path / "text.pdf"
+    image_pdf = tmp_path / "image.pdf"
+    make_pdf(text_pdf, 1)
+    make_image_only_pdf(image_pdf)
+    processor = PdfProcessor()
+
+    assert processor.has_text_layer(text_pdf)
+    assert not processor.has_text_layer(image_pdf)
+    assert processor.search_text_pages(image_pdf, "Page") == []
+    assert processor.extract_page_text(image_pdf, 1) == OCR_PREREQUISITE_MESSAGE
 
 
 def test_search_text_rects_and_sha256(tmp_path: Path) -> None:
