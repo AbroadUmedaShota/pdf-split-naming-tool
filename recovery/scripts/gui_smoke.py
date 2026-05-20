@@ -1,0 +1,154 @@
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import sys
+import tempfile
+import time
+from datetime import datetime
+from pathlib import Path
+from tkinter import Tk
+
+import fitz
+from PIL import ImageGrab
+
+RECOVERY_ROOT = Path(__file__).resolve().parents[1]
+if str(RECOVERY_ROOT) not in sys.path:
+    sys.path.insert(0, str(RECOVERY_ROOT))
+
+from pdf_splitter_tool.app import PdfSplitterApp, PresetManagerDialog
+
+
+def make_sample_pdf(path: Path) -> None:
+    doc = fitz.open()
+    for page_no in range(1, 4):
+        page = doc.new_page()
+        page.insert_text((72, 72), f"Invoice sample page {page_no}", fontsize=14)
+        page.insert_text((72, 108), "Box 01 Binder 02", fontsize=12)
+    doc.save(path)
+    doc.close()
+
+
+def pump(root: Tk, seconds: float = 0.2) -> None:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        root.update()
+        root.update_idletasks()
+        time.sleep(0.02)
+
+
+def wait_until(root: Tk, condition, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        pump(root, 0.1)
+        if condition():
+            return
+    raise AssertionError("Timed out waiting for GUI smoke condition.")
+
+
+def capture_widget(widget, output_dir: Path, name: str) -> Path:
+    widget.update()
+    widget.update_idletasks()
+    x = widget.winfo_rootx()
+    y = widget.winfo_rooty()
+    width = widget.winfo_width()
+    height = widget.winfo_height()
+    if width <= 1 or height <= 1:
+        raise AssertionError(f"Cannot capture screenshot for {name}: invalid size {width}x{height}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / f"{name}.png"
+    ImageGrab.grab(bbox=(x, y, x + width, y + height)).save(path)
+    return path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run a GUI smoke check and save screenshots for PDF Split Naming Tool.")
+    parser.add_argument("--output-dir", type=Path, default=None, help="Screenshot/result output directory.")
+    parser.add_argument("--keep-workdir", action="store_true", help="Keep temporary PDF/output/state files for inspection.")
+    parser.add_argument("--no-screenshots", action="store_true", help="Run GUI assertions without saving screenshots.")
+    args = parser.parse_args()
+
+    repo_root = Path(__file__).resolve().parents[2]
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    output_dir = args.output_dir or repo_root / "artifacts" / "ui-screenshots" / timestamp
+    work_dir = Path(tempfile.mkdtemp(prefix="pdf_split_gui_smoke_"))
+    screenshots: list[str] = []
+    root = Tk()
+    root.withdraw()
+    root.geometry("1180x820+80+80")
+    root.deiconify()
+
+    try:
+        sample_pdf = work_dir / "gui-smoke-sample.pdf"
+        make_sample_pdf(sample_pdf)
+        app = PdfSplitterApp(root, work_dir=work_dir)
+        pump(root, 0.5)
+
+        app.add_pdf_paths([sample_pdf])
+        wait_until(root, lambda: app.current_page_count == 3)
+        if app.pdf_list.size() != 1:
+            raise AssertionError("Step 1 PDF list did not contain the sample PDF.")
+        if not args.no_screenshots:
+            screenshots.append(str(capture_widget(root, output_dir, "step1_pdf_selection")))
+
+        app.notebook.select(app.step2)
+        pump(root, 0.5)
+        wait_until(root, lambda: app._preview_image is not None and "Invoice sample" in app.ocr_text.get("1.0", "end"))
+        app.search_var.set("Invoice")
+        app.start_text_search()
+        wait_until(root, lambda: bool(app.search_hit_pages))
+        wait_until(root, lambda: app._preview_image is not None and "検索ハイライト" in app.status_var.get())
+        app.split_by_n_pages(1)
+        wait_until(root, lambda: len(app.segments) == 3)
+        if not args.no_screenshots:
+            screenshots.append(str(capture_widget(root, output_dir, "step2_split_and_search")))
+
+        app.notebook.select(app.step3)
+        pump(root, 0.3)
+        app.common_metadata_vars["box_no"].set("1")
+        app.common_metadata_vars["binder_no"].set("2")
+        app.apply_common_metadata_to_segments()
+        app.seq_start_var.set("3")
+        app.seq_step_var.set("1")
+        app.resequence_segment_metadata()
+        wait_until(root, lambda: app.metadata_summary_var.get().find("出力可能: 3件") >= 0)
+        if not args.no_screenshots:
+            screenshots.append(str(capture_widget(root, output_dir, "step3_metadata")))
+
+        app.notebook.select(app.step4)
+        app.refresh_output_summary()
+        wait_until(root, lambda: str(app.run_output_button.cget("state")) == "normal")
+        if not args.no_screenshots:
+            screenshots.append(str(capture_widget(root, output_dir, "step4_preflight")))
+        app.run_output()
+        wait_until(root, lambda: len(list(app.output_dir.glob("*.pdf"))) == 3)
+
+        dialog = PresetManagerDialog(app)
+        pump(root, 0.3)
+        if not args.no_screenshots:
+            screenshots.append(str(capture_widget(dialog.window, output_dir, "preset_manager")))
+        dialog.window.destroy()
+
+        app.save_state()
+        result = {
+            "status": "passed",
+            "work_dir": str(work_dir),
+            "sample_pdf": str(sample_pdf),
+            "output_dir": str(app.output_dir),
+            "output_pdf_count": len(list(app.output_dir.glob("*.pdf"))),
+            "screenshots": screenshots,
+            "kept_workdir": args.keep_workdir,
+        }
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "gui-smoke-result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    finally:
+        root.destroy()
+        if not args.keep_workdir:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

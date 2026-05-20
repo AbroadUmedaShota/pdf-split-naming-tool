@@ -1003,6 +1003,8 @@ class PdfSplitterApp:
         self.refresh_step2_sidebars()
         self._render_generation += 1
         generation = self._render_generation
+        zoom = self.effective_zoom()
+        query = self.search_var.get().strip()
         self.status_var.set(f"{page_no}/{self.current_page_count}ページを表示中")
         if not self._render_lock.acquire(blocking=False):
             self._pending_render = True
@@ -1010,12 +1012,11 @@ class PdfSplitterApp:
 
         def worker() -> None:
             try:
-                zoom = self.effective_zoom()
                 pixmap = self.processor.render_page_pixmap(pdf_path, page_no, zoom=zoom)
                 text = self.processor.extract_page_text(pdf_path, page_no)
                 rects = []
-                if self.search_var.get().strip() and page_no in self.search_hit_pages:
-                    rects = self.processor.search_text_rects(pdf_path, page_no, self.search_var.get())
+                if query and page_no in self.search_hit_pages:
+                    rects = self.processor.search_text_rects(pdf_path, page_no, query)
                 self.worker_queue.put(("rendered", (generation, page_no, zoom, pixmap, text, rects)))
             except Exception as exc:
                 self.worker_queue.put(("error", str(exc)))
