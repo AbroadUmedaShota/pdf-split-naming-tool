@@ -4,7 +4,7 @@ import queue
 import sys
 import threading
 from pathlib import Path
-from tkinter import BOTH, END, LEFT, RIGHT, VERTICAL, Canvas, Listbox, StringVar, Text, Tk, Toplevel, filedialog, messagebox
+from tkinter import BOTH, END, LEFT, RIGHT, VERTICAL, BooleanVar, Canvas, Listbox, StringVar, Text, Tk, Toplevel, filedialog, messagebox
 from tkinter import ttk
 
 from .app_metadata import APP_NAME
@@ -49,6 +49,17 @@ class PdfSplitterApp:
         self.workflow_summary_var = StringVar()
         self.footer_status_var = StringVar()
         self.step_status_vars: list[StringVar] = []
+        self.page_list_page_numbers: list[int] = []
+        self.candidate_list_page_numbers: list[int] = []
+        self.search_hit_pages: set[int] = set()
+        self.blank_candidate_pages: set[int] = set()
+        self.index_candidate_pages: set[int] = set()
+        self.show_candidates_only_var = BooleanVar(value=False)
+        self.current_page_var = StringVar(value="現在 - / - ページ")
+        self.current_page_state_var = StringVar(value="PDFを選択してください")
+        self.current_segment_var = StringVar(value="セグメント未作成")
+        self.split_summary_var = StringVar(value="分割位置: 0件")
+        self.candidate_summary_var = StringVar(value="候補: 0件")
 
         self._build_ui()
         self._bind_keys()
@@ -199,42 +210,93 @@ class PdfSplitterApp:
             "分割位置を決める",
             "左右キーでページ移動、Spaceで現在ページの前に分割を追加します。検索欄やOCR欄の入力中はショートカットを無効化します。",
         )
-        left = ttk.Frame(self.step2)
+        workspace = ttk.Frame(self.step2)
+        workspace.pack(fill=BOTH, expand=True)
+
+        left = ttk.Frame(workspace)
         left.pack(side=LEFT, fill="y")
-        ttk.Label(left, text="ページ", style="Hint.TLabel").pack(anchor="w")
-        self.page_list = Listbox(left, width=16)
+        left_header = ttk.Frame(left)
+        left_header.pack(fill="x")
+        ttk.Label(left_header, text="ページ状態", style="Hint.TLabel").pack(side=LEFT)
+        ttk.Checkbutton(
+            left_header,
+            text="候補のみ",
+            variable=self.show_candidates_only_var,
+            command=self.refresh_page_list,
+        ).pack(side=RIGHT)
+        self.page_list = Listbox(left, width=30)
         self.page_list.pack(fill="y", expand=True)
         self.page_list.bind("<<ListboxSelect>>", self.on_page_selected)
 
-        right = ttk.Frame(self.step2)
-        right.pack(side=LEFT, fill=BOTH, expand=True, padx=8)
-        nav = ttk.Frame(right)
-        nav.pack(fill="x")
-        ttk.Button(nav, text="前ページ", command=self.prev_page).pack(side=LEFT)
-        ttk.Button(nav, text="次ページ", command=self.next_page).pack(side=LEFT, padx=4)
-        ttk.Button(nav, text="現在ページの前で分割", command=self.add_split_before_current_page).pack(side=LEFT, padx=4)
-        ttk.Button(nav, text="1ページごとに分割", command=lambda: self.split_by_n_pages(1)).pack(side=LEFT, padx=4)
-        self.blank_button = ttk.Button(nav, text="白紙検出", command=self.start_blank_scan)
-        self.blank_button.pack(side=LEFT, padx=4)
-        self.cancel_job_button = ttk.Button(nav, text="処理中止", command=self.cancel_active_job, state="disabled")
-        self.cancel_job_button.pack(side=LEFT, padx=4)
+        center = ttk.Frame(workspace)
+        center.pack(side=LEFT, fill=BOTH, expand=True, padx=8)
+        preview_bar = ttk.Frame(center)
+        preview_bar.pack(fill="x")
+        ttk.Label(preview_bar, textvariable=self.current_page_var, style="SectionTitle.TLabel").pack(side=LEFT)
+        ttk.Button(preview_bar, text="前ページ", command=self.prev_page).pack(side=RIGHT)
+        ttk.Button(preview_bar, text="次ページ", command=self.next_page).pack(side=RIGHT, padx=4)
+        ttk.Button(preview_bar, text="Space: 現在ページの前で分割", command=self.add_split_before_current_page).pack(
+            side=RIGHT,
+            padx=4,
+        )
+        ttk.Label(center, text="←/→でページ移動。入力欄・OCR本文にフォーカス中は通常入力を優先します。", style="Hint.TLabel").pack(
+            anchor="w",
+            pady=(4, 0),
+        )
 
-        self.search_var = StringVar()
-        self.search_entry = ttk.Entry(nav, textvariable=self.search_var, width=24)
-        self.search_entry.pack(side=RIGHT)
-        self.search_button = ttk.Button(nav, text="検索", command=self.start_text_search)
-        self.search_button.pack(side=RIGHT, padx=4)
-        self.index_button = ttk.Button(nav, text="インデックス", command=self.start_index_candidate_search)
-        self.index_button.pack(side=RIGHT, padx=4)
-
-        self.preview_canvas = Canvas(right, background="#222", height=520, highlightthickness=1, takefocus=True)
+        self.preview_canvas = Canvas(center, background="#222", height=520, highlightthickness=1, takefocus=True)
         self.preview_canvas.pack(fill=BOTH, expand=True, pady=8)
         self.preview_canvas.bind("<Button-1>", lambda _event: self.preview_canvas.focus_set())
-
-        self.ocr_text = Text(right, height=8, wrap="word")
-        self.ocr_text.pack(fill="x")
         self.status_var = StringVar(value="PDF未選択")
-        ttk.Label(right, textvariable=self.status_var).pack(fill="x")
+        ttk.Label(center, textvariable=self.status_var).pack(fill="x")
+
+        decision = ttk.Frame(workspace)
+        decision.pack(side=LEFT, fill="y")
+        page_state = ttk.LabelFrame(decision, text="現在ページ状態", padding=8)
+        page_state.pack(fill="x")
+        ttk.Label(page_state, textvariable=self.current_page_state_var, wraplength=280).pack(anchor="w")
+        ttk.Label(page_state, textvariable=self.current_segment_var, style="Hint.TLabel", wraplength=280).pack(anchor="w", pady=(4, 0))
+
+        tools = ttk.LabelFrame(decision, text="候補検出", padding=8)
+        tools.pack(fill="x", pady=(8, 0))
+        self.search_var = StringVar()
+        self.search_entry = ttk.Entry(tools, textvariable=self.search_var, width=28)
+        self.search_entry.pack(fill="x")
+        tool_buttons = ttk.Frame(tools)
+        tool_buttons.pack(fill="x", pady=(6, 0))
+        self.search_button = ttk.Button(tool_buttons, text="検索", command=self.start_text_search)
+        self.search_button.pack(side=LEFT)
+        self.index_button = ttk.Button(tool_buttons, text="インデックス", command=self.start_index_candidate_search)
+        self.index_button.pack(side=LEFT, padx=4)
+        self.blank_button = ttk.Button(tool_buttons, text="白紙検出", command=self.start_blank_scan)
+        self.blank_button.pack(side=LEFT)
+        self.cancel_job_button = ttk.Button(tools, text="処理中止", command=self.cancel_active_job, state="disabled")
+        self.cancel_job_button.pack(fill="x", pady=(6, 0))
+
+        decision_tabs = ttk.Notebook(decision)
+        decision_tabs.pack(fill=BOTH, expand=True, pady=(8, 0))
+
+        split_tab = ttk.Frame(decision_tabs, padding=6)
+        decision_tabs.add(split_tab, text="分割位置")
+        ttk.Label(split_tab, textvariable=self.split_summary_var).pack(anchor="w")
+        self.split_list = Listbox(split_tab, width=36, height=8)
+        self.split_list.pack(fill=BOTH, expand=True, pady=(4, 6))
+        ttk.Button(split_tab, text="現在ページの前に分割", command=self.add_split_before_current_page).pack(fill="x")
+        ttk.Button(split_tab, text="最後の分割を取り消す", command=self.undo_last_split).pack(fill="x", pady=(4, 0))
+        ttk.Button(split_tab, text="1ページごとに分割", command=lambda: self.split_by_n_pages(1)).pack(fill="x", pady=(4, 0))
+
+        candidate_tab = ttk.Frame(decision_tabs, padding=6)
+        decision_tabs.add(candidate_tab, text="候補")
+        ttk.Label(candidate_tab, textvariable=self.candidate_summary_var).pack(anchor="w")
+        self.candidate_list = Listbox(candidate_tab, width=36, height=8)
+        self.candidate_list.pack(fill=BOTH, expand=True, pady=(4, 6))
+        self.candidate_list.bind("<<ListboxSelect>>", self.on_candidate_selected)
+        ttk.Button(candidate_tab, text="候補ページの前に分割", command=self.add_split_before_current_page).pack(fill="x")
+
+        ocr_tab = ttk.Frame(decision_tabs, padding=6)
+        decision_tabs.add(ocr_tab, text="OCR本文")
+        self.ocr_text = Text(ocr_tab, height=12, wrap="word")
+        self.ocr_text.pack(fill=BOTH, expand=True)
 
     def _build_step3(self) -> None:
         self._add_section_header(
@@ -370,6 +432,9 @@ class PdfSplitterApp:
     def set_current_pdf(self, path: Path) -> None:
         self.current_pdf = path
         self.current_page = 1
+        self.search_hit_pages.clear()
+        self.blank_candidate_pages.clear()
+        self.index_candidate_pages.clear()
         try:
             self.current_page_count = self.processor.page_count(path)
             self.refresh_pdf_list()
@@ -394,22 +459,119 @@ class PdfSplitterApp:
 
     def refresh_page_list(self) -> None:
         self.page_list.delete(0, END)
-        for page_no in range(1, self.current_page_count + 1):
-            self.page_list.insert(END, f"{page_no}ページ")
-        if self.current_page_count:
-            self.page_list.selection_set(self.current_page - 1)
+        candidate_pages = self.candidate_pages()
+        if self.show_candidates_only_var.get():
+            pages = [page_no for page_no in range(1, self.current_page_count + 1) if page_no in candidate_pages]
+        else:
+            pages = list(range(1, self.current_page_count + 1))
+        self.page_list_page_numbers = pages
+        for page_no in pages:
+            self.page_list.insert(END, self.page_list_label(page_no))
+        if self.current_page in pages:
+            self.page_list.selection_clear(0, END)
+            self.page_list.selection_set(pages.index(self.current_page))
+        self.refresh_step2_sidebars()
 
     def on_page_selected(self, _event) -> None:
         selection = self.page_list.curselection()
         if selection:
-            self.current_page = selection[0] + 1
+            self.current_page = self.page_list_page_numbers[selection[0]]
+            self.refresh_step2_sidebars()
             self.render_current_page_async()
+
+    def on_candidate_selected(self, _event) -> None:
+        selection = self.candidate_list.curselection()
+        if selection and selection[0] < len(self.candidate_list_page_numbers):
+            self.current_page = self.candidate_list_page_numbers[selection[0]]
+            self.sync_page_list_selection()
+            self.render_current_page_async()
+
+    def sync_page_list_selection(self) -> None:
+        if self.current_page in self.page_list_page_numbers:
+            self.page_list.selection_clear(0, END)
+            self.page_list.selection_set(self.page_list_page_numbers.index(self.current_page))
+        self.refresh_step2_sidebars()
+
+    def split_boundary_pages(self) -> set[int]:
+        boundaries: set[int] = set()
+        for segment in self.segments:
+            boundary_page = segment.end_page + 1
+            if 1 < boundary_page <= self.current_page_count:
+                boundaries.add(boundary_page)
+        return boundaries
+
+    def candidate_pages(self) -> set[int]:
+        return self.search_hit_pages | self.blank_candidate_pages | self.index_candidate_pages
+
+    def page_badges(self, page_no: int) -> list[str]:
+        badges = []
+        if page_no in self.blank_candidate_pages:
+            badges.append("白紙")
+        if page_no in self.search_hit_pages:
+            badges.append("検索")
+        if page_no in self.index_candidate_pages:
+            badges.append("索引")
+        if page_no in self.split_boundary_pages():
+            badges.append("分割前")
+        return badges
+
+    def page_list_label(self, page_no: int) -> str:
+        badges = self.page_badges(page_no)
+        suffix = f" [{' '.join(badges)}]" if badges else ""
+        return f"{page_no:>4}ページ{suffix}"
+
+    def segment_for_page(self, page_no: int) -> Segment | None:
+        for segment in self.segments:
+            if segment.start_page <= page_no <= segment.end_page:
+                return segment
+        return None
+
+    def refresh_step2_sidebars(self) -> None:
+        if not hasattr(self, "split_list"):
+            return
+        self.current_page_var.set(f"現在 {self.current_page} / {self.current_page_count or '-'} ページ")
+        badges = self.page_badges(self.current_page)
+        state = " / ".join(badges) if badges else "通常ページ"
+        if self.current_page <= 1:
+            state += " / 先頭ページのため前分割不可"
+        self.current_page_state_var.set(state)
+        segment = self.segment_for_page(self.current_page)
+        if segment is None:
+            start = max((item.end_page for item in self.segments), default=0) + 1
+            if self.current_page_count:
+                self.current_segment_var.set(f"未確定範囲: {start}-{self.current_page_count}ページ")
+            else:
+                self.current_segment_var.set("PDF未選択")
+        else:
+            self.current_segment_var.set(f"所属セグメント: {segment.start_page}-{segment.end_page}ページ")
+
+        boundaries = sorted(self.split_boundary_pages())
+        self.split_summary_var.set(f"分割位置: {len(boundaries)}件 / セグメント: {len(self.segments)}件")
+        self.split_list.delete(0, END)
+        if boundaries:
+            for page_no in boundaries:
+                self.split_list.insert(END, f"{page_no}ページの前で分割")
+        else:
+            self.split_list.insert(END, "分割位置は未作成です")
+
+        candidates = sorted(self.candidate_pages())
+        self.candidate_list_page_numbers = candidates
+        self.candidate_summary_var.set(
+            f"候補: {len(candidates)}件  白紙{len(self.blank_candidate_pages)} / 検索{len(self.search_hit_pages)} / 索引{len(self.index_candidate_pages)}"
+        )
+        self.candidate_list.delete(0, END)
+        if candidates:
+            for page_no in candidates:
+                self.candidate_list.insert(END, self.page_list_label(page_no))
+        else:
+            self.candidate_list.insert(END, "候補はまだありません")
 
     def render_current_page_async(self) -> None:
         if self.current_pdf is None or self.current_page_count == 0:
             return
         pdf_path = self.current_pdf
         page_no = self.current_page
+        self.refresh_step2_sidebars()
         self._render_generation += 1
         generation = self._render_generation
         self.status_var.set(f"{page_no}/{self.current_page_count}ページを表示中")
@@ -462,23 +624,31 @@ class PdfSplitterApp:
                 elif kind == "search_done":
                     hits, canceled = payload
                     self.finish_active_job()
+                    self.search_hit_pages = set(hits)
+                    self.refresh_page_list()
                     prefix = "検索を中止しました" if canceled else "検索完了"
                     self.status_var.set(f"{prefix}: {len(hits)}件")
                     if hits:
                         self.current_page = hits[0]
+                        self.sync_page_list_selection()
                         self.render_current_page_async()
                 elif kind == "blank_done":
                     pages, canceled = payload
                     self.finish_active_job()
+                    self.blank_candidate_pages = set(pages)
+                    self.refresh_page_list()
                     prefix = "白紙検出を中止しました" if canceled else "白紙候補"
                     self.status_var.set(f"{prefix}: {', '.join(map(str, pages[:20])) or 'なし'}")
                 elif kind == "index_done":
                     hits, canceled = payload
                     self.finish_active_job()
+                    self.index_candidate_pages = set(hits)
+                    self.refresh_page_list()
                     prefix = "インデックス検索を中止しました" if canceled else "インデックス候補"
                     self.status_var.set(f"{prefix}: {', '.join(map(str, hits[:20])) or 'なし'}")
                     if hits:
                         self.current_page = hits[0]
+                        self.sync_page_list_selection()
                         self.render_current_page_async()
                 elif kind == "error":
                     self.finish_active_job()
@@ -516,15 +686,13 @@ class PdfSplitterApp:
     def prev_page(self) -> None:
         if self.current_page > 1:
             self.current_page -= 1
-            self.page_list.selection_clear(0, END)
-            self.page_list.selection_set(self.current_page - 1)
+            self.sync_page_list_selection()
             self.render_current_page_async()
 
     def next_page(self) -> None:
         if self.current_page < self.current_page_count:
             self.current_page += 1
-            self.page_list.selection_clear(0, END)
-            self.page_list.selection_set(self.current_page - 1)
+            self.sync_page_list_selection()
             self.render_current_page_async()
 
     def add_split_before_current_page(self) -> None:
@@ -537,8 +705,17 @@ class PdfSplitterApp:
             metadata = self.active_preset.default_metadata()
             metadata["seq"] = str(len(self.segments) + 1)
             self.segments.append(Segment(self.current_pdf, start_page, end_page, metadata))
+            self.refresh_page_list()
             self.refresh_segment_list()
             self._update_workflow_status()
+
+    def undo_last_split(self) -> None:
+        if not self.segments:
+            return
+        self.segments.pop()
+        self.refresh_page_list()
+        self.refresh_segment_list()
+        self._update_workflow_status()
 
     def split_by_n_pages(self, pages_per_segment: int) -> None:
         if self.current_pdf is None or self.current_page_count == 0:
@@ -551,6 +728,7 @@ class PdfSplitterApp:
         for index, segment in enumerate(self.segments, start=1):
             segment.metadata.update(self.active_preset.default_metadata())
             segment.metadata["seq"] = str(index)
+        self.refresh_page_list()
         self.refresh_segment_list()
         self._update_workflow_status()
 
