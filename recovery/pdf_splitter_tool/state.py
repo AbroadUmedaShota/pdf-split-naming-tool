@@ -20,7 +20,12 @@ class StateManager:
     def load(self) -> dict[str, Any]:
         if not self.state_path.exists():
             return {}
-        return json.loads(self.state_path.read_text(encoding="utf-8"))
+        try:
+            return json.loads(self.state_path.read_text(encoding="utf-8"))
+        except Exception:
+            if self.backup_path.exists():
+                return json.loads(self.backup_path.read_text(encoding="utf-8"))
+            raise
 
     def save(self, state: dict[str, Any]) -> None:
         self.work_dir.mkdir(parents=True, exist_ok=True)

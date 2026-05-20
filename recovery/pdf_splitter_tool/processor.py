@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import time
 from collections import OrderedDict
+from hashlib import sha256
 from pathlib import Path
 from string import Formatter
 from typing import Any, Callable
@@ -272,6 +273,25 @@ class PdfProcessor:
             raise RuntimeError("PyMuPDF is required for OCR/text extraction.")
         with fitz.open(pdf_path) as doc:
             return doc.load_page(page_no - 1).get_text("text")
+
+    @staticmethod
+    def search_text_rects(pdf_path: Path, page_no: int, query: str) -> list[tuple[float, float, float, float]]:
+        if fitz is None:
+            raise RuntimeError("PyMuPDF is required for OCR/text extraction.")
+        query = query.strip()
+        if not query:
+            return []
+        with fitz.open(pdf_path) as doc:
+            page = doc.load_page(page_no - 1)
+            return [(rect.x0, rect.y0, rect.x1, rect.y1) for rect in page.search_for(query)]
+
+    @staticmethod
+    def calculate_sha256(path: Path) -> str:
+        digest = sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     @staticmethod
     def split_pdf(segment: Segment, output_path: Path) -> Path:

@@ -118,6 +118,17 @@ def test_batch_text_and_index_search(tmp_path: Path) -> None:
     assert processor.index_candidate_pages(source, ("Page 2", "Page 5")) == [2, 5]
 
 
+def test_search_text_rects_and_sha256(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    make_pdf(source, 2)
+
+    rects = PdfProcessor.search_text_rects(source, 1, "Page")
+    digest = PdfProcessor.calculate_sha256(source)
+
+    assert rects
+    assert len(digest) == 64
+
+
 def test_batch_blank_detection_is_conservative(tmp_path: Path) -> None:
     source = tmp_path / "precision.pdf"
     make_blank_precision_pdf(source)
