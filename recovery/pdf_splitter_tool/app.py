@@ -46,13 +46,36 @@ class PdfSplitterApp:
         self._pending_render = False
         self.active_job_cancel: threading.Event | None = None
         self.active_job_name = ""
+        self.workflow_summary_var = StringVar()
+        self.footer_status_var = StringVar()
+        self.step_status_vars: list[StringVar] = []
 
         self._build_ui()
         self._bind_keys()
+        self._update_workflow_status()
         self._poll_worker_queue()
 
     def _build_ui(self) -> None:
-        self.notebook = ttk.Notebook(self.root)
+        self.root.geometry("1180x820")
+        self.root.minsize(980, 680)
+        self._configure_style()
+
+        shell = ttk.Frame(self.root, padding=(12, 10, 12, 8))
+        shell.pack(fill=BOTH, expand=True)
+
+        header = ttk.Frame(shell)
+        header.pack(fill="x", pady=(0, 8))
+        ttk.Label(header, text=APP_NAME, style="AppTitle.TLabel").pack(side=LEFT)
+        ttk.Label(header, textvariable=self.workflow_summary_var, style="AppSummary.TLabel").pack(side=RIGHT)
+
+        tracker = ttk.Frame(shell)
+        tracker.pack(fill="x", pady=(0, 8))
+        for label in ("PDF選択", "分割", "入力", "出力"):
+            var = StringVar(value=f"{label}: 未完了")
+            self.step_status_vars.append(var)
+            ttk.Label(tracker, textvariable=var, style="StepStatus.TLabel", padding=(8, 4)).pack(side=LEFT, padx=(0, 6))
+
+        self.notebook = ttk.Notebook(shell)
         self.notebook.pack(fill=BOTH, expand=True)
 
         self.step1 = ttk.Frame(self.notebook, padding=8)
@@ -70,10 +93,67 @@ class PdfSplitterApp:
         self._build_step3()
         self._build_step4()
 
+        footer = ttk.Frame(shell)
+        footer.pack(fill="x", pady=(8, 0))
+        ttk.Label(footer, textvariable=self.footer_status_var, style="Footer.TLabel").pack(side=LEFT)
+
+    def _configure_style(self) -> None:
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure("AppTitle.TLabel", font=("", 16, "bold"))
+        style.configure("AppSummary.TLabel", foreground="#374151")
+        style.configure("StepStatus.TLabel", background="#eef2f7", foreground="#1f2937")
+        style.configure("SectionTitle.TLabel", font=("", 12, "bold"))
+        style.configure("Hint.TLabel", foreground="#4b5563")
+        style.configure("Footer.TLabel", foreground="#4b5563")
+        style.configure("Primary.TButton", font=("", 9, "bold"))
+
+    def _add_section_header(self, parent: ttk.Frame, title: str, hint: str) -> None:
+        frame = ttk.Frame(parent)
+        frame.pack(fill="x", pady=(0, 8))
+        ttk.Label(frame, text=title, style="SectionTitle.TLabel").pack(anchor="w")
+        ttk.Label(frame, text=hint, style="Hint.TLabel", wraplength=920).pack(anchor="w", pady=(2, 0))
+
+    def _update_workflow_status(self) -> None:
+        checks = check_segment_outputs(self.segments, self.active_preset, self.output_dir, self.processor)
+        ready = sum(1 for check in checks if check.ok)
+        invalid = len(checks) - ready
+
+        pdf_status = "未選択"
+        if self.current_pdf is not None and self.current_page_count:
+            pdf_status = f"OK {len(self.pdf_paths)}件 / {self.current_page_count}ページ"
+        elif self.pdf_paths:
+            pdf_status = f"選択済み {len(self.pdf_paths)}件"
+
+        split_status = f"{len(self.segments)}件" if self.segments else "未作成"
+        input_status = "未作成" if not checks else (f"OK {ready}件" if invalid == 0 else f"要修正 {invalid}件")
+        output_status = "実行可能" if checks and invalid == 0 else "確認待ち"
+
+        statuses = (
+            f"PDF選択: {pdf_status}",
+            f"分割: {split_status}",
+            f"入力: {input_status}",
+            f"出力: {output_status}",
+        )
+        for var, text in zip(self.step_status_vars, statuses):
+            var.set(text)
+
+        current_name = self.current_pdf.name if self.current_pdf else "PDF未選択"
+        self.workflow_summary_var.set(f"{current_name} / {self.active_preset.name}")
+        self.footer_status_var.set(f"出力先: {self.output_dir}    作業フォルダ: {self.work_dir}")
+
     def _build_step1(self) -> None:
+        self._add_section_header(
+            self.step1,
+            "PDFを選択",
+            "処理したいPDFを追加し、案件プリセットと出力先を確認します。ここで選んだPDFが以降の分割作業の対象になります。",
+        )
         toolbar = ttk.Frame(self.step1)
         toolbar.pack(fill="x")
-        ttk.Button(toolbar, text="PDFを追加", command=self.select_pdfs).pack(side=LEFT)
+        ttk.Button(toolbar, text="PDFを追加", command=self.select_pdfs, style="Primary.TButton").pack(side=LEFT)
         ttk.Button(toolbar, text="入力フォルダ", command=self.select_folder).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="出力フォルダ", command=self.select_output_dir).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="プリセット管理", command=self.open_preset_manager).pack(side=LEFT, padx=4)
@@ -89,6 +169,10 @@ class PdfSplitterApp:
         self.preset_combo.pack(side=RIGHT)
         self.preset_combo.bind("<<ComboboxSelected>>", self.on_preset_selected)
 
+        ttk.Label(self.step1, text="PDF一覧 - ファイル名、ページ数、保存場所を確認できます。", style="Hint.TLabel").pack(
+            anchor="w",
+            pady=(8, 0),
+        )
         self.pdf_list = Listbox(self.step1, height=12)
         self.pdf_list.pack(fill=BOTH, expand=True, pady=8)
         self.pdf_list.bind("<<ListboxSelect>>", self.on_pdf_selected)
@@ -107,10 +191,17 @@ class PdfSplitterApp:
         self.refresh_preset_combo()
         self.rebuild_metadata_fields()
         self.refresh_segment_list()
+        self._update_workflow_status()
 
     def _build_step2(self) -> None:
+        self._add_section_header(
+            self.step2,
+            "分割位置を決める",
+            "左右キーでページ移動、Spaceで現在ページの前に分割を追加します。検索欄やOCR欄の入力中はショートカットを無効化します。",
+        )
         left = ttk.Frame(self.step2)
         left.pack(side=LEFT, fill="y")
+        ttk.Label(left, text="ページ", style="Hint.TLabel").pack(anchor="w")
         self.page_list = Listbox(left, width=16)
         self.page_list.pack(fill="y", expand=True)
         self.page_list.bind("<<ListboxSelect>>", self.on_page_selected)
@@ -146,7 +237,15 @@ class PdfSplitterApp:
         ttk.Label(right, textvariable=self.status_var).pack(fill="x")
 
     def _build_step3(self) -> None:
-        self.segment_list = Listbox(self.step3, width=44)
+        self._add_section_header(
+            self.step3,
+            "出力名に使う情報を入力",
+            "共通値をまとめて反映し、連番を再採番してから、各セグメントの出力名と要修正状態を確認します。",
+        )
+        left = ttk.Frame(self.step3)
+        left.pack(side=LEFT, fill="y")
+        ttk.Label(left, text="セグメント一覧", style="Hint.TLabel").pack(anchor="w")
+        self.segment_list = Listbox(left, width=44)
         self.segment_list.pack(side=LEFT, fill="y")
         self.segment_list.bind("<<ListboxSelect>>", self.on_segment_selected)
 
@@ -173,10 +272,21 @@ class PdfSplitterApp:
         ttk.Label(self.metadata_frame, textvariable=self.filename_preview_var).pack(fill="x", pady=8)
 
     def _build_step4(self) -> None:
+        self._add_section_header(
+            self.step4,
+            "出力前に確認",
+            "出力先、予定ファイル名、未入力や命名エラーを確認します。要修正が残っている場合は出力できません。",
+        )
         toolbar = ttk.Frame(self.step4)
         toolbar.pack(fill="x")
         ttk.Button(toolbar, text="出力前チェック", command=self.refresh_output_summary).pack(side=LEFT)
-        self.run_output_button = ttk.Button(toolbar, text="出力実行", command=self.run_output, state="disabled")
+        self.run_output_button = ttk.Button(
+            toolbar,
+            text="出力実行",
+            command=self.run_output,
+            state="disabled",
+            style="Primary.TButton",
+        )
         self.run_output_button.pack(side=LEFT, padx=4)
         self.output_status_var = StringVar(value="出力前チェックを実行してください")
         ttk.Label(toolbar, textvariable=self.output_status_var).pack(side=LEFT, padx=8)
@@ -225,6 +335,7 @@ class PdfSplitterApp:
             self.rebuild_metadata_fields()
         elif self.notebook.index(self.notebook.select()) == 3:
             self.refresh_output_summary()
+        self._update_workflow_status()
 
     def select_pdfs(self) -> None:
         paths = filedialog.askopenfilenames(filetypes=[("PDF files", "*.pdf")])
@@ -242,11 +353,14 @@ class PdfSplitterApp:
                 self.pdf_list.insert(END, f"{path.name} | 未読込 | {path}")
         if self.pdf_paths and self.current_pdf is None:
             self.set_current_pdf(self.pdf_paths[0])
+        self._update_workflow_status()
 
     def select_output_dir(self) -> None:
         folder = filedialog.askdirectory()
         if folder:
             self.output_dir = Path(folder)
+            self.refresh_output_summary()
+            self._update_workflow_status()
 
     def on_pdf_selected(self, _event) -> None:
         selection = self.pdf_list.curselection()
@@ -264,6 +378,7 @@ class PdfSplitterApp:
             self.current_page_count = 0
         self.refresh_page_list()
         self.render_current_page_async()
+        self._update_workflow_status()
 
     def refresh_pdf_list(self) -> None:
         self.pdf_list.delete(0, END)
@@ -423,6 +538,7 @@ class PdfSplitterApp:
             metadata["seq"] = str(len(self.segments) + 1)
             self.segments.append(Segment(self.current_pdf, start_page, end_page, metadata))
             self.refresh_segment_list()
+            self._update_workflow_status()
 
     def split_by_n_pages(self, pages_per_segment: int) -> None:
         if self.current_pdf is None or self.current_page_count == 0:
@@ -436,6 +552,7 @@ class PdfSplitterApp:
             segment.metadata.update(self.active_preset.default_metadata())
             segment.metadata["seq"] = str(index)
         self.refresh_segment_list()
+        self._update_workflow_status()
 
     def start_text_search(self) -> None:
         if self.current_pdf is None:
@@ -595,6 +712,7 @@ class PdfSplitterApp:
         self.refresh_segment_list()
         self.rebuild_metadata_fields()
         self.refresh_output_summary()
+        self._update_workflow_status()
 
     def resequence_segment_metadata(self) -> None:
         if not self.segments:
@@ -610,6 +728,7 @@ class PdfSplitterApp:
         self.refresh_segment_list()
         self.rebuild_metadata_fields()
         self.refresh_output_summary()
+        self._update_workflow_status()
 
     def on_metadata_changed(self, key: str, value: StringVar) -> None:
         if self.current_segment_index is None:
@@ -617,6 +736,7 @@ class PdfSplitterApp:
         self.segments[self.current_segment_index].metadata[key] = value.get()
         self.update_filename_preview()
         self.refresh_segment_list()
+        self._update_workflow_status()
 
     def update_filename_preview(self) -> None:
         if self.current_segment_index is None:
@@ -647,6 +767,7 @@ class PdfSplitterApp:
         can_run = bool(checks) and invalid == 0
         self.run_output_button.configure(state="normal" if can_run else "disabled")
         self.output_status_var.set("出力可能" if can_run else "要修正があります")
+        self._update_workflow_status()
 
     def run_output(self) -> None:
         checks = check_segment_outputs(self.segments, self.active_preset, self.output_dir, self.processor)
@@ -660,6 +781,7 @@ class PdfSplitterApp:
                 continue
             final_path = self.processor.split_pdf(check.segment, check.output_path)
             self.output_text.insert(END, f"出力しました: {final_path}\n")
+        self._update_workflow_status()
 
 
 class PresetManagerDialog:
