@@ -15,7 +15,15 @@ from pdf_splitter_tool.step2_controller import (
     split_boundary_pages,
     visible_page_numbers,
 )
-from pdf_splitter_tool.workflow import apply_common_metadata, check_segment_outputs, error_messages, resequence_segments
+from pdf_splitter_tool.workflow import (
+    OUTPUT_ACTION_REUSE_EXISTING,
+    OUTPUT_ACTION_SKIP,
+    apply_common_metadata,
+    check_segment_outputs,
+    error_messages,
+    output_action_key,
+    resequence_segments,
+)
 
 
 def test_error_messages_use_field_labels() -> None:
@@ -58,6 +66,60 @@ def test_check_segment_outputs_simulates_duplicate_names(tmp_path: Path) -> None
     checks = check_segment_outputs(segments, YOSHIDA_ELSIS_PRESET, tmp_path)
 
     assert [check.filename for check in checks] == ["01_02_003.pdf", "01_02_003_2.pdf"]
+
+
+def test_check_segment_outputs_detects_existing_and_defaults_to_unique(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    existing = tmp_path / "01_02_003.pdf"
+    existing.write_text("existing", encoding="utf-8")
+    segment = Segment(source, 1, 1, {"box_no": "1", "binder_no": "2", "seq": "3"})
+
+    checks = check_segment_outputs([segment], YOSHIDA_ELSIS_PRESET, tmp_path)
+
+    assert checks[0].ok
+    assert checks[0].has_existing_output
+    assert checks[0].existing_path == existing
+    assert checks[0].filename == "01_02_003_2.pdf"
+    assert checks[0].output_path == tmp_path / "01_02_003_2.pdf"
+
+
+def test_check_segment_outputs_reuses_existing_file(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    existing = tmp_path / "01_02_003.pdf"
+    existing.write_text("existing", encoding="utf-8")
+    segment = Segment(source, 1, 1, {"box_no": "1", "binder_no": "2", "seq": "3"})
+    key = output_action_key(segment, "01_02_003.pdf")
+
+    checks = check_segment_outputs([segment], YOSHIDA_ELSIS_PRESET, tmp_path, output_actions={key: OUTPUT_ACTION_REUSE_EXISTING})
+
+    assert checks[0].ok
+    assert checks[0].action == OUTPUT_ACTION_REUSE_EXISTING
+    assert checks[0].filename == "01_02_003.pdf"
+    assert checks[0].output_path == existing
+
+
+def test_check_segment_outputs_skip_is_runnable_without_output_path(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    segment = Segment(source, 1, 1, {"box_no": "1", "binder_no": "2", "seq": "3"})
+    key = output_action_key(segment, "01_02_003.pdf")
+
+    checks = check_segment_outputs([segment], YOSHIDA_ELSIS_PRESET, tmp_path, output_actions={key: OUTPUT_ACTION_SKIP})
+
+    assert checks[0].ok
+    assert checks[0].action == OUTPUT_ACTION_SKIP
+    assert checks[0].filename == "01_02_003.pdf"
+    assert checks[0].output_path is None
+
+
+def test_check_segment_outputs_reuse_requires_existing_file(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    segment = Segment(source, 1, 1, {"box_no": "1", "binder_no": "2", "seq": "3"})
+    key = output_action_key(segment, "01_02_003.pdf")
+
+    checks = check_segment_outputs([segment], YOSHIDA_ELSIS_PRESET, tmp_path, output_actions={key: OUTPUT_ACTION_REUSE_EXISTING})
+
+    assert not checks[0].ok
+    assert checks[0].messages == ("再利用対象の既存ファイルがありません",)
 
 
 def test_template_key_error_is_actionable(tmp_path: Path) -> None:

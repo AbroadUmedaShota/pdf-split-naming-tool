@@ -41,13 +41,28 @@ def build_output_preflight_view(checks: list[SegmentOutputCheck], output_dir: Pa
         lines.append(TaggedOutputLine("[OK] 未入力・命名エラーなし\n", "ok" if checks else "warn"))
     lines.extend(
         (
-            TaggedOutputLine("[OK] 同名ファイルがある場合は _2, _3 の連番で重複を回避します。\n\n", "ok"),
+            TaggedOutputLine("[OK] 同名ファイルがある場合は既存有無と処理方針を表示します。上書きは行いません。\n\n", "ok"),
             TaggedOutputLine("出力予定一覧\n", "heading"),
         )
     )
     for check in checks:
         if check.ok:
-            lines.append(TaggedOutputLine(f"[出力可能] {check.segment.start_page}-{check.segment.end_page} -> {check.filename}\n", "ok"))
+            existing = "既存あり" if check.has_existing_output else "既存なし"
+            if check.action == "skip":
+                tag = "warn"
+                status = "スキップ"
+            elif check.action == "reuse_existing":
+                tag = "warn"
+                status = "再利用"
+            else:
+                tag = "ok"
+                status = "新規作成"
+            lines.append(
+                TaggedOutputLine(
+                    f"[{status}] {check.segment.start_page}-{check.segment.end_page} -> {check.filename} / {existing} / {check.action_label}\n",
+                    tag,
+                )
+            )
         else:
             lines.append(
                 TaggedOutputLine(
