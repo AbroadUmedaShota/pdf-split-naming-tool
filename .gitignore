@@ -1,6 +1,7 @@
 # Local/source-recovery data
 data/
 artifacts/
+output/
 
 # Python generated files
 __pycache__/
