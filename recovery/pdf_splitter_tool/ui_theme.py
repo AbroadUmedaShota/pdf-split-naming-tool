@@ -30,6 +30,7 @@ def configure_app_style(root: Tk) -> None:
     style.configure("TLabel", background=UI_BG, foreground=UI_TEXT)
     style.configure("AppTitle.TLabel", font=("", 17, "bold"), foreground=UI_TEXT)
     style.configure("AppSummary.TLabel", foreground=UI_MUTED_TEXT)
+    style.configure("NextAction.TLabel", background="#fff7ed", foreground="#9a3412", font=("", 10, "bold"))
     style.configure("StepStatus.TLabel", background="#e9f1ff", foreground="#1e3a8a", relief="flat")
     style.configure("SectionTitle.TLabel", font=("", 12, "bold"), foreground=UI_TEXT)
     style.configure("Hint.TLabel", foreground=UI_MUTED_TEXT)

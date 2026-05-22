@@ -96,6 +96,11 @@ def main() -> int:
         app.notebook.select(app.step2)
         pump(root, 0.5)
         wait_until(root, lambda: app._preview_image is not None and "Invoice sample" in app.ocr_text.get("1.0", "end"))
+        if not args.no_screenshots:
+            screenshots.append(str(capture_widget(root, output_dir, "step2_initial_split")))
+        app.step2_details_visible_var.set(True)
+        app.toggle_step2_details()
+        pump(root, 0.2)
         app.search_var.set("Invoice")
         app.start_text_search()
         wait_until(root, lambda: bool(app.search_hit_pages))

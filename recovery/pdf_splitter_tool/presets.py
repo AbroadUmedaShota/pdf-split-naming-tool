@@ -8,7 +8,7 @@ from .models import MetadataField, Preset
 
 YOSHIDA_ELSIS_PRESET = Preset(
     id="yoshida-elsis",
-    name="吉田エルシス",
+    name="ヨシダエルシス",
     fields=(
         MetadataField("box_no", "箱No", required=True),
         MetadataField("binder_no", "バインダーNo", required=True),

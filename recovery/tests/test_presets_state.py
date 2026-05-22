@@ -17,7 +17,7 @@ def test_preset_repository_saves_and_loads_yoshida(tmp_path: Path) -> None:
     preset = find_preset(loaded, loaded_active_id)
 
     assert loaded_active_id == YOSHIDA_ELSIS_PRESET.id
-    assert preset.name == "吉田エルシス"
+    assert preset.name == "ヨシダエルシス"
     assert preset.naming_template == "{box_no:0>2}_{binder_no:0>2}_{seq:0>3}.pdf"
     assert [field.key for field in preset.fields] == ["box_no", "binder_no", "seq", "company", "doc"]
     assert [field.label for field in preset.fields] == [
@@ -58,7 +58,7 @@ def test_preset_repository_refreshes_builtin_yoshida_labels(tmp_path: Path) -> N
     presets, active_id = PresetRepository(path).load()
     preset = find_preset(presets, active_id)
 
-    assert preset.name == "吉田エルシス"
+    assert preset.name == "ヨシダエルシス"
     assert [field.label for field in preset.fields] == [
         "箱No",
         "バインダーNo",

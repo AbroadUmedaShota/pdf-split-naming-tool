@@ -88,6 +88,7 @@ class PdfSplitterApp:
         self.redo_stack: list[list[Segment]] = []
         self._restoring_state = False
         self.workflow_summary_var = StringVar()
+        self.next_action_var = StringVar(value="次にやること: PDFまたは入力フォルダを選択してください。")
         self.footer_status_var = StringVar()
         self.step_status_vars: list[StringVar] = []
         self.page_list_page_numbers: list[int] = []
@@ -96,6 +97,9 @@ class PdfSplitterApp:
         self.blank_candidate_pages: set[int] = set()
         self.index_candidate_pages: set[int] = set()
         self.show_candidates_only_var = BooleanVar(value=False)
+        self.step1_details_visible_var = BooleanVar(value=False)
+        self.step2_details_visible_var = BooleanVar(value=False)
+        self.step3_assist_visible_var = BooleanVar(value=False)
         self.current_page_var = StringVar(value="現在 - / - ページ")
         self.current_page_state_var = StringVar(value="PDFを選択してください")
         self.current_segment_var = StringVar(value="セグメント未作成")
@@ -111,6 +115,7 @@ class PdfSplitterApp:
         self.ocr_transfer_field_var = StringVar()
         self.step3_suggestion_var = StringVar(value="入力補助候補: 未生成")
         self.output_progress_var = StringVar(value="出力待機中")
+        self.output_instruction_var = StringVar(value="出力前チェックを実行してください。")
         self.state_status_var = StringVar(value="状態未保存")
         self.output_action_var = StringVar(value=OUTPUT_ACTION_LABELS[OUTPUT_ACTION_CREATE_UNIQUE])
         self.current_pdf_has_text_layer = False
@@ -141,6 +146,11 @@ class PdfSplitterApp:
             var = StringVar(value=f"{label}: 未完了")
             self.step_status_vars.append(var)
             ttk.Label(tracker, textvariable=var, style="StepStatus.TLabel", padding=(8, 4)).pack(side=LEFT, padx=(0, 6))
+
+        ttk.Label(shell, textvariable=self.next_action_var, style="NextAction.TLabel", padding=(10, 7)).pack(
+            fill="x",
+            pady=(0, 8),
+        )
 
         self.notebook = ttk.Notebook(shell)
         self.notebook.pack(fill=BOTH, expand=True)
@@ -179,6 +189,24 @@ class PdfSplitterApp:
         ttk.Label(frame, text=title, style="SectionTitle.TLabel").pack(anchor="w")
         ttk.Label(frame, text=hint, style="Hint.TLabel", wraplength=920).pack(anchor="w", pady=(2, 0))
 
+    def toggle_step1_details(self) -> None:
+        if self.step1_details_visible_var.get():
+            self.step1_details_frame.pack(fill="x", pady=(6, 0))
+        else:
+            self.step1_details_frame.pack_forget()
+
+    def toggle_step2_details(self) -> None:
+        if self.step2_details_visible_var.get():
+            self.step2_details_frame.pack(fill=BOTH, expand=True, pady=(8, 0))
+        else:
+            self.step2_details_frame.pack_forget()
+
+    def toggle_step3_assist(self) -> None:
+        if self.step3_assist_visible_var.get():
+            self.step3_assist_frame.pack(fill="x", pady=(6, 0))
+        else:
+            self.step3_assist_frame.pack_forget()
+
     def _update_workflow_status(self) -> None:
         checks = check_segment_outputs(
             self.segments,
@@ -208,6 +236,18 @@ class PdfSplitterApp:
         )
         for var, text in zip(self.step_status_vars, statuses):
             var.set(text)
+
+        if not self.pdf_paths:
+            next_action = "次にやること: PDFまたは入力フォルダを選択し、出力先を指定してください。"
+        elif not self.segments:
+            next_action = "次にやること: Step 2でPDFを確認し、分割位置を追加してください。"
+        elif invalid:
+            next_action = f"次にやること: Step 3で要修正 {invalid}件の入力を確認してください。"
+        elif checks:
+            next_action = "次にやること: Step 4で出力前チェックを確認し、出力実行してください。"
+        else:
+            next_action = "次にやること: Step 2で分割セグメントを作成してください。"
+        self.next_action_var.set(next_action)
 
         current_name = self.current_pdf.name if self.current_pdf else "PDF未選択"
         self.workflow_summary_var.set(f"{current_name} / {self.active_preset.name}")
@@ -314,28 +354,45 @@ class PdfSplitterApp:
     def _build_step1(self) -> None:
         self._add_section_header(
             self.step1,
-            "PDFを選択",
-            "処理したいPDFを追加し、案件プリセットと出力先を確認します。ここで選んだPDFが以降の分割作業の対象になります。",
+            "1. PDFと出力先を選ぶ",
+            "上から順に確認してください。PDFを追加し、共通項目と出力先を揃えると分割作業へ進めます。",
         )
-        toolbar = ttk.Frame(self.step1)
-        toolbar.pack(fill="x")
-        ttk.Button(toolbar, text="PDFを個別に選択", command=self.select_pdfs, style="Primary.TButton").pack(side=LEFT)
-        ttk.Button(toolbar, text="入力フォルダを選択", command=self.select_folder).pack(side=LEFT, padx=4)
-        ttk.Button(toolbar, text="置換読込(PDF)", command=self.replace_with_pdfs).pack(side=LEFT, padx=4)
-        ttk.Button(toolbar, text="置換読込(フォルダ)", command=self.replace_with_folder).pack(side=LEFT, padx=4)
-        ttk.Button(toolbar, text="出力フォルダ", command=self.select_output_dir).pack(side=LEFT, padx=4)
-        ttk.Button(toolbar, text="プリセット管理", command=self.open_preset_manager).pack(side=LEFT, padx=4)
+
+        status = ttk.LabelFrame(self.step1, text="準備状況", padding=8)
+        status.pack(fill="x")
+        ttk.Label(status, textvariable=self.state_status_var, style="Hint.TLabel").pack(anchor="w")
+
+        preset_frame = ttk.LabelFrame(self.step1, text="案件プリセット", padding=8)
+        preset_frame.pack(fill="x", pady=(8, 0))
+        preset_row = ttk.Frame(preset_frame)
+        preset_row.pack(fill="x")
+        ttk.Label(preset_row, text="プリセット:", width=12).pack(side=LEFT)
 
         self.preset_var = StringVar(value=self.active_preset.name)
         self.preset_combo = ttk.Combobox(
-            toolbar,
+            preset_row,
             textvariable=self.preset_var,
             values=[preset.name for preset in self.presets],
             state="readonly",
             width=28,
         )
-        self.preset_combo.pack(side=RIGHT)
+        self.preset_combo.pack(side=LEFT)
         self.preset_combo.bind("<<ComboboxSelected>>", self.on_preset_selected)
+        ttk.Label(preset_row, text="通常作業では選択だけ行います。編集は詳細設定から開きます。", style="Hint.TLabel").pack(
+            side=LEFT,
+            padx=10,
+        )
+        ttk.Checkbutton(
+            preset_frame,
+            text="詳細設定を表示",
+            variable=self.step1_details_visible_var,
+            command=self.toggle_step1_details,
+        ).pack(anchor="w", pady=(6, 0))
+        self.step1_details_frame = ttk.Frame(preset_frame)
+        ttk.Button(self.step1_details_frame, text="プリセット管理", command=self.open_preset_manager).pack(side=LEFT)
+        ttk.Button(self.step1_details_frame, text="置換読込(PDF)", command=self.replace_with_pdfs).pack(side=LEFT, padx=4)
+        ttk.Button(self.step1_details_frame, text="置換読込(フォルダ)", command=self.replace_with_folder).pack(side=LEFT, padx=4)
+        self.toggle_step1_details()
 
         common = ttk.LabelFrame(self.step1, text="共通項目（下書き）", padding=8)
         common.pack(fill="x", pady=(8, 0))
@@ -349,26 +406,35 @@ class PdfSplitterApp:
         common_buttons = ttk.Frame(common)
         common_buttons.pack(fill="x", pady=(6, 0))
         ttk.Button(common_buttons, text="共通項目を全PDFへ適用", command=self.apply_step1_common_metadata).pack(side=LEFT)
-        ttk.Checkbutton(common_buttons, text="ファイル名で自動ソート", variable=self.auto_sort_var).pack(side=LEFT, padx=8)
-        ttk.Label(common_buttons, textvariable=self.load_status_var, style="Hint.TLabel").pack(side=LEFT, padx=8)
-        self.cancel_load_button = ttk.Button(common_buttons, text="中断", command=self.cancel_pdf_loading, state="disabled")
-        self.cancel_load_button.pack(side=RIGHT)
         self.rebuild_step1_common_fields()
+
+        load_frame = ttk.LabelFrame(self.step1, text="PDF読込", padding=8)
+        load_frame.pack(fill="x", pady=(8, 0))
+        ttk.Button(load_frame, text="PDFを個別に選択", command=self.select_pdfs, style="Primary.TButton").pack(side=LEFT)
+        ttk.Button(load_frame, text="入力フォルダを選択", command=self.select_folder, style="Primary.TButton").pack(side=LEFT, padx=6)
+        ttk.Checkbutton(load_frame, text="ファイル名で自動ソート", variable=self.auto_sort_var).pack(side=LEFT, padx=10)
+        ttk.Label(load_frame, textvariable=self.load_status_var, style="Hint.TLabel").pack(side=LEFT, padx=8)
+        self.cancel_load_button = ttk.Button(load_frame, text="中断", command=self.cancel_pdf_loading, state="disabled")
+        self.cancel_load_button.pack(side=RIGHT)
 
         ttk.Label(self.step1, text="PDF一覧 - ファイル名、ページ数、保存場所を確認できます。", style="Hint.TLabel").pack(
             anchor="w",
             pady=(8, 0),
         )
-        self.pdf_list = Listbox(self.step1, height=12)
+        self.pdf_list = Listbox(self.step1, height=3)
         self._style_listbox(self.pdf_list)
-        self.pdf_list.pack(fill=BOTH, expand=True, pady=8)
+        self.pdf_list.pack(fill="x", pady=6)
         self.pdf_list.bind("<<ListboxSelect>>", self.on_pdf_selected)
         pdf_buttons = ttk.Frame(self.step1)
         pdf_buttons.pack(fill="x")
         ttk.Button(pdf_buttons, text="選択解除", command=self.remove_selected_pdf).pack(side=LEFT)
         ttk.Button(pdf_buttons, text="全クリア", command=self.clear_pdf_selection).pack(side=LEFT, padx=4)
         ttk.Button(pdf_buttons, text="状態を保存", command=self.save_state).pack(side=RIGHT)
-        ttk.Label(pdf_buttons, textvariable=self.state_status_var, style="Hint.TLabel").pack(side=RIGHT, padx=8)
+
+        output_frame = ttk.LabelFrame(self.step1, text="出力設定", padding=8)
+        output_frame.pack(fill="x", pady=(8, 0))
+        ttk.Label(output_frame, textvariable=self.footer_status_var, style="Hint.TLabel").pack(side=LEFT, fill="x", expand=True)
+        ttk.Button(output_frame, text="出力フォルダを選択", command=self.select_output_dir, style="Primary.TButton").pack(side=RIGHT)
 
     def open_preset_manager(self) -> None:
         from .preset_manager_dialog import PresetManagerDialog
@@ -424,8 +490,8 @@ class PdfSplitterApp:
     def _build_step2(self) -> None:
         self._add_section_header(
             self.step2,
-            "分割位置を決める",
-            "左右キーでページ移動、Spaceで現在ページの前に分割を追加します。検索欄やOCR欄の入力中はショートカットを無効化します。",
+            "2. ページを見ながら分割する",
+            "通常作業では、ページを確認して「現在ページの前に分割」を押します。検索やOCRは必要なときだけ詳細機能から開きます。",
         )
         workspace = ttk.Frame(self.step2)
         workspace.pack(fill=BOTH, expand=True)
@@ -495,8 +561,26 @@ class PdfSplitterApp:
         ttk.Label(page_state, textvariable=self.current_page_state_var, wraplength=280).pack(anchor="w")
         ttk.Label(page_state, textvariable=self.current_segment_var, style="Hint.TLabel", wraplength=280).pack(anchor="w", pady=(4, 0))
 
-        tools = ttk.LabelFrame(decision, text="候補検出", padding=8)
-        tools.pack(fill="x", pady=(8, 0))
+        main_split = ttk.LabelFrame(decision, text="分割操作", padding=8)
+        main_split.pack(fill="x", pady=(8, 0))
+        ttk.Label(main_split, textvariable=self.split_summary_var).pack(anchor="w")
+        self.split_list = Listbox(main_split, width=36, height=5)
+        self._style_listbox(self.split_list)
+        self.split_list.pack(fill="x", pady=(4, 6))
+        ttk.Button(main_split, text="現在ページの前に分割", command=self.add_split_before_current_page, style="Primary.TButton").pack(fill="x")
+        ttk.Button(main_split, text="最後の分割を取り消す", command=self.undo_last_split).pack(fill="x", pady=(4, 0))
+        ttk.Button(main_split, text="1ページごとに分割", command=lambda: self.split_by_n_pages(1)).pack(fill="x", pady=(4, 0))
+
+        ttk.Checkbutton(
+            decision,
+            text="詳細機能を表示",
+            variable=self.step2_details_visible_var,
+            command=self.toggle_step2_details,
+        ).pack(anchor="w", pady=(8, 0))
+        self.step2_details_frame = ttk.Frame(decision)
+
+        tools = ttk.LabelFrame(self.step2_details_frame, text="候補検出", padding=8)
+        tools.pack(fill="x")
         self.search_var = StringVar()
         self.search_entry = ttk.Entry(tools, textvariable=self.search_var, width=28)
         self.search_entry.pack(fill="x")
@@ -511,25 +595,8 @@ class PdfSplitterApp:
         self.cancel_job_button = ttk.Button(tools, text="処理中止", command=self.cancel_active_job, state="disabled")
         self.cancel_job_button.pack(fill="x", pady=(6, 0))
 
-        decision_tabs = ttk.Notebook(decision)
+        decision_tabs = ttk.Notebook(self.step2_details_frame)
         decision_tabs.pack(fill=BOTH, expand=True, pady=(8, 0))
-
-        split_tab = ttk.Frame(decision_tabs, padding=6)
-        decision_tabs.add(split_tab, text="分割位置")
-        ttk.Label(split_tab, textvariable=self.split_summary_var).pack(anchor="w")
-        self.split_list = Listbox(split_tab, width=36, height=8)
-        self._style_listbox(self.split_list)
-        self.split_list.pack(fill=BOTH, expand=True, pady=(4, 6))
-        ttk.Button(split_tab, text="現在ページの前に分割", command=self.add_split_before_current_page).pack(fill="x")
-        ttk.Button(split_tab, text="選択した分割を削除", command=self.delete_selected_split).pack(fill="x", pady=(4, 0))
-        ttk.Button(split_tab, text="最後の分割を取り消す", command=self.undo_last_split).pack(fill="x", pady=(4, 0))
-        undo_row = ttk.Frame(split_tab)
-        undo_row.pack(fill="x", pady=(4, 0))
-        ttk.Button(undo_row, text="Undo", command=self.undo_segments).pack(side=LEFT, fill="x", expand=True)
-        ttk.Button(undo_row, text="Redo", command=self.redo_segments).pack(side=LEFT, fill="x", expand=True, padx=(4, 0))
-        ttk.Button(split_tab, text="1ページごとに分割", command=lambda: self.split_by_n_pages(1)).pack(fill="x", pady=(4, 0))
-        ttk.Button(split_tab, text="参照元フォルダを開く", command=self.open_current_pdf_folder).pack(fill="x", pady=(4, 0))
-        ttk.Button(split_tab, text="このファイルを改名", command=self.rename_current_pdf_file).pack(fill="x", pady=(4, 0))
 
         candidate_tab = ttk.Frame(decision_tabs, padding=6)
         decision_tabs.add(candidate_tab, text="候補")
@@ -552,11 +619,22 @@ class PdfSplitterApp:
         ttk.Button(transfer, text="選択OCRを転記", command=self.transfer_selected_ocr_text).pack(side=LEFT, padx=4)
         self.refresh_ocr_transfer_fields()
 
+        advanced_split = ttk.LabelFrame(self.step2_details_frame, text="詳細な分割操作", padding=8)
+        advanced_split.pack(fill="x", pady=(8, 0))
+        ttk.Button(advanced_split, text="選択した分割を削除", command=self.delete_selected_split).pack(fill="x")
+        undo_row = ttk.Frame(advanced_split)
+        undo_row.pack(fill="x", pady=(4, 0))
+        ttk.Button(undo_row, text="Undo", command=self.undo_segments).pack(side=LEFT, fill="x", expand=True)
+        ttk.Button(undo_row, text="Redo", command=self.redo_segments).pack(side=LEFT, fill="x", expand=True, padx=(4, 0))
+        ttk.Button(advanced_split, text="参照元フォルダを開く", command=self.open_current_pdf_folder).pack(fill="x", pady=(4, 0))
+        ttk.Button(advanced_split, text="このファイルを改名", command=self.rename_current_pdf_file).pack(fill="x", pady=(4, 0))
+        self.toggle_step2_details()
+
     def _build_step3(self) -> None:
         self._add_section_header(
             self.step3,
-            "出力名に使う情報を入力",
-            "共通値をまとめて反映し、連番を再採番してから、各セグメントの出力名と要修正状態を確認します。",
+            "3. 出力名に使う情報を入力する",
+            "左の表で分割単位を選び、右側で箱No・バインダーNo・連番を入力します。補助操作は必要なときだけ開きます。",
         )
         left = ttk.Frame(self.step3)
         left.pack(side=LEFT, fill="y")
@@ -600,18 +678,27 @@ class PdfSplitterApp:
         ttk.Entry(seq_row, textvariable=self.seq_step_var, width=8).pack(side=LEFT)
         ttk.Button(seq_row, text="共通値を全件へ反映", command=self.apply_common_metadata_to_segments).pack(side=LEFT, padx=8)
         ttk.Button(seq_row, text="連番を再採番", command=self.resequence_segment_metadata).pack(side=LEFT)
-        assist_row = ttk.Frame(self.bulk_frame)
-        assist_row.pack(fill="x", pady=(6, 0))
+
+        ttk.Checkbutton(
+            self.bulk_frame,
+            text="補助操作を表示",
+            variable=self.step3_assist_visible_var,
+            command=self.toggle_step3_assist,
+        ).pack(anchor="w", pady=(6, 0))
+        self.step3_assist_frame = ttk.Frame(self.bulk_frame)
+        assist_row = ttk.Frame(self.step3_assist_frame)
+        assist_row.pack(fill="x")
         ttk.Button(assist_row, text="前行メタデータコピー", command=self.copy_previous_segment_metadata).pack(side=LEFT)
         ttk.Button(assist_row, text="次の要修正へ移動", command=self.select_next_invalid_segment).pack(side=LEFT, padx=4)
         ttk.Button(assist_row, text="入力補助候補を更新", command=self.refresh_metadata_suggestions).pack(side=LEFT)
         ttk.Button(assist_row, text="選択候補をコピー", command=self.copy_selected_metadata_suggestion).pack(side=LEFT, padx=4)
         ttk.Button(assist_row, text="出力予定フォルダを開く", command=self.open_output_folder).pack(side=LEFT, padx=4)
-        ttk.Label(self.bulk_frame, textvariable=self.step3_suggestion_var, style="Hint.TLabel", wraplength=560).pack(anchor="w", pady=(6, 0))
-        self.suggestion_list = Listbox(self.bulk_frame, height=4, exportselection=False)
+        ttk.Label(self.step3_assist_frame, textvariable=self.step3_suggestion_var, style="Hint.TLabel", wraplength=560).pack(anchor="w", pady=(6, 0))
+        self.suggestion_list = Listbox(self.step3_assist_frame, height=4, exportselection=False)
         self._style_listbox(self.suggestion_list)
         self.suggestion_list.pack(fill="x", pady=(4, 0))
         self.suggestion_list.bind("<Double-Button-1>", lambda _event: self.copy_selected_metadata_suggestion())
+        self.toggle_step3_assist()
 
         self.metadata_frame = ttk.LabelFrame(right, text="選択セグメント", padding=8)
         self.metadata_frame.pack(fill=BOTH, expand=True, pady=(8, 0))
@@ -621,8 +708,12 @@ class PdfSplitterApp:
     def _build_step4(self) -> None:
         self._add_section_header(
             self.step4,
-            "出力前に確認",
-            "出力先、予定ファイル名、未入力や命名エラーを確認します。要修正が残っている場合は出力できません。",
+            "4. 出力前に確認して実行する",
+            "まず出力前チェックを押してください。問題がなければ出力実行、要修正があればStep 3へ戻って入力を直します。",
+        )
+        ttk.Label(self.step4, textvariable=self.output_instruction_var, style="NextAction.TLabel", padding=(8, 5)).pack(
+            fill="x",
+            pady=(0, 8),
         )
         toolbar = ttk.Frame(self.step4)
         toolbar.pack(fill="x")
@@ -1707,6 +1798,7 @@ class PdfSplitterApp:
             self.output_action_overrides,
         )
         view = build_output_preflight_view(checks, self.output_dir)
+        warning_count = sum(1 for check in checks if check.ok and (check.has_existing_output or check.action in {OUTPUT_ACTION_REUSE_EXISTING, OUTPUT_ACTION_SKIP}))
         for index, check in enumerate(checks):
             if check.ok:
                 if check.action == OUTPUT_ACTION_SKIP:
@@ -1737,6 +1829,14 @@ class PdfSplitterApp:
                 tags=(tag,),
             )
         self.output_check_summary_var.set(view.summary_text)
+        if not checks:
+            self.output_instruction_var.set("要確認: 出力対象がありません。Step 1でPDFを選択し、Step 2で分割を作成してください。")
+        elif view.invalid_count:
+            self.output_instruction_var.set(f"要修正: {view.invalid_count}件あります。Step 3で入力内容と出力名を確認してください。")
+        elif warning_count:
+            self.output_instruction_var.set(f"警告: {warning_count}件の既存ファイル処理があります。処理方針を確認してから出力してください。")
+        else:
+            self.output_instruction_var.set(f"OK: {view.ready_count}件を出力できます。保存先を確認してから出力実行してください。")
         for line in view.lines:
             self.output_text.insert(END, line.text, line.tag)
         self.run_output_button.configure(state="normal" if view.can_run else "disabled")
@@ -1832,6 +1932,11 @@ class PdfSplitterApp:
         self.output_status_var.set("出力完了" if failed == 0 else "エラー終了")
         self.output_check_summary_var.set(
             f"出力完了: 成功 {success}件 / 再利用 {reused}件 / スキップ {skipped}件 / 失敗 {failed}件 / 保存先: {self.output_dir}"
+        )
+        self.output_instruction_var.set(
+            "OK: 出力が完了しました。出力フォルダを確認してください。"
+            if failed == 0
+            else f"要確認: 出力失敗が {failed}件あります。ログを確認してください。"
         )
         self.run_output_button.configure(state="normal" if failed == 0 else "disabled")
         self._update_workflow_status()

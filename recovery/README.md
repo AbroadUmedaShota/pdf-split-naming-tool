@@ -40,7 +40,7 @@ See `docs/2026-05-19_配布前チェックリスト.md` before copying a build t
 
 ## Current priority
 
-- Yoshida Elsis preset first.
+- ヨシダエルシス preset first.
 - Preset-based fields, naming rules, and extraction keywords.
 - Step 2 keyboard focus behavior.
 - Responsive preview and thumbnail handling for 200-250+ page PDFs.
