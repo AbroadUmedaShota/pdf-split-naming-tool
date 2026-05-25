@@ -51,6 +51,7 @@ from .workflow import (
 
 
 TEXT_WIDGET_CLASSES = {"Entry", "TEntry", "Text", "Spinbox", "TCombobox"}
+STEP2_DETAIL_TAB_LABELS = ("検出", "候補", "OCR本文", "操作")
 
 
 class PdfSplitterApp:
@@ -579,27 +580,33 @@ class PdfSplitterApp:
         ).pack(anchor="w", pady=(8, 0))
         self.step2_details_frame = ttk.Frame(decision)
 
-        tools = ttk.LabelFrame(self.step2_details_frame, text="候補検出", padding=8)
-        tools.pack(fill="x")
+        self.step2_detail_tabs = ttk.Notebook(self.step2_details_frame)
+        self.step2_detail_tabs.pack(fill=BOTH, expand=True)
+
+        detect_tab = ttk.Frame(self.step2_detail_tabs, padding=6)
+        self.step2_detail_tabs.add(detect_tab, text=STEP2_DETAIL_TAB_LABELS[0])
         self.search_var = StringVar()
-        self.search_entry = ttk.Entry(tools, textvariable=self.search_var, width=28)
+        self.search_entry = ttk.Entry(detect_tab, textvariable=self.search_var, width=28)
         self.search_entry.pack(fill="x")
-        tool_buttons = ttk.Frame(tools)
+        tool_buttons = ttk.Frame(detect_tab)
         tool_buttons.pack(fill="x", pady=(6, 0))
         self.search_button = ttk.Button(tool_buttons, text="検索", command=self.start_text_search)
-        self.search_button.pack(side=LEFT)
+        self.search_button.pack(side=LEFT, fill="x", expand=True)
         self.index_button = ttk.Button(tool_buttons, text="インデックス", command=self.start_index_candidate_search)
-        self.index_button.pack(side=LEFT, padx=4)
+        self.index_button.pack(side=LEFT, fill="x", expand=True, padx=4)
         self.blank_button = ttk.Button(tool_buttons, text="白紙検出", command=self.start_blank_scan)
-        self.blank_button.pack(side=LEFT)
-        self.cancel_job_button = ttk.Button(tools, text="処理中止", command=self.cancel_active_job, state="disabled")
+        self.blank_button.pack(side=LEFT, fill="x", expand=True)
+        self.cancel_job_button = ttk.Button(detect_tab, text="処理中止", command=self.cancel_active_job, state="disabled")
         self.cancel_job_button.pack(fill="x", pady=(6, 0))
+        ttk.Label(
+            detect_tab,
+            text="検索、インデックス候補、白紙候補は必要な時だけ実行します。",
+            style="Hint.TLabel",
+            wraplength=260,
+        ).pack(anchor="w", pady=(6, 0))
 
-        decision_tabs = ttk.Notebook(self.step2_details_frame)
-        decision_tabs.pack(fill=BOTH, expand=True, pady=(8, 0))
-
-        candidate_tab = ttk.Frame(decision_tabs, padding=6)
-        decision_tabs.add(candidate_tab, text="候補")
+        candidate_tab = ttk.Frame(self.step2_detail_tabs, padding=6)
+        self.step2_detail_tabs.add(candidate_tab, text=STEP2_DETAIL_TAB_LABELS[1])
         ttk.Label(candidate_tab, textvariable=self.candidate_summary_var).pack(anchor="w")
         self.candidate_list = Listbox(candidate_tab, width=36, height=8)
         self._style_listbox(self.candidate_list)
@@ -607,8 +614,8 @@ class PdfSplitterApp:
         self.candidate_list.bind("<<ListboxSelect>>", self.on_candidate_selected)
         ttk.Button(candidate_tab, text="候補ページの前に分割", command=self.add_split_before_current_page).pack(fill="x")
 
-        ocr_tab = ttk.Frame(decision_tabs, padding=6)
-        decision_tabs.add(ocr_tab, text="OCR本文")
+        ocr_tab = ttk.Frame(self.step2_detail_tabs, padding=6)
+        self.step2_detail_tabs.add(ocr_tab, text=STEP2_DETAIL_TAB_LABELS[2])
         self.ocr_text = Text(ocr_tab, height=12, wrap="word")
         self._style_text(self.ocr_text)
         self.ocr_text.pack(fill=BOTH, expand=True)
@@ -619,8 +626,8 @@ class PdfSplitterApp:
         ttk.Button(transfer, text="選択OCRを転記", command=self.transfer_selected_ocr_text).pack(side=LEFT, padx=4)
         self.refresh_ocr_transfer_fields()
 
-        advanced_split = ttk.LabelFrame(self.step2_details_frame, text="詳細な分割操作", padding=8)
-        advanced_split.pack(fill="x", pady=(8, 0))
+        advanced_split = ttk.Frame(self.step2_detail_tabs, padding=6)
+        self.step2_detail_tabs.add(advanced_split, text=STEP2_DETAIL_TAB_LABELS[3])
         ttk.Button(advanced_split, text="選択した分割を削除", command=self.delete_selected_split).pack(fill="x")
         undo_row = ttk.Frame(advanced_split)
         undo_row.pack(fill="x", pady=(4, 0))

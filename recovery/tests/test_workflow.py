@@ -45,7 +45,122 @@ def test_apply_common_metadata_and_resequence_segments(tmp_path: Path) -> None:
 def test_metadata_suggestions_from_text_are_copy_friendly() -> None:
     text = "\n  株式会社A  \n\n契約書\n株式会社A\n箱No 01\nバインダー 02\n追加行\n"
 
-    assert metadata_suggestions_from_text(text, limit=4) == ["株式会社A", "契約書", "箱No 01", "バインダー 02"]
+    assert metadata_suggestions_from_text(text, limit=4) == ["01", "02", "株式会社A", "契約書"]
+
+
+def test_metadata_suggestions_prioritize_labeled_values() -> None:
+    text = """
+    PDF OCR result
+    箱No: 01
+    バインダーNo：02
+    連番 = 003
+    会社名 株式会社A
+    契約書
+    """
+
+    assert metadata_suggestions_from_text(text, limit=5) == ["01", "02", "003", "株式会社A", "契約書"]
+
+
+def test_metadata_suggestions_extract_generic_number_labels() -> None:
+    text = """
+    No. 01
+    No 02
+    番号 003
+    契約書
+    """
+
+    assert metadata_suggestions_from_text(text, limit=4) == ["01", "02", "003", "契約書"]
+
+
+def test_metadata_suggestions_extract_number_prefix_before_description() -> None:
+    text = """
+    No. 01 契約書
+    No 02 Binder
+    番号 003 控え
+    """
+
+    assert metadata_suggestions_from_text(text, limit=3) == ["01", "02", "003"]
+
+
+def test_metadata_suggestions_extract_values_without_label_separators() -> None:
+    text = """
+    箱No01
+    バインダーNo02
+    No.003
+    会社名株式会社A
+    """
+
+    assert metadata_suggestions_from_text(text, limit=4) == ["01", "02", "003", "株式会社A"]
+
+
+def test_metadata_suggestions_extract_values_with_symbol_separators() -> None:
+    text = """
+    箱No-01
+    バインダーNo/02
+    No.-003
+    Seq|004
+    """
+
+    assert metadata_suggestions_from_text(text, limit=4) == ["01", "02", "003", "004"]
+
+
+def test_metadata_suggestions_do_not_treat_notice_as_no_label() -> None:
+    text = """
+    Notice of contract
+    No.003
+    契約書
+    """
+
+    assert metadata_suggestions_from_text(text, limit=3) == ["003", "契約書", "Notice of contract"]
+
+
+def test_metadata_suggestions_do_not_strip_short_japanese_words_as_labels() -> None:
+    text = """
+    箱入り書類
+    バインダー保管資料
+    箱01
+    バインダー02
+    """
+
+    assert metadata_suggestions_from_text(text, limit=4) == ["01", "02", "箱入り書類", "バインダー保管資料"]
+
+
+def test_metadata_suggestions_normalize_fullwidth_label_values() -> None:
+    text = """
+    箱No０１
+    ＢｉｎｄｅｒＮｏ０２
+    Ｓｅｑ００３
+    株式会社Ａ
+    """
+
+    assert metadata_suggestions_from_text(text, limit=4) == ["01", "02", "003", "株式会社A"]
+
+
+def test_metadata_suggestions_ignore_leading_bullets_before_labels() -> None:
+    text = """
+    - BoxNo01
+    ・バインダーNo02
+    ■Seq003
+    * 会社名株式会社A
+    """
+
+    assert metadata_suggestions_from_text(text, limit=4) == ["01", "02", "003", "株式会社A"]
+
+
+def test_metadata_suggestions_do_not_strip_english_words_that_start_with_labels() -> None:
+    text = """
+    Documentary contract
+    Companywide policy
+    document 契約書
+    company 株式会社A
+    """
+
+    assert metadata_suggestions_from_text(text, limit=4) == [
+        "契約書",
+        "株式会社A",
+        "Documentary contract",
+        "Companywide policy",
+    ]
 
 
 def test_check_segment_outputs_reports_ready_and_invalid(tmp_path: Path) -> None:

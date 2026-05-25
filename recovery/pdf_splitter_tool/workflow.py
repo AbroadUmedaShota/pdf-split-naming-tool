@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +21,32 @@ OUTPUT_ACTION_LABELS = {
     OUTPUT_ACTION_REUSE_EXISTING: "既存ファイルを再利用",
     OUTPUT_ACTION_SKIP: "スキップ",
 }
+METADATA_SUGGESTION_VALUE_LABEL_PATTERN = (
+    r"箱\s*No|箱番号|box\s*no(?![A-Za-z])|"
+    r"バインダー\s*No|バインダー番号|binder\s*no(?![A-Za-z])|"
+    r"連番|seq(?![A-Za-z])|番号|"
+    r"会社名|company(?![A-Za-z-])|契約書名|書類名|document(?![A-Za-z-])"
+)
+METADATA_SUGGESTION_SEPARATOR_PATTERN = r"[:：=／/|\\\-‐‑‒–—―ー－ ]+"
+METADATA_SUGGESTION_VALUE_RE = re.compile(
+    rf"^\s*(?P<label>{METADATA_SUGGESTION_VALUE_LABEL_PATTERN})(?:{METADATA_SUGGESTION_SEPARATOR_PATTERN})?(?P<value>.+?)\s*$",
+    re.IGNORECASE,
+)
+METADATA_SUGGESTION_NUMBER_LABEL_RE = re.compile(
+    r"^(?:箱\s*No|箱番号|box\s*no|バインダー\s*No|バインダー番号|binder\s*no|連番|seq|番号)$",
+    re.IGNORECASE,
+)
+METADATA_SUGGESTION_NUMBER_VALUE_RE = re.compile(r"^(?P<value>\d[\dA-Za-z_-]*)(?:\s+.+)?$")
+METADATA_SUGGESTION_SHORT_NUMBER_RE = re.compile(
+    r"^\s*(?:箱|バインダー)\s*(?P<value>\d[\dA-Za-z_-]*)(?:\s+.+)?\s*$",
+    re.IGNORECASE,
+)
+METADATA_SUGGESTION_NO_VALUE_RE = re.compile(
+    rf"^\s*No\.?(?:{METADATA_SUGGESTION_SEPARATOR_PATTERN})?(?P<value>\d[\dA-Za-z_-]*)(?:\s+.+)?\s*$",
+    re.IGNORECASE,
+)
+METADATA_SUGGESTION_LEADING_MARK_RE = re.compile(r"^\s*(?:[-*•・■□◆◇●○]+|\d+[.)）])\s*")
+METADATA_SUGGESTION_JAPANESE_RE = re.compile(r"[ぁ-んァ-ン一-龯]")
 
 
 @dataclass(frozen=True)
@@ -74,14 +102,40 @@ def resequence_segments(segments: list[Segment], key: str = "seq", start: int = 
 
 
 def metadata_suggestions_from_text(text: str, limit: int = 5) -> list[str]:
-    suggestions: list[str] = []
+    labeled_values: list[str] = []
+    business_lines: list[str] = []
+    other_lines: list[str] = []
     seen: set[str] = set()
     for line in text.splitlines():
-        candidate = line.strip()
+        candidate = METADATA_SUGGESTION_LEADING_MARK_RE.sub("", unicodedata.normalize("NFKC", line)).strip()
+        if not candidate:
+            continue
+        number_match = METADATA_SUGGESTION_NO_VALUE_RE.match(candidate) or METADATA_SUGGESTION_SHORT_NUMBER_RE.match(
+            candidate
+        )
+        value_match = None if number_match else METADATA_SUGGESTION_VALUE_RE.match(candidate)
+        match = number_match or value_match
+        if match:
+            candidate = match.group("value").strip()
+            if number_match or (
+                value_match and METADATA_SUGGESTION_NUMBER_LABEL_RE.match(value_match.group("label").strip())
+            ):
+                number_value_match = METADATA_SUGGESTION_NUMBER_VALUE_RE.match(candidate)
+                if number_value_match:
+                    candidate = number_value_match.group("value")
+            target = labeled_values
+        elif METADATA_SUGGESTION_JAPANESE_RE.search(candidate):
+            target = business_lines
+        else:
+            target = other_lines
         if not candidate or candidate in seen:
             continue
-        suggestions.append(candidate)
+        target.append(candidate)
         seen.add(candidate)
+
+    suggestions: list[str] = []
+    for candidate in [*labeled_values, *business_lines, *other_lines]:
+        suggestions.append(candidate)
         if len(suggestions) >= limit:
             break
     return suggestions

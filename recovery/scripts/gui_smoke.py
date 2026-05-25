@@ -17,7 +17,7 @@ RECOVERY_ROOT = Path(__file__).resolve().parents[1]
 if str(RECOVERY_ROOT) not in sys.path:
     sys.path.insert(0, str(RECOVERY_ROOT))
 
-from pdf_splitter_tool.app import PdfSplitterApp
+from pdf_splitter_tool.app import STEP2_DETAIL_TAB_LABELS, PdfSplitterApp
 from pdf_splitter_tool.preset_manager_dialog import PresetManagerDialog
 
 
@@ -27,6 +27,9 @@ def make_sample_pdf(path: Path) -> None:
         page = doc.new_page()
         page.insert_text((72, 72), f"Invoice sample page {page_no}", fontsize=14)
         page.insert_text((72, 108), "Box 01 Binder 02", fontsize=12)
+        page.insert_text((72, 144), "BoxNo01", fontsize=12)
+        page.insert_text((72, 180), "BinderNo02", fontsize=12)
+        page.insert_text((72, 216), "Seq003", fontsize=12)
     doc.save(path)
     doc.close()
 
@@ -61,6 +64,16 @@ def capture_widget(widget, output_dir: Path, name: str) -> Path:
     path = output_dir / f"{name}.png"
     ImageGrab.grab(bbox=(x, y, x + width, y + height)).save(path)
     return path
+
+
+def assert_notebook_tabs(notebook, expected: tuple[str, ...]) -> None:
+    actual = tuple(notebook.tab(tab_id, "text") for tab_id in notebook.tabs())
+    if actual != expected:
+        raise AssertionError(f"Notebook tabs mismatch: expected {expected!r}, got {actual!r}")
+
+
+def listbox_values(listbox) -> tuple[str, ...]:
+    return tuple(listbox.get(index) for index in range(listbox.size()))
 
 
 def main() -> int:
@@ -101,6 +114,11 @@ def main() -> int:
         app.step2_details_visible_var.set(True)
         app.toggle_step2_details()
         pump(root, 0.2)
+        assert_notebook_tabs(app.step2_detail_tabs, STEP2_DETAIL_TAB_LABELS)
+        for tab_index in range(len(STEP2_DETAIL_TAB_LABELS)):
+            app.step2_detail_tabs.select(tab_index)
+            pump(root, 0.05)
+        app.step2_detail_tabs.select(0)
         app.search_var.set("Invoice")
         app.start_text_search()
         wait_until(root, lambda: bool(app.search_hit_pages))
@@ -112,6 +130,12 @@ def main() -> int:
 
         app.notebook.select(app.step3)
         pump(root, 0.3)
+        app.step3_assist_visible_var.set(True)
+        app.toggle_step3_assist()
+        app.refresh_metadata_suggestions()
+        suggestions = listbox_values(app.suggestion_list)
+        if suggestions[:3] != ("01", "02", "003"):
+            raise AssertionError(f"Step 3 suggestions mismatch: {suggestions!r}")
         app.common_metadata_vars["box_no"].set("1")
         app.common_metadata_vars["binder_no"].set("2")
         app.apply_common_metadata_to_segments()
