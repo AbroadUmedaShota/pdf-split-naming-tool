@@ -22,23 +22,37 @@ OUTPUT_ACTION_LABELS = {
     OUTPUT_ACTION_SKIP: "スキップ",
 }
 METADATA_SUGGESTION_VALUE_LABEL_PATTERN = (
-    r"箱\s*No|箱番号|box\s*no(?![A-Za-z])|"
-    r"バインダー\s*No|バインダー番号|binder\s*no(?![A-Za-z])|"
-    r"連番|seq(?![A-Za-z])|番号|"
-    r"会社名|company(?![A-Za-z-])|契約書名|書類名|document(?![A-Za-z-])"
+    r"箱\s*No\s*\.?|箱\s*番号|box\s*(?:no\s*\.?|number)(?![A-Za-z])|"
+    r"バインダー\s*No\s*\.?|バインダー\s*番号|binder\s*(?:no\s*\.?|number)(?![A-Za-z])|"
+    r"連番|seq(?:uence)?\.?(?:\s*number)?(?![A-Za-z])|番号|"
+    r"会社\s*名|company\s*name(?![A-Za-z-])|company(?![A-Za-z-])|"
+    r"契約書\s*名|書類\s*名|(?:document|contract)\s*name(?![A-Za-z-])|document(?![A-Za-z-])"
 )
-METADATA_SUGGESTION_SEPARATOR_PATTERN = r"[:：=／/|\\\-‐‑‒–—―ー－ ]+"
+METADATA_SUGGESTION_SEPARATOR_PATTERN = r"[:：=＃#／/|\\\-‐‑‒–—―ー－ ]+"
+METADATA_SUGGESTION_PAREN_DECORATION_PATTERN = r"(?:[（(][^）)]*[）)])"
+METADATA_SUGGESTION_SEPARATOR_ONLY_RE = re.compile(rf"^{METADATA_SUGGESTION_SEPARATOR_PATTERN}$")
 METADATA_SUGGESTION_VALUE_RE = re.compile(
-    rf"^\s*(?P<label>{METADATA_SUGGESTION_VALUE_LABEL_PATTERN})(?:{METADATA_SUGGESTION_SEPARATOR_PATTERN})?(?P<value>.+?)\s*$",
+    rf"^\s*(?P<label>{METADATA_SUGGESTION_VALUE_LABEL_PATTERN})"
+    rf"(?:{METADATA_SUGGESTION_PAREN_DECORATION_PATTERN})?"
+    rf"(?:{METADATA_SUGGESTION_SEPARATOR_PATTERN})?(?P<value>.+?)\s*$",
+    re.IGNORECASE,
+)
+METADATA_SUGGESTION_STANDALONE_LABEL_RE = re.compile(
+    rf"^\s*(?P<label>{METADATA_SUGGESTION_VALUE_LABEL_PATTERN})"
+    rf"(?:{METADATA_SUGGESTION_PAREN_DECORATION_PATTERN})?"
+    rf"(?:{METADATA_SUGGESTION_SEPARATOR_PATTERN})?\s*$",
     re.IGNORECASE,
 )
 METADATA_SUGGESTION_NUMBER_LABEL_RE = re.compile(
-    r"^(?:箱\s*No|箱番号|box\s*no|バインダー\s*No|バインダー番号|binder\s*no|連番|seq|番号)$",
+    r"^(?:箱\s*No|箱\s*番号|box\s*no|バインダー\s*No|バインダー\s*番号|binder\s*no|連番|seq(?:uence)?\.?|番号)$",
     re.IGNORECASE,
 )
-METADATA_SUGGESTION_NUMBER_VALUE_RE = re.compile(r"^(?P<value>\d[\dA-Za-z_-]*)(?:\s+.+)?$")
+METADATA_SUGGESTION_NUMBER_VALUE_RE = re.compile(
+    r"^(?:(?:No\s*\.?|番号|seq(?:uence)?\.?|#)\s*)?(?P<value>\d[\dA-Za-z_-]*)(?:\s+.+)?$",
+    re.IGNORECASE,
+)
 METADATA_SUGGESTION_SHORT_NUMBER_RE = re.compile(
-    r"^\s*(?:箱|バインダー)\s*(?P<value>\d[\dA-Za-z_-]*)(?:\s+.+)?\s*$",
+    rf"^\s*(?:箱|バインダー|box|binder)(?:{METADATA_SUGGESTION_SEPARATOR_PATTERN})?(?P<value>\d[\dA-Za-z_-]*)(?:\s+.+)?\s*$",
     re.IGNORECASE,
 )
 METADATA_SUGGESTION_NO_VALUE_RE = re.compile(
@@ -101,15 +115,57 @@ def resequence_segments(segments: list[Segment], key: str = "seq", start: int = 
         value += step
 
 
+def metadata_suggestion_value_from_labeled_text(candidate: str) -> str:
+    standalone_label_match = METADATA_SUGGESTION_STANDALONE_LABEL_RE.match(candidate)
+    if standalone_label_match:
+        return candidate
+
+    number_match = METADATA_SUGGESTION_NO_VALUE_RE.match(candidate) or METADATA_SUGGESTION_SHORT_NUMBER_RE.match(
+        candidate
+    )
+    value_match = None if number_match else METADATA_SUGGESTION_VALUE_RE.match(candidate)
+    match = number_match or value_match
+    return match.group("value").strip() if match else candidate
+
+
 def metadata_suggestions_from_text(text: str, limit: int = 5) -> list[str]:
+    if limit <= 0:
+        return []
+
     labeled_values: list[str] = []
     business_lines: list[str] = []
     other_lines: list[str] = []
     seen: set[str] = set()
+    pending_label: str | None = None
     for line in text.splitlines():
         candidate = METADATA_SUGGESTION_LEADING_MARK_RE.sub("", unicodedata.normalize("NFKC", line)).strip()
         if not candidate:
             continue
+        if pending_label:
+            if METADATA_SUGGESTION_SEPARATOR_ONLY_RE.match(candidate):
+                continue
+            standalone_label_match = METADATA_SUGGESTION_STANDALONE_LABEL_RE.match(candidate)
+            if standalone_label_match:
+                pending_label = standalone_label_match.group("label").strip()
+                continue
+            candidate = metadata_suggestion_value_from_labeled_text(candidate)
+            if METADATA_SUGGESTION_NUMBER_LABEL_RE.match(pending_label):
+                number_value_match = METADATA_SUGGESTION_NUMBER_VALUE_RE.match(candidate)
+                if number_value_match:
+                    candidate = number_value_match.group("value")
+            target = labeled_values
+            pending_label = None
+            if not candidate or candidate in seen:
+                continue
+            target.append(candidate)
+            seen.add(candidate)
+            continue
+
+        standalone_label_match = METADATA_SUGGESTION_STANDALONE_LABEL_RE.match(candidate)
+        if standalone_label_match:
+            pending_label = standalone_label_match.group("label").strip()
+            continue
+
         number_match = METADATA_SUGGESTION_NO_VALUE_RE.match(candidate) or METADATA_SUGGESTION_SHORT_NUMBER_RE.match(
             candidate
         )

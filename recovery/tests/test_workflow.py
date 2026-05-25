@@ -104,6 +104,79 @@ def test_metadata_suggestions_extract_values_with_symbol_separators() -> None:
     assert metadata_suggestions_from_text(text, limit=4) == ["01", "02", "003", "004"]
 
 
+def test_metadata_suggestions_extract_values_from_no_dot_labels() -> None:
+    text = """
+    箱No. 01
+    バインダーNo. 02
+    BoxNo. 03
+    BinderNo. 04
+    """
+
+    assert metadata_suggestions_from_text(text, limit=4) == ["01", "02", "03", "04"]
+
+
+def test_metadata_suggestions_extract_values_from_no_dot_labels_with_spaces() -> None:
+    text = """
+    箱 No . 01
+    バインダー No . 02
+    Box No . 03
+    Binder No . 04
+    """
+
+    assert metadata_suggestions_from_text(text, limit=4) == ["01", "02", "03", "04"]
+
+
+def test_metadata_suggestions_extract_values_from_number_symbol_labels() -> None:
+    text = """
+    箱№01
+    バインダー№ 02
+    №003
+    """
+
+    assert metadata_suggestions_from_text(text, limit=3) == ["01", "02", "003"]
+
+
+def test_metadata_suggestions_extract_values_from_hash_number_labels() -> None:
+    text = """
+    箱#01
+    バインダー # 02
+    Box # 03
+    No # 004
+    """
+
+    assert metadata_suggestions_from_text(text, limit=4) == ["01", "02", "03", "004"]
+
+
+def test_metadata_suggestions_extract_values_from_english_number_labels() -> None:
+    text = """
+    Box Number 01
+    Binder Number 02
+    Sequence Number 003
+    """
+
+    assert metadata_suggestions_from_text(text, limit=3) == ["01", "02", "003"]
+
+
+def test_metadata_suggestions_extract_values_from_seq_dot_labels() -> None:
+    text = """
+    Seq. 003
+    Sequence. 004
+    Seq.
+    005
+    """
+
+    assert metadata_suggestions_from_text(text, limit=3) == ["003", "004", "005"]
+
+
+def test_metadata_suggestions_extract_values_from_spaced_japanese_number_labels() -> None:
+    text = """
+    箱 番号 01
+    バインダー 番号 02
+    """
+
+    assert metadata_suggestions_from_text(text, limit=2) == ["01", "02"]
+
+
 def test_metadata_suggestions_do_not_treat_notice_as_no_label() -> None:
     text = """
     Notice of contract
@@ -161,6 +234,161 @@ def test_metadata_suggestions_do_not_strip_english_words_that_start_with_labels(
         "Documentary contract",
         "Companywide policy",
     ]
+
+
+def test_metadata_suggestions_extract_values_from_english_name_labels() -> None:
+    text = """
+    Company Name Acme Inc
+    Document Name Lease Agreement
+    Contract Name Service Agreement
+    """
+
+    assert metadata_suggestions_from_text(text, limit=3) == ["Acme Inc", "Lease Agreement", "Service Agreement"]
+
+
+def test_metadata_suggestions_extract_values_from_spaced_japanese_name_labels() -> None:
+    text = """
+    会社 名 株式会社A
+    書類 名 契約書
+    契約書 名 賃貸借契約書
+    """
+
+    assert metadata_suggestions_from_text(text, limit=3) == ["株式会社A", "契約書", "賃貸借契約書"]
+
+
+def test_metadata_suggestions_use_value_after_standalone_label() -> None:
+    text = """
+    箱No
+    01
+    バインダー番号
+    02
+    会社名
+    株式会社A
+    書類名
+    契約書
+    """
+
+    assert metadata_suggestions_from_text(text, limit=4) == ["01", "02", "株式会社A", "契約書"]
+
+
+def test_metadata_suggestions_skip_empty_label_when_next_line_is_another_label() -> None:
+    text = """
+    会社名
+    書類名
+    契約書
+    箱No
+    バインダー番号
+    02
+    """
+
+    assert metadata_suggestions_from_text(text, limit=3) == ["契約書", "02"]
+
+
+def test_metadata_suggestions_extract_labeled_value_after_standalone_label() -> None:
+    text = """
+    箱No
+    No. 01
+    バインダー番号
+    番号 02
+    連番
+    Seq 003
+    """
+
+    assert metadata_suggestions_from_text(text, limit=3) == ["01", "02", "003"]
+
+
+def test_metadata_suggestions_extract_hash_value_after_number_label() -> None:
+    text = """
+    箱No
+    # 01
+    バインダー番号
+    #02
+    """
+
+    assert metadata_suggestions_from_text(text, limit=2) == ["01", "02"]
+
+
+def test_metadata_suggestions_extract_values_from_number_label_with_no_suffix() -> None:
+    text = """
+    連番No. 003
+    連番番号 004
+    seq No 005
+    """
+
+    assert metadata_suggestions_from_text(text, limit=3) == ["003", "004", "005"]
+
+
+def test_metadata_suggestions_respect_zero_limit() -> None:
+    text = """
+    箱No
+    01
+    会社名
+    株式会社A
+    """
+
+    assert metadata_suggestions_from_text(text, limit=0) == []
+
+
+def test_metadata_suggestions_use_value_after_standalone_label_with_separator() -> None:
+    text = """
+    箱No:
+    01
+    バインダー番号：
+    02
+    会社名 =
+    株式会社A
+    書類名 -
+    契約書
+    """
+
+    assert metadata_suggestions_from_text(text, limit=4) == ["01", "02", "株式会社A", "契約書"]
+
+
+def test_metadata_suggestions_skip_separator_only_line_after_standalone_label() -> None:
+    text = """
+    箱No
+    :
+    01
+    会社名
+    =
+    株式会社A
+    書類名
+    -
+    契約書
+    """
+
+    assert metadata_suggestions_from_text(text, limit=3) == ["01", "株式会社A", "契約書"]
+
+
+def test_metadata_suggestions_use_value_after_empty_parenthesized_label() -> None:
+    text = """
+    会社名（）
+    株式会社A
+    書類名()
+    契約書
+    """
+
+    assert metadata_suggestions_from_text(text, limit=2) == ["株式会社A", "契約書"]
+
+
+def test_metadata_suggestions_use_value_after_parenthesized_label_note() -> None:
+    text = """
+    会社名（契約者）
+    株式会社A
+    書類名(種類)
+    契約書
+    """
+
+    assert metadata_suggestions_from_text(text, limit=2) == ["株式会社A", "契約書"]
+
+
+def test_metadata_suggestions_extract_same_line_values_after_parenthesized_label_note() -> None:
+    text = """
+    会社名（契約者） 株式会社A
+    書類名（種類）: 契約書
+    """
+
+    assert metadata_suggestions_from_text(text, limit=2) == ["株式会社A", "契約書"]
 
 
 def test_check_segment_outputs_reports_ready_and_invalid(tmp_path: Path) -> None:
