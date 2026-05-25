@@ -48,7 +48,7 @@ def visible_page_numbers(page_count: int, candidates: set[int], candidates_only:
 
 def segment_for_page(segments: list[Segment], page_no: int) -> Segment | None:
     for segment in segments:
-        if segment.start_page <= page_no <= segment.end_page:
+        if page_no in segment.pages:
             return segment
     return None
 
@@ -56,7 +56,7 @@ def segment_for_page(segments: list[Segment], page_no: int) -> Segment | None:
 def segment_state_text(segments: list[Segment], page_no: int, page_count: int) -> str:
     segment = segment_for_page(segments, page_no)
     if segment is not None:
-        return f"所属セグメント: {segment.start_page}-{segment.end_page}ページ"
+        return f"所属セグメント: {segment.page_label}ページ"
     start = max((item.end_page for item in segments), default=0) + 1
     if page_count:
         return f"未確定範囲: {start}-{page_count}ページ"

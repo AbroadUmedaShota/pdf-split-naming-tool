@@ -105,6 +105,21 @@ def test_split_pdf_uses_one_based_inclusive_segment(tmp_path: Path) -> None:
         assert "Page 4" in doc.load_page(2).get_text()
 
 
+def test_split_pdf_uses_page_plan_order_and_rotation(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    make_pdf(source, 5)
+    segment = Segment(source, start_page=1, end_page=5, page_numbers=(3, 1), rotations={3: 90})
+
+    output = PdfProcessor.split_pdf(segment, tmp_path / "out.pdf")
+
+    with fitz.open(output) as doc:
+        assert doc.page_count == 2
+        assert "Page 3" in doc.load_page(0).get_text()
+        assert doc.load_page(0).rotation == 90
+        assert "Page 1" in doc.load_page(1).get_text()
+        assert doc.load_page(1).rotation == 0
+
+
 def test_lru_cache_limits_items() -> None:
     cache = LruCache(max_items=2)
     cache.set("a", 1)

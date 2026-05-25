@@ -59,14 +59,14 @@ def build_output_preflight_view(checks: list[SegmentOutputCheck], output_dir: Pa
                 status = "新規作成"
             lines.append(
                 TaggedOutputLine(
-                    f"[{status}] {check.segment.start_page}-{check.segment.end_page} -> {check.filename} / {existing} / {check.action_label}\n",
+                    f"[{status}] {check.segment.page_label} -> {check.filename} / {existing} / {check.action_label}\n",
                     tag,
                 )
             )
         else:
             lines.append(
                 TaggedOutputLine(
-                    f"[要修正] {check.segment.start_page}-{check.segment.end_page} -> {' / '.join(check.messages)}\n",
+                    f"[要修正] {check.segment.page_label} -> {' / '.join(check.messages)}\n",
                     "error",
                 )
             )

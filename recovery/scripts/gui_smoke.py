@@ -17,7 +17,7 @@ RECOVERY_ROOT = Path(__file__).resolve().parents[1]
 if str(RECOVERY_ROOT) not in sys.path:
     sys.path.insert(0, str(RECOVERY_ROOT))
 
-from pdf_splitter_tool.app import STEP2_DETAIL_TAB_LABELS, PdfSplitterApp
+from pdf_splitter_tool.app import MAIN_TAB_LABELS, STEP2_DETAIL_TAB_LABELS, PdfSplitterApp
 from pdf_splitter_tool.preset_manager_dialog import PresetManagerDialog
 
 
@@ -98,6 +98,7 @@ def main() -> int:
         make_sample_pdf(sample_pdf)
         app = PdfSplitterApp(root, work_dir=work_dir)
         pump(root, 0.5)
+        assert_notebook_tabs(app.notebook, MAIN_TAB_LABELS)
 
         app.add_pdf_paths([sample_pdf])
         wait_until(root, lambda: app.current_page_count == 3)
@@ -153,6 +154,12 @@ def main() -> int:
             screenshots.append(str(capture_widget(root, output_dir, "step4_preflight")))
         app.run_output()
         wait_until(root, lambda: len(list(app.output_dir.glob("*.pdf"))) == 3)
+        wait_until(root, lambda: app.output_history.history_path.exists())
+        app.notebook.select(app.step5)
+        app.refresh_history_view()
+        wait_until(root, lambda: "created" in app.history_text.get("1.0", "end"))
+        if not args.no_screenshots:
+            screenshots.append(str(capture_widget(root, output_dir, "step5_history")))
 
         dialog = PresetManagerDialog(app)
         pump(root, 0.3)

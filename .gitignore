@@ -20,6 +20,14 @@ __pycache__/
 recovery/build/
 recovery/dist/
 
+# Node / Tauri generated files
+node_modules/
+apps/desktop/.next/
+apps/desktop/out/
+apps/desktop/tsconfig.tsbuildinfo
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/target/
+
 # OS/editor files
 .DS_Store
 Thumbs.db

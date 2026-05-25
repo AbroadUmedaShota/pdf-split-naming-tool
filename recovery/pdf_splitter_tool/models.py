@@ -79,12 +79,71 @@ class Segment:
     start_page: int
     end_page: int
     metadata: dict[str, str] = field(default_factory=dict)
+    page_numbers: tuple[int, ...] = ()
+    rotations: dict[int, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.start_page < 1 or self.end_page < 1:
             raise ValueError("Segment pages are 1-based and must be positive.")
         if self.end_page < self.start_page:
             raise ValueError("Segment end_page must be greater than or equal to start_page.")
+        if self.page_numbers:
+            if any(page < 1 for page in self.page_numbers):
+                raise ValueError("Segment page_numbers must be positive.")
+            self.page_numbers = tuple(int(page) for page in self.page_numbers)
+        normalized_rotations: dict[int, int] = {}
+        for page, rotation in self.rotations.items():
+            page_no = int(page)
+            if page_no < 1:
+                raise ValueError("Segment rotation pages must be positive.")
+            normalized_rotation = int(rotation) % 360
+            if normalized_rotation:
+                normalized_rotations[page_no] = normalized_rotation
+        self.rotations = normalized_rotations
+
+    @property
+    def pages(self) -> tuple[int, ...]:
+        return self.page_numbers or tuple(range(self.start_page, self.end_page + 1))
+
+    @property
+    def page_label(self) -> str:
+        pages = self.pages
+        if not pages:
+            return ""
+        if pages == tuple(range(pages[0], pages[-1] + 1)):
+            return f"{pages[0]}-{pages[-1]}" if pages[0] != pages[-1] else str(pages[0])
+        return ",".join(str(page) for page in pages)
+
+    def copy(self) -> "Segment":
+        return Segment(
+            self.pdf_path,
+            self.start_page,
+            self.end_page,
+            dict(self.metadata),
+            tuple(self.page_numbers),
+            dict(self.rotations),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "pdf_path": str(self.pdf_path),
+            "start_page": self.start_page,
+            "end_page": self.end_page,
+            "metadata": dict(self.metadata),
+            "page_numbers": list(self.page_numbers),
+            "rotations": {str(page): rotation for page, rotation in self.rotations.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Segment":
+        return cls(
+            Path(str(data.get("pdf_path", ""))),
+            int(data.get("start_page", 1)),
+            int(data.get("end_page", 1)),
+            dict(data.get("metadata", {})),
+            tuple(int(page) for page in data.get("page_numbers", [])),
+            {int(page): int(rotation) for page, rotation in dict(data.get("rotations", {})).items()},
+        )
 
     @property
     def zero_based_start(self) -> int:

@@ -326,11 +326,11 @@ class PdfProcessor:
         final_path = PdfProcessor.ensure_unique_path(output_path)
         with fitz.open(segment.pdf_path) as src:
             with fitz.open() as dst:
-                dst.insert_pdf(
-                    src,
-                    from_page=segment.zero_based_start,
-                    to_page=segment.zero_based_end_inclusive,
-                )
+                for page_no in segment.pages:
+                    dst.insert_pdf(src, from_page=page_no - 1, to_page=page_no - 1)
+                    rotation = segment.rotations.get(page_no)
+                    if rotation:
+                        dst.load_page(dst.page_count - 1).set_rotation(rotation)
                 dst.save(final_path)
         return final_path
 

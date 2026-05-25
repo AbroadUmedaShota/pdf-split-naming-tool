@@ -115,6 +115,97 @@ def resequence_segments(segments: list[Segment], key: str = "seq", start: int = 
         value += step
 
 
+def _segment_from_pages(segment: Segment, pages: list[int] | tuple[int, ...], rotations: dict[int, int] | None = None) -> Segment:
+    if not pages:
+        raise ValueError("Segment must contain at least one page.")
+    page_numbers = tuple(int(page) for page in pages)
+    planned_pages = set(page_numbers)
+    planned_rotations = {page: rotation for page, rotation in dict(rotations or {}).items() if page in planned_pages}
+    return Segment(
+        segment.pdf_path,
+        min(page_numbers),
+        max(page_numbers),
+        dict(segment.metadata),
+        page_numbers,
+        planned_rotations,
+    )
+
+
+def delete_segment_pages(segment: Segment, pages_to_delete: set[int]) -> Segment:
+    pages = [page for page in segment.pages if page not in pages_to_delete]
+    rotations = {page: rotation for page, rotation in segment.rotations.items() if page in pages}
+    return _segment_from_pages(segment, pages, rotations)
+
+
+def extract_segment_pages(segment: Segment, pages_to_extract: list[int] | tuple[int, ...]) -> Segment:
+    available = set(segment.pages)
+    pages = [page for page in pages_to_extract if page in available]
+    rotations = {page: segment.rotations[page] for page in pages if page in segment.rotations}
+    return _segment_from_pages(segment, pages, rotations)
+
+
+def move_segment_page(segment: Segment, page_no: int, offset: int) -> Segment:
+    pages = list(segment.pages)
+    if page_no not in pages or offset == 0:
+        return segment.copy()
+    old_index = pages.index(page_no)
+    page = pages.pop(old_index)
+    new_index = max(0, min(len(pages), old_index + offset))
+    pages.insert(new_index, page)
+    return _segment_from_pages(segment, pages, dict(segment.rotations))
+
+
+def rotate_segment_pages(segment: Segment, pages_to_rotate: set[int], degrees: int = 90) -> Segment:
+    pages = set(segment.pages)
+    rotations = dict(segment.rotations)
+    for page in pages_to_rotate:
+        if page in pages:
+            rotations[page] = (rotations.get(page, 0) + degrees) % 360
+    return _segment_from_pages(segment, segment.pages, rotations)
+
+
+def segment_page_plan(segment: Segment) -> dict[str, object]:
+    return {
+        "source_pdf": str(segment.pdf_path),
+        "pages": segment.page_label,
+        "page_numbers": list(segment.pages),
+        "rotations": {str(page): rotation for page, rotation in segment.rotations.items() if rotation},
+    }
+
+
+def segment_page_errors(segment: Segment, processor: PdfProcessor) -> tuple[str, ...]:
+    seen_pages: set[int] = set()
+    duplicated_pages: list[int] = []
+    for page in segment.pages:
+        if page in seen_pages and page not in duplicated_pages:
+            duplicated_pages.append(page)
+        seen_pages.add(page)
+    if duplicated_pages:
+        pages = ", ".join(str(page) for page in duplicated_pages)
+        return (f"ページ整理に重複ページが含まれています: {pages}",)
+    planned_pages = set(segment.pages)
+    rotation_pages_outside_plan = sorted(page for page in segment.rotations if page not in planned_pages)
+    if rotation_pages_outside_plan:
+        pages = ", ".join(f"{page}ページ" for page in rotation_pages_outside_plan)
+        return (f"ページ整理に対象外の回転指定が含まれています: {pages}",)
+    invalid_rotations = [
+        f"{page}ページ={rotation}度" for page, rotation in segment.rotations.items() if rotation % 90 != 0
+    ]
+    if invalid_rotations:
+        return (f"ページ整理に未対応の回転角度が含まれています: {', '.join(invalid_rotations)}",)
+    if not segment.page_numbers and not segment.pdf_path.exists():
+        return ()
+    try:
+        page_count = processor.page_count(segment.pdf_path)
+    except Exception as exc:
+        return (f"PDFページ数を確認できません: {exc}",)
+    invalid_pages = [page for page in segment.pages if page < 1 or page > page_count]
+    if invalid_pages:
+        pages = ", ".join(str(page) for page in invalid_pages)
+        return (f"ページ整理に存在しないページが含まれています: {pages} (PDFは{page_count}ページ)",)
+    return ()
+
+
 def metadata_suggestion_value_from_labeled_text(candidate: str) -> str:
     standalone_label_match = METADATA_SUGGESTION_STANDALONE_LABEL_RE.match(candidate)
     if standalone_label_match:
@@ -210,7 +301,11 @@ def check_segment_outputs(
     reserved: set[Path] = set()
     for segment in segments:
         result = processor.build_filename_templated(preset, segment.metadata)
-        messages = list(error_messages(preset, result.errors))
+        page_errors = segment_page_errors(segment, processor)
+        messages = [*error_messages(preset, result.errors), *page_errors]
+        if page_errors:
+            checks.append(SegmentOutputCheck(segment, False, result.normalized_filename, None, tuple(messages)))
+            continue
         if result.ok:
             requested_path = output_dir / result.normalized_filename
             action_key = output_action_key(segment, result.normalized_filename)
@@ -258,7 +353,8 @@ def normalized_output_action(action: str | None) -> str:
 
 
 def output_action_key(segment: Segment, filename: str) -> str:
-    return f"{segment.pdf_path.resolve()}|{segment.start_page}|{segment.end_page}|{filename}"
+    rotations = ",".join(f"{page}:{rotation}" for page, rotation in sorted(segment.rotations.items()))
+    return f"{segment.pdf_path.resolve()}|{segment.page_label}|{rotations}|{filename}"
 
 
 def unique_output_path(path: Path, reserved: set[Path]) -> Path:

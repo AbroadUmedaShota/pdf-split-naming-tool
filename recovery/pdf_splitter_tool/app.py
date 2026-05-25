@@ -9,6 +9,7 @@ from tkinter import BOTH, END, LEFT, RIGHT, VERTICAL, BooleanVar, Canvas, Double
 from tkinter import ttk
 
 from .app_metadata import APP_NAME
+from .history import OutputHistory
 from .models import Segment
 from .output_controller import build_output_preflight_view
 from .presets import PresetRepository, find_preset
@@ -43,14 +44,20 @@ from .workflow import (
     OUTPUT_ACTION_SKIP,
     apply_common_metadata,
     check_segment_outputs,
+    delete_segment_pages,
     error_messages,
+    extract_segment_pages,
     metadata_suggestions_from_text,
+    move_segment_page,
     normalized_output_action,
     resequence_segments,
+    rotate_segment_pages,
+    segment_page_plan,
 )
 
 
 TEXT_WIDGET_CLASSES = {"Entry", "TEntry", "Text", "Spinbox", "TCombobox"}
+MAIN_TAB_LABELS = ("1 PDF取込", "2 ページ整理", "3 入力", "4 出力確認", "5 履歴")
 STEP2_DETAIL_TAB_LABELS = ("検出", "候補", "OCR本文", "操作")
 
 
@@ -61,6 +68,7 @@ class PdfSplitterApp:
         self.root.title(APP_NAME)
         self.processor = PdfProcessor()
         self.state_manager = StateManager(self.work_dir)
+        self.output_history = OutputHistory(self.work_dir)
         self.preset_repo = PresetRepository(self.work_dir / "presets.json")
         self.presets, self.active_preset_id = self.preset_repo.load()
         self.active_preset = find_preset(self.presets, self.active_preset_id)
@@ -117,6 +125,7 @@ class PdfSplitterApp:
         self.step3_suggestion_var = StringVar(value="入力補助候補: 未生成")
         self.output_progress_var = StringVar(value="出力待機中")
         self.output_instruction_var = StringVar(value="出力前チェックを実行してください。")
+        self.history_summary_var = StringVar(value="履歴未読込")
         self.state_status_var = StringVar(value="状態未保存")
         self.output_action_var = StringVar(value=OUTPUT_ACTION_LABELS[OUTPUT_ACTION_CREATE_UNIQUE])
         self.current_pdf_has_text_layer = False
@@ -143,7 +152,7 @@ class PdfSplitterApp:
 
         tracker = ttk.Frame(shell)
         tracker.pack(fill="x", pady=(0, 8))
-        for label in ("PDF選択", "分割", "入力", "出力"):
+        for label in ("PDF取込", "ページ整理", "項目入力", "出力確認", "履歴"):
             var = StringVar(value=f"{label}: 未完了")
             self.step_status_vars.append(var)
             ttk.Label(tracker, textvariable=var, style="StepStatus.TLabel", padding=(8, 4)).pack(side=LEFT, padx=(0, 6))
@@ -160,16 +169,19 @@ class PdfSplitterApp:
         self.step2 = ttk.Frame(self.notebook, padding=8)
         self.step3 = ttk.Frame(self.notebook, padding=8)
         self.step4 = ttk.Frame(self.notebook, padding=8)
-        self.notebook.add(self.step1, text="1 PDF選択")
-        self.notebook.add(self.step2, text="2 分割")
-        self.notebook.add(self.step3, text="3 入力")
-        self.notebook.add(self.step4, text="4 出力")
+        self.step5 = ttk.Frame(self.notebook, padding=8)
+        self.notebook.add(self.step1, text=MAIN_TAB_LABELS[0])
+        self.notebook.add(self.step2, text=MAIN_TAB_LABELS[1])
+        self.notebook.add(self.step3, text=MAIN_TAB_LABELS[2])
+        self.notebook.add(self.step4, text=MAIN_TAB_LABELS[3])
+        self.notebook.add(self.step5, text=MAIN_TAB_LABELS[4])
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         self._build_step1()
         self._build_step2()
         self._build_step3()
         self._build_step4()
+        self._build_step5()
 
         footer = ttk.Frame(shell)
         footer.pack(fill="x", pady=(8, 0))
@@ -229,11 +241,16 @@ class PdfSplitterApp:
         input_status = "未作成" if not checks else (f"OK {ready}件" if invalid == 0 else f"要修正 {invalid}件")
         output_status = "実行可能" if checks and invalid == 0 else "確認待ち"
 
+        try:
+            history_count = len(self.output_history.load())
+        except Exception:
+            history_count = 0
         statuses = (
-            f"PDF選択: {pdf_status}",
-            f"分割: {split_status}",
-            f"入力: {input_status}",
-            f"出力: {output_status}",
+            f"PDF取込: {pdf_status}",
+            f"ページ整理: {split_status}",
+            f"項目入力: {input_status}",
+            f"出力確認: {output_status}",
+            f"履歴: {history_count}件",
         )
         for var, text in zip(self.step_status_vars, statuses):
             var.set(text)
@@ -262,15 +279,7 @@ class PdfSplitterApp:
             "current_pdf": str(self.current_pdf) if self.current_pdf else "",
             "current_page": self.current_page,
             "output_dir": str(self.output_dir),
-            "segments": [
-                {
-                    "pdf_path": str(segment.pdf_path),
-                    "start_page": segment.start_page,
-                    "end_page": segment.end_page,
-                    "metadata": dict(segment.metadata),
-                }
-                for segment in self.segments
-            ],
+            "segments": [segment.to_dict() for segment in self.segments],
             "output_actions": dict(self.output_action_overrides),
             "step1_common_metadata": {key: var.get() for key, var in self.step1_common_metadata_vars.items()},
         }
@@ -319,14 +328,9 @@ class PdfSplitterApp:
                 pdf_path = Path(str(item.get("pdf_path", "")))
                 if pdf_path not in valid_paths:
                     continue
-                self.segments.append(
-                    Segment(
-                        pdf_path,
-                        int(item.get("start_page", 1)),
-                        int(item.get("end_page", 1)),
-                        dict(item.get("metadata", {})),
-                    )
-                )
+                segment = Segment.from_dict(item)
+                if segment.pdf_path == pdf_path:
+                    self.segments.append(segment)
             for key, value in dict(state.get("step1_common_metadata", {})).items():
                 if key in self.step1_common_metadata_vars:
                     self.step1_common_metadata_vars[key].set(str(value))
@@ -629,6 +633,15 @@ class PdfSplitterApp:
         advanced_split = ttk.Frame(self.step2_detail_tabs, padding=6)
         self.step2_detail_tabs.add(advanced_split, text=STEP2_DETAIL_TAB_LABELS[3])
         ttk.Button(advanced_split, text="選択した分割を削除", command=self.delete_selected_split).pack(fill="x")
+        organize = ttk.LabelFrame(advanced_split, text="現在ページの整理", padding=6)
+        organize.pack(fill="x", pady=(6, 0))
+        ttk.Button(organize, text="現在ページを除外", command=self.delete_current_page_from_segment).pack(fill="x")
+        ttk.Button(organize, text="現在ページを右回転", command=self.rotate_current_page_in_segment).pack(fill="x", pady=(4, 0))
+        move_row = ttk.Frame(organize)
+        move_row.pack(fill="x", pady=(4, 0))
+        ttk.Button(move_row, text="前へ移動", command=lambda: self.move_current_page_in_segment(-1)).pack(side=LEFT, fill="x", expand=True)
+        ttk.Button(move_row, text="後ろへ移動", command=lambda: self.move_current_page_in_segment(1)).pack(side=LEFT, fill="x", expand=True, padx=(4, 0))
+        ttk.Button(organize, text="現在ページだけを抽出", command=self.extract_current_page_as_segment).pack(fill="x", pady=(4, 0))
         undo_row = ttk.Frame(advanced_split)
         undo_row.pack(fill="x", pady=(4, 0))
         ttk.Button(undo_row, text="Undo", command=self.undo_segments).pack(side=LEFT, fill="x", expand=True)
@@ -782,6 +795,25 @@ class PdfSplitterApp:
         self.output_text.tag_configure("warn", foreground=UI_WARNING)
         self.output_text.tag_configure("error", foreground=UI_DANGER)
         self.output_text.tag_configure("heading", foreground=UI_TEXT, font=("", 10, "bold"))
+
+    def _build_step5(self) -> None:
+        self._add_section_header(
+            self.step5,
+            "5. 出力履歴を確認する",
+            "過去の出力日時、元PDF、ページ操作、出力ファイル、警告結果をローカル履歴として確認できます。",
+        )
+        toolbar = ttk.Frame(self.step5)
+        toolbar.pack(fill="x")
+        ttk.Button(toolbar, text="履歴を更新", command=self.refresh_history_view).pack(side=LEFT)
+        ttk.Label(toolbar, textvariable=self.history_summary_var, style="Hint.TLabel").pack(side=LEFT, padx=8)
+        self.history_text = Text(self.step5, height=24, wrap="word")
+        self._style_text(self.history_text)
+        self.history_text.pack(fill=BOTH, expand=True, pady=(8, 0))
+        self.history_text.tag_configure("heading", foreground=UI_TEXT, font=("", 10, "bold"))
+        self.history_text.tag_configure("ok", foreground=UI_READY)
+        self.history_text.tag_configure("warn", foreground=UI_WARNING)
+        self.history_text.tag_configure("error", foreground=UI_DANGER)
+        self.refresh_history_view()
 
     def _bind_keys(self) -> None:
         self.root.bind_all("<space>", self.on_space_key)
@@ -1317,14 +1349,14 @@ class PdfSplitterApp:
     def snapshot_segments_for_undo(self) -> None:
         if self._restoring_state:
             return
-        copied = [Segment(segment.pdf_path, segment.start_page, segment.end_page, dict(segment.metadata)) for segment in self.segments]
+        copied = [segment.copy() for segment in self.segments]
         self.undo_stack.append(copied)
         if len(self.undo_stack) > 40:
             self.undo_stack.pop(0)
         self.redo_stack.clear()
 
     def restore_segments_snapshot(self, snapshot: list[Segment]) -> None:
-        self.segments = [Segment(segment.pdf_path, segment.start_page, segment.end_page, dict(segment.metadata)) for segment in snapshot]
+        self.segments = [segment.copy() for segment in snapshot]
         self.refresh_page_list()
         self.refresh_segment_list()
         self.refresh_output_summary()
@@ -1369,17 +1401,84 @@ class PdfSplitterApp:
         self.refresh_segment_list()
         self._update_workflow_status()
 
+    def current_page_segment_index(self) -> int | None:
+        if self.current_pdf is None:
+            return None
+        return next(
+            (
+                index
+                for index, segment in enumerate(self.segments)
+                if segment.pdf_path == self.current_pdf and self.current_page in segment.pages
+            ),
+            None,
+        )
+
+    def replace_segment(self, index: int, segment: Segment) -> None:
+        self.segments[index] = segment
+        self.refresh_page_list()
+        self.refresh_segment_list()
+        self.refresh_output_summary()
+        self._update_workflow_status()
+
+    def delete_current_page_from_segment(self) -> None:
+        index = self.current_page_segment_index()
+        if index is None:
+            messagebox.showinfo("ページ整理", "現在ページを含む分割セグメントがありません。先に分割を作成してください。")
+            return
+        segment = self.segments[index]
+        self.snapshot_segments_for_undo()
+        if len(segment.pages) <= 1:
+            self.segments.pop(index)
+            self.refresh_page_list()
+            self.refresh_segment_list()
+            self.refresh_output_summary()
+            self._update_workflow_status()
+            return
+        self.replace_segment(index, delete_segment_pages(segment, {self.current_page}))
+
+    def rotate_current_page_in_segment(self) -> None:
+        index = self.current_page_segment_index()
+        if index is None:
+            messagebox.showinfo("ページ整理", "現在ページを含む分割セグメントがありません。先に分割を作成してください。")
+            return
+        self.snapshot_segments_for_undo()
+        self.replace_segment(index, rotate_segment_pages(self.segments[index], {self.current_page}, 90))
+        self.render_current_page_async()
+
+    def move_current_page_in_segment(self, offset: int) -> None:
+        index = self.current_page_segment_index()
+        if index is None:
+            messagebox.showinfo("ページ整理", "現在ページを含む分割セグメントがありません。先に分割を作成してください。")
+            return
+        self.snapshot_segments_for_undo()
+        self.replace_segment(index, move_segment_page(self.segments[index], self.current_page, offset))
+
+    def extract_current_page_as_segment(self) -> None:
+        if self.current_pdf is None:
+            return
+        source_index = self.current_page_segment_index()
+        source = self.segments[source_index] if source_index is not None else Segment(self.current_pdf, self.current_page, self.current_page)
+        self.snapshot_segments_for_undo()
+        segment = extract_segment_pages(source, [self.current_page])
+        segment.metadata.update(self.active_preset.default_metadata())
+        segment.metadata["seq"] = str(len(self.segments) + 1)
+        self.segments.append(segment)
+        self.refresh_page_list()
+        self.refresh_segment_list()
+        self.refresh_output_summary()
+        self._update_workflow_status()
+
     def undo_segments(self) -> None:
         if not self.undo_stack:
             return
-        current = [Segment(segment.pdf_path, segment.start_page, segment.end_page, dict(segment.metadata)) for segment in self.segments]
+        current = [segment.copy() for segment in self.segments]
         self.redo_stack.append(current)
         self.restore_segments_snapshot(self.undo_stack.pop())
 
     def redo_segments(self) -> None:
         if not self.redo_stack:
             return
-        current = [Segment(segment.pdf_path, segment.start_page, segment.end_page, dict(segment.metadata)) for segment in self.segments]
+        current = [segment.copy() for segment in self.segments]
         self.undo_stack.append(current)
         self.restore_segments_snapshot(self.redo_stack.pop())
 
@@ -1626,7 +1725,7 @@ class PdfSplitterApp:
                 iid=str(index),
                 values=(
                     index + 1,
-                    f"{check.segment.start_page}-{check.segment.end_page}",
+                    check.segment.page_label,
                     metadata.get("box_no", ""),
                     metadata.get("binder_no", ""),
                     metadata.get("seq", ""),
@@ -1827,7 +1926,7 @@ class PdfSplitterApp:
                 iid=str(index),
                 values=(
                     index + 1,
-                    f"{check.segment.start_page}-{check.segment.end_page}",
+                    check.segment.page_label,
                     check.filename or check.requested_filename,
                     existing,
                     check.action_label,
@@ -1849,6 +1948,37 @@ class PdfSplitterApp:
         self.run_output_button.configure(state="normal" if view.can_run else "disabled")
         self.output_status_var.set(view.status_text)
         self._update_workflow_status()
+
+    def refresh_history_view(self) -> None:
+        if not hasattr(self, "history_text"):
+            return
+        self.history_text.delete("1.0", END)
+        try:
+            runs = self.output_history.load()
+        except Exception as exc:
+            self.history_summary_var.set(f"履歴読込失敗: {exc}")
+            return
+        self.history_summary_var.set(f"履歴: {len(runs)}件 / 保存先: {self.output_history.history_path}")
+        if not runs:
+            self.history_text.insert(END, "まだ出力履歴はありません。\n", "warn")
+            return
+        for run in reversed(runs[-50:]):
+            summary = run.get("summary", {})
+            self.history_text.insert(
+                END,
+                f"{run.get('created_at', '')}  成功 {summary.get('success', 0)} / 再利用 {summary.get('reused', 0)} / "
+                f"スキップ {summary.get('skipped', 0)} / 失敗 {summary.get('failed', 0)}\n",
+                "heading",
+            )
+            for item in run.get("items", []):
+                status = str(item.get("status", ""))
+                tag = "ok" if status in {"created", "reused"} else ("warn" if status == "skipped" else "error")
+                self.history_text.insert(
+                    END,
+                    f"  [{status}] {item.get('pages', '')} {item.get('requested_filename', '')} -> {item.get('output_path', '')}\n",
+                    tag,
+                )
+            self.history_text.insert(END, "\n")
 
     def selected_output_check(self):
         selection = self.output_tree.selection()
@@ -1906,35 +2036,49 @@ class PdfSplitterApp:
         reused = 0
         skipped = 0
         failed = 0
+        history_items: list[dict[str, object]] = []
         for index, check in enumerate(checks, start=1):
             self.output_progress_var.set(f"出力中: {index}/{len(checks)} {check.filename}")
             self.output_status_var.set("一括実行中")
             self.root.update_idletasks()
+            item = {
+                **segment_page_plan(check.segment),
+                "metadata": dict(check.segment.metadata),
+                "requested_filename": check.requested_filename,
+                "action": check.action,
+                "warnings": list(check.messages),
+            }
             if check.action == OUTPUT_ACTION_SKIP:
                 skipped += 1
-                self.output_text.insert(END, f"スキップ: {check.segment.start_page}-{check.segment.end_page} {check.filename}\n", "warn")
+                self.output_text.insert(END, f"スキップ: {check.segment.page_label} {check.filename}\n", "warn")
+                history_items.append({**item, "status": "skipped", "output_path": ""})
                 continue
             if check.action == OUTPUT_ACTION_REUSE_EXISTING:
                 if check.output_path is None:
                     failed += 1
                     self.output_text.insert(END, f"再利用失敗: {check.filename} 既存ファイルがありません\n", "error")
+                    history_items.append({**item, "status": "failed", "output_path": "", "error": "existing file missing"})
                     continue
                 digest = self.processor.calculate_sha256(check.output_path)
                 reused += 1
                 self.output_text.insert(END, f"再利用: {check.output_path} sha256={digest}\n", "warn")
+                history_items.append({**item, "status": "reused", "output_path": str(check.output_path), "sha256": digest})
                 continue
             if check.output_path is None:
                 failed += 1
-                self.output_text.insert(END, f"スキップ: {check.segment.start_page}-{check.segment.end_page}\n", "warn")
+                self.output_text.insert(END, f"スキップ: {check.segment.page_label}\n", "warn")
+                history_items.append({**item, "status": "failed", "output_path": "", "error": "missing output path"})
                 continue
             try:
                 final_path = self.processor.split_pdf(check.segment, check.output_path)
                 digest = self.processor.calculate_sha256(final_path)
                 success += 1
                 self.output_text.insert(END, f"成功: {final_path} sha256={digest}\n", "ok")
+                history_items.append({**item, "status": "created", "output_path": str(final_path), "sha256": digest})
             except Exception as exc:
                 failed += 1
                 self.output_text.insert(END, f"出力失敗: {check.filename} {exc}\n", "error")
+                history_items.append({**item, "status": "failed", "output_path": str(check.output_path), "error": str(exc)})
         self.output_progress_var.set(f"処理終了: 成功 {success}件 / 再利用 {reused}件 / スキップ {skipped}件 / 失敗 {failed}件")
         self.output_status_var.set("出力完了" if failed == 0 else "エラー終了")
         self.output_check_summary_var.set(
@@ -1945,6 +2089,14 @@ class PdfSplitterApp:
             if failed == 0
             else f"要確認: 出力失敗が {failed}件あります。ログを確認してください。"
         )
+        try:
+            self.output_history.append_run(
+                summary={"success": success, "reused": reused, "skipped": skipped, "failed": failed, "output_dir": str(self.output_dir)},
+                items=history_items,
+            )
+            self.refresh_history_view()
+        except Exception as exc:
+            self.output_text.insert(END, f"履歴保存失敗: {exc}\n", "error")
         self.run_output_button.configure(state="normal" if failed == 0 else "disabled")
         self._update_workflow_status()
 

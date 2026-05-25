@@ -22,8 +22,13 @@ from pdf_splitter_tool.workflow import (
     check_segment_outputs,
     error_messages,
     metadata_suggestions_from_text,
+    delete_segment_pages,
+    extract_segment_pages,
+    move_segment_page,
     output_action_key,
     resequence_segments,
+    rotate_segment_pages,
+    segment_page_plan,
 )
 
 
@@ -40,6 +45,56 @@ def test_apply_common_metadata_and_resequence_segments(tmp_path: Path) -> None:
     assert [segment.metadata["box_no"] for segment in segments] == ["1", "1"]
     assert [segment.metadata["binder_no"] for segment in segments] == ["2", "2"]
     assert [segment.metadata["seq"] for segment in segments] == ["3", "5"]
+
+
+def test_page_organization_helpers_preserve_metadata_and_plan(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    segment = Segment(source, 1, 5, {"seq": "1"})
+
+    deleted = delete_segment_pages(segment, {2, 4})
+    rotated = rotate_segment_pages(deleted, {3}, 90)
+    moved = move_segment_page(rotated, 5, -1)
+    extracted = extract_segment_pages(moved, [5, 1])
+
+    assert deleted.page_numbers == (1, 3, 5)
+    assert rotated.rotations == {3: 90}
+    assert moved.page_numbers == (1, 5, 3)
+    assert extracted.page_numbers == (5, 1)
+    assert extracted.rotations == {}
+    assert extracted.metadata == {"seq": "1"}
+
+
+def test_rotate_segment_pages_drops_noop_rotation(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    segment = Segment(source, 1, 1, {"seq": "1"})
+
+    rotated = segment
+    for _ in range(4):
+        rotated = rotate_segment_pages(rotated, {1}, 90)
+
+    assert rotated.rotations == {}
+
+
+def test_page_organization_helpers_drop_rotation_outside_page_plan(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    segment = Segment(source, 1, 5, {"seq": "1"}, page_numbers=(1, 3, 5), rotations={2: 90, 3: 180})
+
+    moved = move_segment_page(segment, 5, -1)
+
+    assert moved.page_numbers == (1, 5, 3)
+    assert moved.rotations == {3: 180}
+
+
+def test_segment_page_plan_keeps_order_and_rotation_for_history(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    segment = Segment(source, 1, 5, {"seq": "1"}, page_numbers=(5, 1, 3), rotations={5: 90, 3: 180})
+
+    assert segment_page_plan(segment) == {
+        "source_pdf": str(source),
+        "pages": "5,1,3",
+        "page_numbers": [5, 1, 3],
+        "rotations": {"5": 90, "3": 180},
+    }
 
 
 def test_metadata_suggestions_from_text_are_copy_friendly() -> None:
@@ -470,6 +525,97 @@ def test_check_segment_outputs_reuse_requires_existing_file(tmp_path: Path) -> N
 
     assert not checks[0].ok
     assert checks[0].messages == ("再利用対象の既存ファイルがありません",)
+
+
+def test_check_segment_outputs_detects_invalid_page_plan_before_output(tmp_path: Path) -> None:
+    class PageCountProcessor:
+        @staticmethod
+        def build_filename_templated(preset: Preset, metadata: dict[str, str]):
+            from pdf_splitter_tool.processor import PdfProcessor
+
+            return PdfProcessor.build_filename_templated(preset, metadata)
+
+        @staticmethod
+        def page_count(_pdf_path: Path) -> int:
+            return 2
+
+    source = tmp_path / "source.pdf"
+    segment = Segment(source, 1, 3, {"box_no": "1", "binder_no": "2", "seq": "3"}, page_numbers=(1, 3))
+
+    checks = check_segment_outputs([segment], YOSHIDA_ELSIS_PRESET, tmp_path, processor=PageCountProcessor())
+
+    assert not checks[0].ok
+    assert checks[0].messages == ("ページ整理に存在しないページが含まれています: 3 (PDFは2ページ)",)
+
+
+def test_check_segment_outputs_detects_duplicate_page_plan_before_output(tmp_path: Path) -> None:
+    class PageCountProcessor:
+        @staticmethod
+        def build_filename_templated(preset: Preset, metadata: dict[str, str]):
+            from pdf_splitter_tool.processor import PdfProcessor
+
+            return PdfProcessor.build_filename_templated(preset, metadata)
+
+        @staticmethod
+        def page_count(_pdf_path: Path) -> int:
+            return 3
+
+    source = tmp_path / "source.pdf"
+    segment = Segment(source, 1, 3, {"box_no": "1", "binder_no": "2", "seq": "3"}, page_numbers=(1, 2, 2, 3))
+
+    checks = check_segment_outputs([segment], YOSHIDA_ELSIS_PRESET, tmp_path, processor=PageCountProcessor())
+
+    assert not checks[0].ok
+    assert checks[0].messages == ("ページ整理に重複ページが含まれています: 2",)
+
+
+def test_check_segment_outputs_detects_invalid_rotation_before_output(tmp_path: Path) -> None:
+    class PageCountProcessor:
+        @staticmethod
+        def build_filename_templated(preset: Preset, metadata: dict[str, str]):
+            from pdf_splitter_tool.processor import PdfProcessor
+
+            return PdfProcessor.build_filename_templated(preset, metadata)
+
+        @staticmethod
+        def page_count(_pdf_path: Path) -> int:
+            return 3
+
+    source = tmp_path / "source.pdf"
+    segment = Segment(source, 1, 3, {"box_no": "1", "binder_no": "2", "seq": "3"}, rotations={2: 45})
+
+    checks = check_segment_outputs([segment], YOSHIDA_ELSIS_PRESET, tmp_path, processor=PageCountProcessor())
+
+    assert not checks[0].ok
+    assert checks[0].messages == ("ページ整理に未対応の回転角度が含まれています: 2ページ=45度",)
+
+
+def test_check_segment_outputs_detects_rotation_outside_page_plan_before_output(tmp_path: Path) -> None:
+    class PageCountProcessor:
+        @staticmethod
+        def build_filename_templated(preset: Preset, metadata: dict[str, str]):
+            from pdf_splitter_tool.processor import PdfProcessor
+
+            return PdfProcessor.build_filename_templated(preset, metadata)
+
+        @staticmethod
+        def page_count(_pdf_path: Path) -> int:
+            return 4
+
+    source = tmp_path / "source.pdf"
+    segment = Segment(
+        source,
+        1,
+        4,
+        {"box_no": "1", "binder_no": "2", "seq": "3"},
+        page_numbers=(1, 3),
+        rotations={4: 90},
+    )
+
+    checks = check_segment_outputs([segment], YOSHIDA_ELSIS_PRESET, tmp_path, processor=PageCountProcessor())
+
+    assert not checks[0].ok
+    assert checks[0].messages == ("ページ整理に対象外の回転指定が含まれています: 4ページ",)
 
 
 def test_template_key_error_is_actionable(tmp_path: Path) -> None:
