@@ -14,7 +14,14 @@ python -m pdf_splitter_tool
 ```powershell
 cd recovery
 python -m pytest
+python scripts\gui_smoke.py
 ```
+
+## Verified behavior
+
+- Step 3 input assistance refreshes OCR-derived candidates, selects the first candidate, shows candidate count and selected value, and focuses the candidate list.
+- The selected candidate can be copied with the copy button, Enter, Ctrl+C, or double-click. Escape clears the selection and disables copying.
+- `tests/test_app_shortcuts.py` covers the shared shortcut/status text, and `scripts/gui_smoke.py` covers the GUI focus, copy, and clear behavior.
 
 ## Build distribution
 
@@ -37,6 +44,8 @@ opening the GUI:
 ```
 
 See `docs/2026-05-19_配布前チェックリスト.md` before copying a build to a shared folder.
+
+The latest Step 3 input-assist copy UX changes are verified in development, but no new distribution ZIP has been built for them yet.
 
 ## Current priority
 
