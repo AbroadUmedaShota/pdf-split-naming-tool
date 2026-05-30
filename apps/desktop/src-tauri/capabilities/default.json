@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Default desktop permissions for the PDF organizer MVP.",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default"]
+}

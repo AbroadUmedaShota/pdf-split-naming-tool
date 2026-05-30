@@ -1,12 +1,16 @@
-# PDF Split Naming Tool Recovery
+# PDF Split Naming Tool Sidecar
 
-This is the maintainable recovery implementation for `PDF分割命名ツール_v3_1_1`.
+This package is the Python sidecar for the desktop app in `../apps/desktop`.
+It is not a second user-facing GUI app.
 
-## Run
+The sidecar owns PDF-specific processing such as page counts, previews,
+split/export, filename generation, preflight checks, and persisted work state.
+
+## Smoke
 
 ```powershell
 cd recovery
-python -m pdf_splitter_tool
+python -m pdf_splitter_tool --smoke
 ```
 
 ## Test
@@ -14,16 +18,20 @@ python -m pdf_splitter_tool
 ```powershell
 cd recovery
 python -m pytest
-python scripts\gui_smoke.py
 ```
 
-## Verified behavior
+## Sidecar request
 
-- Step 3 input assistance refreshes OCR-derived candidates, selects the first candidate, shows candidate count and selected value, and focuses the candidate list.
-- The selected candidate can be copied with the copy button, Enter, Ctrl+C, or double-click. Escape clears the selection and disables copying.
-- `tests/test_app_shortcuts.py` covers the shared shortcut/status text, and `scripts/gui_smoke.py` covers the GUI focus, copy, and clear behavior.
+```powershell
+cd recovery
+python -m pdf_splitter_tool --sidecar-request request.json --sidecar-output response.json
+```
 
 ## Build distribution
+
+The current user-facing distribution target is the Tauri desktop app under
+`../apps/desktop`. The legacy PyInstaller build script remains as historical
+recovery material and should be revisited before being used for a new release.
 
 ```powershell
 cd recovery
@@ -35,21 +43,18 @@ The build creates a PyInstaller one-folder app under `recovery/dist/<VersionName
 and a ZIP at `recovery/dist/<VersionName>.zip`. Existing distribution folders or
 ZIP files are not overwritten.
 
-For packaged EXE runs, `presets.json` and `_pdf_split_state.json` are stored in
-the same folder as the EXE. Use `--smoke` to verify runtime paths without
-opening the GUI:
+For packaged sidecar runs, `_pdf_split_state.json` and related state files are
+stored in the configured app work folder. Use `--smoke` to verify runtime paths
+without processing a PDF:
 
 ```powershell
 .\dist\<VersionName>\<VersionName>.exe --smoke --smoke-output .\dist\<VersionName>\smoke-result.json
 ```
 
-See `docs/2026-05-19_配布前チェックリスト.md` before copying a build to a shared folder.
-
-The latest Step 3 input-assist copy UX changes are verified in development, but no new distribution ZIP has been built for them yet.
+See `../docs/2026-05-19_配布前チェックリスト.md` before copying a build to a shared folder.
 
 ## Current priority
 
-- ヨシダエルシス preset first.
-- Preset-based fields, naming rules, and extraction keywords.
-- Step 2 keyboard focus behavior.
-- Responsive preview and thumbnail handling for 200-250+ page PDFs.
+- Keep the sidecar command contract small and stable for `apps/desktop`.
+- Verify the MVP flow with real PDFs.
+- Defer OCR, presets, history, and advanced page organization until MVP use is confirmed.
