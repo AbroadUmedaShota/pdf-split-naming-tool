@@ -1,7 +1,25 @@
 "use client";
 
 import { open } from "@tauri-apps/plugin-dialog";
-import { useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle2,
+  ChevronRight,
+  ClipboardCheck,
+  Download,
+  FileText,
+  FolderOpen,
+  PencilLine,
+  RotateCcw,
+  Save,
+  Split,
+  Undo2,
+  Upload,
+  type LucideIcon
+} from "lucide-react";
+import { type ReactNode, useMemo, useState } from "react";
 import {
   invokeSidecar,
   type AppPersistedState,
@@ -30,14 +48,18 @@ type SegmentView = {
   metadata: Record<string, string>;
 };
 
-const steps: Array<{ id: StepId; label: string }> = [
-  { id: "import", label: "PDF取込" },
-  { id: "split", label: "分割" },
-  { id: "input", label: "入力" },
-  { id: "output", label: "出力" }
+type StepState = "active" | "done" | "attention" | "idle";
+
+const steps: Array<{ id: StepId; label: string; hint: string; icon: LucideIcon }> = [
+  { id: "import", label: "PDF取込", hint: "PDF / 出力先", icon: FileText },
+  { id: "split", label: "分割", hint: "ページ範囲", icon: Split },
+  { id: "input", label: "入力", hint: "箱No / 連番", icon: PencilLine },
+  { id: "output", label: "出力", hint: "チェック / 実行", icon: Download }
 ];
 
 const emptyCommonMetadata = { box_no: "", binder_no: "" };
+const requiredMetadata = ["box_no", "binder_no", "seq"] as const;
+const invalidFilenameChars = /[<>:"/\\|?*]/g;
 
 function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -49,6 +71,32 @@ function segmentKey(pdfPath: string, startPage: number, endPage: number): string
 
 function pageLabel(startPage: number, endPage: number): string {
   return startPage === endPage ? `${startPage}` : `${startPage}-${endPage}`;
+}
+
+function padMetadata(value: string, length: number): string {
+  const trimmed = value.trim();
+  return trimmed.length >= length ? trimmed : trimmed.padStart(length, "0");
+}
+
+function sanitizeFilename(filename: string): string {
+  const sanitized = filename.replace(invalidFilenameChars, "_").trim().replace(/[. ]+$/g, "").replace(/\s+/g, " ");
+  return sanitized || "output.pdf";
+}
+
+function previewFilename(metadata: Record<string, string>): string {
+  if (missingMetadata(metadata).length) {
+    return "未入力";
+  }
+  return sanitizeFilename(
+    `${padMetadata(metadata.box_no ?? "", 2)}_${padMetadata(metadata.binder_no ?? "", 2)}_${padMetadata(
+      metadata.seq ?? "",
+      3
+    )}.pdf`
+  );
+}
+
+function missingMetadata(metadata: Record<string, string>): string[] {
+  return requiredMetadata.filter((key) => !String(metadata[key] ?? "").trim());
 }
 
 function sidecarError(response: SidecarResponse): string {
@@ -91,6 +139,38 @@ function buildSegments(
   });
 }
 
+function IconLabel({ children, icon: Icon }: { children: ReactNode; icon: LucideIcon }) {
+  return (
+    <span className="icon-label">
+      <Icon aria-hidden="true" size={16} strokeWidth={2.1} />
+      <span>{children}</span>
+    </span>
+  );
+}
+
+function EmptyState({
+  action,
+  children,
+  icon: Icon,
+  title
+}: {
+  action?: ReactNode;
+  children: ReactNode;
+  icon: LucideIcon;
+  title: string;
+}) {
+  return (
+    <div className="empty-state">
+      <Icon aria-hidden="true" size={28} strokeWidth={1.9} />
+      <div>
+        <strong>{title}</strong>
+        <p>{children}</p>
+      </div>
+      {action}
+    </div>
+  );
+}
+
 export default function Page() {
   const [activeStep, setActiveStep] = useState<StepId>("import");
   const [pdfFiles, setPdfFiles] = useState<PdfFile[]>([]);
@@ -112,6 +192,54 @@ export default function Page() {
     [pdfFiles, splitPointsByPdf, segmentMetadata, commonMetadata]
   );
   const selectedSegment = allSegments.find((segment) => segment.key === selectedSegmentKey) ?? allSegments[0];
+  const totalPages = useMemo(() => pdfFiles.reduce((total, file) => total + file.pageCount, 0), [pdfFiles]);
+  const incompleteSegments = useMemo(
+    () => allSegments.filter((segment) => missingMetadata(segment.metadata).length > 0).length,
+    [allSegments]
+  );
+  const readySegments = Math.max(0, allSegments.length - incompleteSegments);
+  const outputIssues = preflightChecks.filter((check) => !check.ok).length;
+  const canContinueFromImport = pdfFiles.length > 0 && Boolean(outputDir);
+  const canRunPreflight = allSegments.length > 0 && Boolean(outputDir);
+  const canExport = preflightChecks.length > 0 && outputIssues === 0;
+
+  function stepState(stepId: StepId): StepState {
+    if (activeStep === stepId) {
+      return "active";
+    }
+    if (stepId === "import") {
+      return canContinueFromImport ? "done" : pdfFiles.length || outputDir ? "attention" : "idle";
+    }
+    if (stepId === "split") {
+      return allSegments.length ? "done" : "idle";
+    }
+    if (stepId === "input") {
+      if (!allSegments.length) {
+        return "idle";
+      }
+      return incompleteSegments ? "attention" : "done";
+    }
+    if (exportResult?.summary.created) {
+      return "done";
+    }
+    if (outputIssues) {
+      return "attention";
+    }
+    return "idle";
+  }
+
+  function stepStateLabel(state: StepState): string {
+    if (state === "active") {
+      return "作業中";
+    }
+    if (state === "done") {
+      return "完了";
+    }
+    if (state === "attention") {
+      return "要確認";
+    }
+    return "未着手";
+  }
 
   async function loadPdfInfo(path: string): Promise<PdfFile> {
     const response = await invokeSidecar({ command: "pdf_info", pdf_path: path });
@@ -326,6 +454,14 @@ export default function Page() {
     }
   }
 
+  const statusTone = status.includes("エラー")
+    ? "danger"
+    : status.includes("修正") || status.includes("不足")
+      ? "warning"
+      : status.includes("完了") || status.includes("できます")
+        ? "ok"
+        : "";
+
   return (
     <main className="app-shell">
       <aside className="rail" aria-label="作業ステップ">
@@ -337,43 +473,97 @@ export default function Page() {
           </div>
         </div>
         <nav className="step-list">
-          {steps.map((step, index) => (
-            <button
-              className={activeStep === step.id ? "step active" : "step"}
-              key={step.id}
-              onClick={() => setActiveStep(step.id)}
-              type="button"
-            >
-              <span className="step-index">{index + 1}</span>
-              <strong>{step.label}</strong>
-            </button>
-          ))}
+          {steps.map((step, index) => {
+            const state = stepState(step.id);
+            const Icon = step.icon;
+            return (
+              <button
+                aria-current={activeStep === step.id ? "step" : undefined}
+                className={`step ${state}`}
+                data-testid={`step-${step.id}`}
+                key={step.id}
+                onClick={() => setActiveStep(step.id)}
+                type="button"
+              >
+                <span className="step-index">{index + 1}</span>
+                <span className="step-copy">
+                  <strong>
+                    <Icon aria-hidden="true" size={16} strokeWidth={2.1} />
+                    {step.label}
+                  </strong>
+                  <span>{step.hint}</span>
+                </span>
+                <span className={`step-badge ${state}`}>{stepStateLabel(state)}</span>
+              </button>
+            );
+          })}
         </nav>
       </aside>
 
       <section className="workspace" aria-label="PDF整理ワークスペース">
         <header className="topbar">
           <div>
-            <p className="section-label">MVP</p>
+            <p className="section-label">PDF分割命名ツール</p>
             <h2>{steps.find((step) => step.id === activeStep)?.label}</h2>
           </div>
-          <div className="status-pill">{status}</div>
+          <div className={`status-pill ${statusTone}`} role="status">
+            {statusTone === "danger" ? (
+              <AlertTriangle aria-hidden="true" size={16} />
+            ) : statusTone === "ok" ? (
+              <CheckCircle2 aria-hidden="true" size={16} />
+            ) : (
+              <ClipboardCheck aria-hidden="true" size={16} />
+            )}
+            <span>{status}</span>
+          </div>
         </header>
+
+        <section className="work-summary" aria-label="作業状況">
+          <div>
+            <span>PDF</span>
+            <strong>{pdfFiles.length}件</strong>
+            <small>{totalPages ? `${totalPages}ページ` : "未選択"}</small>
+          </div>
+          <div>
+            <span>分割</span>
+            <strong>{allSegments.length}件</strong>
+            <small>{currentFile ? `${basename(currentFile.path)} を表示中` : "PDF未選択"}</small>
+          </div>
+          <div className={incompleteSegments ? "needs-attention" : ""}>
+            <span>入力</span>
+            <strong>{allSegments.length ? `${readySegments}件 OK` : "未確認"}</strong>
+            <small>{allSegments.length ? (incompleteSegments ? `${incompleteSegments}件 未入力` : "未入力なし") : "入力対象なし"}</small>
+          </div>
+          <div className={outputDir ? "" : "needs-attention"}>
+            <span>出力先</span>
+            <strong>{outputDir ? "設定済み" : "未設定"}</strong>
+            <small>{outputDir || "フォルダを選択"}</small>
+          </div>
+        </section>
 
         {activeStep === "import" && (
           <section className="panel stack" aria-label="PDF取込">
+            <div className="panel-heading">
+              <div>
+                <h3>取込設定</h3>
+                <p>対象PDF、出力先、共通項目をここで揃えます。</p>
+              </div>
+              <button disabled={!canContinueFromImport} onClick={() => setActiveStep("split")} type="button">
+                <IconLabel icon={ChevronRight}>分割へ進む</IconLabel>
+              </button>
+            </div>
             <div className="action-row">
               <button className="primary" onClick={choosePdfs} type="button">
-                PDFを選択
+                <IconLabel icon={Upload}>PDFを選択</IconLabel>
               </button>
               <button onClick={chooseOutputDir} type="button">
-                出力フォルダ
+                <IconLabel icon={FolderOpen}>出力フォルダ</IconLabel>
               </button>
               <button onClick={loadState} type="button">
-                状態を復元
+                <IconLabel icon={RotateCcw}>状態を復元</IconLabel>
               </button>
               <button onClick={saveState} type="button">
-                状態を保存
+                <IconLabel icon={Save}>状態を保存</IconLabel>
               </button>
             </div>
             <div className="field-grid two">
@@ -406,19 +596,36 @@ export default function Page() {
                 <strong>{allSegments.length}件</strong>
               </div>
             </div>
-            <div className="list">
-              {pdfFiles.map((file) => (
-                <button
-                  className={file.path === currentPdf ? "list-row selected" : "list-row"}
-                  key={file.path}
-                  onClick={() => void selectPdf(file.path)}
-                  type="button"
-                >
-                  <strong>{basename(file.path)}</strong>
-                  <span>{file.pageCount}ページ</span>
-                </button>
-              ))}
-            </div>
+            {pdfFiles.length ? (
+              <div className="list">
+                {pdfFiles.map((file) => (
+                  <button
+                    className={file.path === currentPdf ? "list-row selected" : "list-row"}
+                    key={file.path}
+                    onClick={() => void selectPdf(file.path)}
+                    type="button"
+                  >
+                    <span>
+                      <strong>{basename(file.path)}</strong>
+                      <small>{file.path}</small>
+                    </span>
+                    <span>{file.pageCount}ページ</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                action={
+                  <button className="primary" onClick={choosePdfs} type="button">
+                    <IconLabel icon={Upload}>PDFを選択</IconLabel>
+                  </button>
+                }
+                icon={FileText}
+                title="PDFが未選択です"
+              >
+                最初に処理対象のPDFを追加します。
+              </EmptyState>
+            )}
           </section>
         )}
 
@@ -426,50 +633,73 @@ export default function Page() {
           <section className="split-layout" aria-label="分割">
             <div className="panel stack">
               <div className="panel-heading">
-                <h3>{currentPdf ? basename(currentPdf) : "PDF未選択"}</h3>
-                <span>
-                  {currentFile ? `${currentPage} / ${currentFile.pageCount}ページ` : "-"}
-                </span>
+                <div>
+                  <h3>{currentPdf ? basename(currentPdf) : "PDF未選択"}</h3>
+                  <p>{currentFile ? `${currentPage} / ${currentFile.pageCount}ページ` : "PDFを取込画面で選択してください。"}</p>
+                </div>
+                <button disabled={!allSegments.length} onClick={() => setActiveStep("input")} type="button">
+                  <IconLabel icon={ChevronRight}>入力へ進む</IconLabel>
+                </button>
               </div>
               <div className="action-row">
                 <button disabled={!currentFile || currentPage <= 1} onClick={() => void movePage(-1)} type="button">
-                  前ページ
+                  <IconLabel icon={ArrowLeft}>前ページ</IconLabel>
                 </button>
                 <button
                   disabled={!currentFile || currentPage >= (currentFile?.pageCount ?? 1)}
                   onClick={() => void movePage(1)}
                   type="button"
                 >
-                  次ページ
+                  <IconLabel icon={ArrowRight}>次ページ</IconLabel>
                 </button>
                 <button className="primary" disabled={!currentFile} onClick={addSplitBeforeCurrentPage} type="button">
-                  現在ページの前で分割
+                  <IconLabel icon={Split}>現在ページの前で分割</IconLabel>
                 </button>
                 <button disabled={!currentFile} onClick={splitEveryPage} type="button">
-                  1ページごとに分割
+                  <IconLabel icon={ClipboardCheck}>1ページごとに分割</IconLabel>
                 </button>
                 <button disabled={!currentFile} onClick={undoLastSplit} type="button">
-                  最後の分割を取り消す
+                  <IconLabel icon={Undo2}>最後の分割を取り消す</IconLabel>
                 </button>
               </div>
               <div className="preview-frame">
-                {previewDataUrl ? <img alt="PDFページプレビュー" src={previewDataUrl} /> : <span>プレビューなし</span>}
+                {previewDataUrl ? (
+                  <img alt="PDFページプレビュー" src={previewDataUrl} />
+                ) : (
+                  <EmptyState icon={FileText} title="プレビューなし">
+                    PDFを選択するとページプレビューを表示します。
+                  </EmptyState>
+                )}
               </div>
             </div>
             <aside className="panel stack">
-              <h3>分割一覧</h3>
+              <div className="panel-heading compact-heading">
+                <div>
+                  <h3>分割一覧</h3>
+                  <p>{allSegments.length ? `${allSegments.length}件` : "未作成"}</p>
+                </div>
+              </div>
               <div className="list compact">
-                {allSegments.map((segment) => (
-                  <button
-                    className={segment.key === selectedSegmentKey ? "list-row selected" : "list-row"}
-                    key={segment.key}
-                    onClick={() => setSelectedSegmentKey(segment.key)}
-                    type="button"
-                  >
-                    <strong>{basename(segment.pdfPath)}</strong>
-                    <span>{segment.pages}ページ</span>
-                  </button>
-                ))}
+                {allSegments.length ? (
+                  allSegments.map((segment) => (
+                    <button
+                      className={segment.key === selectedSegmentKey ? "list-row selected" : "list-row"}
+                      key={segment.key}
+                      onClick={() => setSelectedSegmentKey(segment.key)}
+                      type="button"
+                    >
+                      <span>
+                        <strong>{basename(segment.pdfPath)}</strong>
+                        <small>{previewFilename(segment.metadata)}</small>
+                      </span>
+                      <span>{segment.pages}ページ</span>
+                    </button>
+                  ))
+                ) : (
+                  <EmptyState icon={Split} title="分割なし">
+                    PDFを選択するとページ範囲が表示されます。
+                  </EmptyState>
+                )}
               </div>
             </aside>
           </section>
@@ -477,12 +707,26 @@ export default function Page() {
 
         {activeStep === "input" && (
           <section className="panel stack" aria-label="入力">
+            <div className="panel-heading">
+              <div>
+                <h3>命名入力</h3>
+                <p>
+                  {selectedSegment
+                    ? `${basename(selectedSegment.pdfPath)} / ${selectedSegment.pages}ページ`
+                    : "分割セグメントがありません。"}
+                </p>
+              </div>
+              <div className="filename-preview">
+                <span>出力名</span>
+                <strong>{selectedSegment ? previewFilename(selectedSegment.metadata) : "-"}</strong>
+              </div>
+            </div>
             <div className="action-row">
               <button className="primary" disabled={!allSegments.length} onClick={resequence} type="button">
-                連番を再採番
+                <IconLabel icon={ClipboardCheck}>連番を再採番</IconLabel>
               </button>
               <button disabled={!allSegments.length || !outputDir} onClick={runPreflight} type="button">
-                出力前チェック
+                <IconLabel icon={ChevronRight}>出力前チェック</IconLabel>
               </button>
             </div>
             {selectedSegment && (
@@ -510,45 +754,70 @@ export default function Page() {
                 </label>
               </div>
             )}
-            <div className="table">
-              <div className="table-head">
-                <span>PDF</span>
-                <span>ページ</span>
-                <span>箱No</span>
-                <span>バインダー</span>
-                <span>連番</span>
+            {allSegments.length ? (
+              <div className="table input-table">
+                <div className="table-head">
+                  <span>PDF</span>
+                  <span>ページ</span>
+                  <span>箱No</span>
+                  <span>バインダー</span>
+                  <span>連番</span>
+                  <span>出力名</span>
+                  <span>状態</span>
+                </div>
+                {allSegments.map((segment) => {
+                  const missing = missingMetadata(segment.metadata);
+                  return (
+                    <button
+                      className={segment.key === selectedSegment?.key ? "table-row selected" : "table-row"}
+                      key={segment.key}
+                      onClick={() => setSelectedSegmentKey(segment.key)}
+                      type="button"
+                    >
+                      <span>{basename(segment.pdfPath)}</span>
+                      <span>{segment.pages}</span>
+                      <span>{segment.metadata.box_no || "-"}</span>
+                      <span>{segment.metadata.binder_no || "-"}</span>
+                      <span>{segment.metadata.seq || "-"}</span>
+                      <span>{previewFilename(segment.metadata)}</span>
+                      <span className={missing.length ? "state-text warning" : "state-text ok"}>
+                        {missing.length ? "未入力" : "OK"}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-              {allSegments.map((segment) => (
-                <button
-                  className={segment.key === selectedSegment?.key ? "table-row selected" : "table-row"}
-                  key={segment.key}
-                  onClick={() => setSelectedSegmentKey(segment.key)}
-                  type="button"
-                >
-                  <span>{basename(segment.pdfPath)}</span>
-                  <span>{segment.pages}</span>
-                  <span>{segment.metadata.box_no || "-"}</span>
-                  <span>{segment.metadata.binder_no || "-"}</span>
-                  <span>{segment.metadata.seq || "-"}</span>
-                </button>
-              ))}
-            </div>
+            ) : (
+              <EmptyState icon={PencilLine} title="入力対象がありません">
+                PDFを取込み、分割を確認してから入力します。
+              </EmptyState>
+            )}
           </section>
         )}
 
         {activeStep === "output" && (
           <section className="panel stack" aria-label="出力">
+            <div className="panel-heading">
+              <div>
+                <h3>出力確認</h3>
+                <p>{preflightChecks.length ? `${preflightChecks.length}件の出力予定` : "出力前チェック待ち"}</p>
+              </div>
+              <div className={!preflightChecks.length || outputIssues ? "check-summary warning" : "check-summary"}>
+                <strong>{preflightChecks.length ? (outputIssues ? `${outputIssues}件 要修正` : "出力可能") : "未確認"}</strong>
+                <span>{outputDir || "出力先未設定"}</span>
+              </div>
+            </div>
             <div className="action-row">
               <button disabled={!allSegments.length || !outputDir} onClick={runPreflight} type="button">
-                出力前チェック
+                <IconLabel icon={ClipboardCheck}>出力前チェック</IconLabel>
               </button>
               <button
                 className="primary"
-                disabled={!preflightChecks.length || preflightChecks.some((check) => !check.ok)}
+                disabled={!canExport}
                 onClick={runExport}
                 type="button"
               >
-                出力実行
+                <IconLabel icon={Download}>出力実行</IconLabel>
               </button>
             </div>
             {exportResult && (
@@ -563,22 +832,39 @@ export default function Page() {
                 </div>
               </div>
             )}
-            <div className="table output-table">
-              <div className="table-head">
-                <span>ページ</span>
-                <span>予定ファイル名</span>
-                <span>既存</span>
-                <span>状態</span>
-              </div>
-              {preflightChecks.map((check, index) => (
-                <div className={check.ok ? "table-row" : "table-row error"} key={`${check.pdf_path}-${check.pages}-${index}`}>
-                  <span>{check.pages}</span>
-                  <span>{check.filename || check.requested_filename || "-"}</span>
-                  <span>{check.has_existing_output ? "あり" : "なし"}</span>
-                  <span>{check.ok ? "出力可能" : check.messages.join(" / ")}</span>
+            {preflightChecks.length ? (
+              <div className="table output-table">
+                <div className="table-head">
+                  <span>ページ</span>
+                  <span>予定ファイル名</span>
+                  <span>既存</span>
+                  <span>状態</span>
                 </div>
-              ))}
-            </div>
+                {preflightChecks.map((check, index) => (
+                  <div
+                    className={check.ok ? "table-row" : "table-row error"}
+                    key={`${check.pdf_path}-${check.pages}-${index}`}
+                  >
+                    <span>{check.pages}</span>
+                    <span>{check.filename || check.requested_filename || "-"}</span>
+                    <span>{check.has_existing_output ? "あり" : "なし"}</span>
+                    <span>{check.ok ? "出力可能" : check.messages.join(" / ")}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                action={
+                  <button disabled={!canRunPreflight} onClick={runPreflight} type="button">
+                    <IconLabel icon={ClipboardCheck}>出力前チェック</IconLabel>
+                  </button>
+                }
+                icon={Download}
+                title="出力前チェック待ちです"
+              >
+                入力内容が揃ったら、ここで出力可否を確認します。
+              </EmptyState>
+            )}
           </section>
         )}
       </section>
