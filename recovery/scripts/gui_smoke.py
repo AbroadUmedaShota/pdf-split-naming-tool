@@ -136,6 +136,65 @@ def main() -> int:
         suggestions = listbox_values(app.suggestion_list)
         if suggestions[:3] != ("01", "02", "003"):
             raise AssertionError(f"Step 3 suggestions mismatch: {suggestions!r}")
+        if not app.suggestion_copy_button.instate(["!disabled"]):
+            raise AssertionError("Step 3 suggestion copy button should be enabled when candidates exist")
+        if "件" not in app.step3_suggestion_var.get():
+            raise AssertionError(f"Step 3 suggestion status should show count: {app.step3_suggestion_var.get()!r}")
+        if "Ctrl+C" not in app.step3_suggestion_var.get():
+            raise AssertionError(f"Step 3 suggestion status should mention Ctrl+C: {app.step3_suggestion_var.get()!r}")
+        if "選択中 01" not in app.step3_suggestion_var.get():
+            raise AssertionError(f"Step 3 initial selected suggestion should be visible in status: {app.step3_suggestion_var.get()!r}")
+        pump(root, 0.1)
+        if root.focus_get() != app.suggestion_list:
+            raise AssertionError("Step 3 suggestion list should receive focus after refreshing candidates")
+        app.suggestion_list.selection_clear(0, "end")
+        app.update_suggestion_copy_state()
+        pump(root, 0.1)
+        if app.suggestion_copy_button.instate(["!disabled"]):
+            raise AssertionError("Step 3 suggestion copy button should be disabled when no candidate is selected")
+        if "選択中" in app.step3_suggestion_var.get() or "候補を選択" not in app.step3_suggestion_var.get():
+            raise AssertionError(
+                f"Step 3 suggestion status should not keep stale selected value: {app.step3_suggestion_var.get()!r}"
+            )
+        app.suggestion_list.selection_set(1)
+        app.update_suggestion_copy_state()
+        pump(root, 0.1)
+        if not app.suggestion_copy_button.instate(["!disabled"]):
+            raise AssertionError("Step 3 suggestion copy button should re-enable after candidate selection")
+        if "02" not in app.step3_suggestion_var.get():
+            raise AssertionError(f"Step 3 selected suggestion should be visible in status: {app.step3_suggestion_var.get()!r}")
+        app.suggestion_list.focus_force()
+        pump(root, 0.1)
+        app.suggestion_list.event_generate("<Escape>")
+        pump(root, 0.1)
+        if app.suggestion_copy_button.instate(["!disabled"]):
+            raise AssertionError("Step 3 Escape should disable suggestion copy after clearing selection")
+        if "解除" not in app.step3_suggestion_var.get():
+            raise AssertionError(f"Step 3 Escape should show clear status: {app.step3_suggestion_var.get()!r}")
+        app.suggestion_list.selection_set(1)
+        app.update_suggestion_copy_state()
+        pump(root, 0.1)
+        app.suggestion_copy_button.focus_force()
+        pump(root, 0.1)
+        app.suggestion_copy_button.invoke()
+        pump(root, 0.1)
+        if root.clipboard_get() != "02":
+            raise AssertionError("Step 3 copy button should copy the selected suggestion")
+        if root.focus_get() != app.suggestion_list:
+            raise AssertionError("Step 3 copy button should return focus to the suggestion list")
+        app.suggestion_list.event_generate("<Control-c>")
+        pump(root, 0.1)
+        if root.clipboard_get() != "02":
+            raise AssertionError("Step 3 Ctrl+C should copy the selected suggestion")
+        if app.copy_selected_metadata_suggestion() != "break":
+            raise AssertionError("Step 3 suggestion copy handler should stop Tk default key handling")
+        app.suggestion_list.selection_clear(0, "end")
+        app.suggestion_list.selection_set(0)
+        app.update_suggestion_copy_state()
+        app.suggestion_list.event_generate("<KeyPress-Return>")
+        pump(root, 0.1)
+        if root.clipboard_get() != "01":
+            raise AssertionError("Step 3 Enter key should copy the selected suggestion")
         app.common_metadata_vars["box_no"].set("1")
         app.common_metadata_vars["binder_no"].set("2")
         app.apply_common_metadata_to_segments()

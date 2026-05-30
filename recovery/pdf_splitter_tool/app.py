@@ -52,6 +52,12 @@ from .workflow import (
 
 TEXT_WIDGET_CLASSES = {"Entry", "TEntry", "Text", "Spinbox", "TCombobox"}
 STEP2_DETAIL_TAB_LABELS = ("検出", "候補", "OCR本文", "操作")
+STEP3_SUGGESTION_COPY_HINT = "Enter、Ctrl+C、ダブルクリックでコピーできます。"
+
+
+def step3_suggestion_selected_status(candidate: str, count: int | None = None) -> str:
+    count_text = f"{count}件。" if count is not None else ""
+    return f"入力補助候補: {count_text}選択中 {candidate}。{STEP3_SUGGESTION_COPY_HINT}"
 
 
 class PdfSplitterApp:
@@ -698,13 +704,23 @@ class PdfSplitterApp:
         ttk.Button(assist_row, text="前行メタデータコピー", command=self.copy_previous_segment_metadata).pack(side=LEFT)
         ttk.Button(assist_row, text="次の要修正へ移動", command=self.select_next_invalid_segment).pack(side=LEFT, padx=4)
         ttk.Button(assist_row, text="入力補助候補を更新", command=self.refresh_metadata_suggestions).pack(side=LEFT)
-        ttk.Button(assist_row, text="選択候補をコピー", command=self.copy_selected_metadata_suggestion).pack(side=LEFT, padx=4)
+        self.suggestion_copy_button = ttk.Button(
+            assist_row,
+            text="選択候補をコピー",
+            command=self.copy_selected_metadata_suggestion,
+            state="disabled",
+        )
+        self.suggestion_copy_button.pack(side=LEFT, padx=4)
         ttk.Button(assist_row, text="出力予定フォルダを開く", command=self.open_output_folder).pack(side=LEFT, padx=4)
         ttk.Label(self.step3_assist_frame, textvariable=self.step3_suggestion_var, style="Hint.TLabel", wraplength=560).pack(anchor="w", pady=(6, 0))
         self.suggestion_list = Listbox(self.step3_assist_frame, height=4, exportselection=False)
         self._style_listbox(self.suggestion_list)
         self.suggestion_list.pack(fill="x", pady=(4, 0))
+        self.suggestion_list.bind("<<ListboxSelect>>", lambda _event: self.update_suggestion_copy_state())
         self.suggestion_list.bind("<Double-Button-1>", lambda _event: self.copy_selected_metadata_suggestion())
+        self.suggestion_list.bind("<Return>", lambda _event: self.copy_selected_metadata_suggestion())
+        self.suggestion_list.bind("<Control-c>", lambda _event: self.copy_selected_metadata_suggestion())
+        self.suggestion_list.bind("<Escape>", lambda _event: self.clear_metadata_suggestion_selection())
         self.toggle_step3_assist()
 
         self.metadata_frame = ttk.LabelFrame(right, text="選択セグメント", padding=8)
@@ -1737,6 +1753,7 @@ class PdfSplitterApp:
 
     def refresh_metadata_suggestions(self) -> None:
         self.suggestion_list.delete(0, END)
+        self.suggestion_copy_button.configure(state="disabled")
         text = self.ocr_text.get("1.0", END).strip()
         if not text:
             self.step3_suggestion_var.set("入力補助候補: OCR本文がありません。")
@@ -1746,19 +1763,41 @@ class PdfSplitterApp:
             self.suggestion_list.insert(END, candidate)
         if candidates:
             self.suggestion_list.selection_set(0)
-            self.step3_suggestion_var.set("入力補助候補: 候補を選択してコピーできます。")
+            self.suggestion_list.focus_set()
+            self.update_suggestion_copy_state()
+            selected = self.suggestion_list.get(0)
+            self.step3_suggestion_var.set(step3_suggestion_selected_status(selected, count=len(candidates)))
         else:
             self.step3_suggestion_var.set("入力補助候補: 候補なし")
 
-    def copy_selected_metadata_suggestion(self) -> None:
+    def update_suggestion_copy_state(self) -> None:
+        selection = self.suggestion_list.curselection()
+        state = "normal" if selection else "disabled"
+        self.suggestion_copy_button.configure(state=state)
+        if selection:
+            candidate = self.suggestion_list.get(selection[0])
+            self.step3_suggestion_var.set(step3_suggestion_selected_status(candidate))
+        elif self.suggestion_list.size():
+            self.step3_suggestion_var.set("入力補助候補: 候補を選択してください。")
+
+    def clear_metadata_suggestion_selection(self) -> str:
+        self.suggestion_list.selection_clear(0, END)
+        self.update_suggestion_copy_state()
+        self.step3_suggestion_var.set("入力補助候補: 選択を解除しました。")
+        return "break"
+
+    def copy_selected_metadata_suggestion(self) -> str:
         selection = self.suggestion_list.curselection()
         if not selection:
-            messagebox.showinfo("入力補助候補", "コピーする候補を選択してください。")
-            return
+            self.update_suggestion_copy_state()
+            self.step3_suggestion_var.set("入力補助候補: コピーする候補を選択してください。")
+            return "break"
         candidate = self.suggestion_list.get(selection[0])
         self.root.clipboard_clear()
         self.root.clipboard_append(candidate)
+        self.suggestion_list.focus_set()
         self.step3_suggestion_var.set(f"入力補助候補をコピーしました: {candidate}")
+        return "break"
 
     def resequence_segment_metadata(self) -> None:
         if not self.segments:
