@@ -11,12 +11,15 @@ import {
   Download,
   FileText,
   FolderOpen,
+  ListChecks,
   PencilLine,
   RotateCcw,
   Save,
   Split,
+  Trash2,
   Undo2,
   Upload,
+  XCircle,
   type LucideIcon
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
@@ -171,6 +174,51 @@ function EmptyState({
   );
 }
 
+function PaneHeader({
+  action,
+  description,
+  title
+}: {
+  action?: ReactNode;
+  description?: string;
+  title: string;
+}) {
+  return (
+    <div className="pane-header">
+      <div>
+        <h3>{title}</h3>
+        {description ? <p>{description}</p> : null}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function StatusCheck({ detail, label, ok }: { detail?: string; label: string; ok: boolean }) {
+  return (
+    <div className={ok ? "status-check ok" : "status-check warning"}>
+      {ok ? (
+        <CheckCircle2 aria-hidden="true" size={17} strokeWidth={2.2} />
+      ) : (
+        <AlertTriangle aria-hidden="true" size={17} strokeWidth={2.2} />
+      )}
+      <span>
+        <strong>{label}</strong>
+        {detail ? <small>{detail}</small> : null}
+      </span>
+    </div>
+  );
+}
+
+function StatLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="stat-line">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 export default function Page() {
   const [activeStep, setActiveStep] = useState<StepId>("import");
   const [pdfFiles, setPdfFiles] = useState<PdfFile[]>([]);
@@ -199,9 +247,15 @@ export default function Page() {
   );
   const readySegments = Math.max(0, allSegments.length - incompleteSegments);
   const outputIssues = preflightChecks.filter((check) => !check.ok).length;
+  const existingOutputs = preflightChecks.filter((check) => check.has_existing_output).length;
   const canContinueFromImport = pdfFiles.length > 0 && Boolean(outputDir);
   const canRunPreflight = allSegments.length > 0 && Boolean(outputDir);
   const canExport = preflightChecks.length > 0 && outputIssues === 0;
+
+  function clearOutputState(): void {
+    setPreflightChecks([]);
+    setExportResult(null);
+  }
 
   function stepState(stepId: StepId): StepState {
     if (activeStep === stepId) {
@@ -280,6 +334,7 @@ export default function Page() {
       });
       setCurrentPdf(loaded[0].path);
       setCurrentPage(1);
+      clearOutputState();
       await loadPreview(loaded[0].path, 1);
       setStatus(`${loaded.length}件のPDFを読み込みました。`);
     } catch (error) {
@@ -291,6 +346,7 @@ export default function Page() {
     const selected = await open({ directory: true, multiple: false });
     if (typeof selected === "string") {
       setOutputDir(selected);
+      clearOutputState();
       setStatus("出力フォルダを設定しました。");
     }
   }
@@ -303,6 +359,62 @@ export default function Page() {
     } catch (error) {
       setStatus(`プレビューエラー: ${String(error)}`);
     }
+  }
+
+  async function removePdf(path: string): Promise<void> {
+    const remaining = pdfFiles.filter((file) => file.path !== path);
+    setPdfFiles(remaining);
+    setSplitPointsByPdf((current) => {
+      const next = { ...current };
+      delete next[path];
+      return next;
+    });
+    setSegmentMetadata((current) => {
+      const next: Record<string, Record<string, string>> = {};
+      for (const [key, value] of Object.entries(current)) {
+        if (!key.startsWith(`${path}#`)) {
+          next[key] = value;
+        }
+      }
+      return next;
+    });
+    if (selectedSegmentKey.startsWith(`${path}#`)) {
+      setSelectedSegmentKey("");
+    }
+    clearOutputState();
+    if (currentPdf === path) {
+      const nextPdf = remaining[0];
+      setCurrentPdf(nextPdf?.path ?? "");
+      setCurrentPage(1);
+      setPreviewDataUrl("");
+      if (nextPdf) {
+        try {
+          await loadPreview(nextPdf.path, 1);
+        } catch (error) {
+          setStatus(`プレビューエラー: ${String(error)}`);
+          return;
+        }
+      }
+    }
+    setStatus(`${basename(path)} を一覧から外しました。`);
+  }
+
+  function clearPdfSelection(): void {
+    setPdfFiles([]);
+    setCurrentPdf("");
+    setCurrentPage(1);
+    setPreviewDataUrl("");
+    setSplitPointsByPdf({});
+    setSegmentMetadata({});
+    setSelectedSegmentKey("");
+    clearOutputState();
+    setStatus("PDF一覧をクリアしました。");
+  }
+
+  function resetOutputDir(): void {
+    setOutputDir("");
+    clearOutputState();
+    setStatus("出力先をリセットしました。");
   }
 
   async function movePage(offset: number): Promise<void> {
@@ -322,6 +434,7 @@ export default function Page() {
       setStatus("先頭ページの前では分割できません。");
       return;
     }
+    clearOutputState();
     setSplitPointsByPdf((current) => ({
       ...current,
       [currentFile.path]: splitPointsFor(currentFile.pageCount, [...(current[currentFile.path] ?? []), currentPage])
@@ -333,6 +446,7 @@ export default function Page() {
     if (!currentFile) {
       return;
     }
+    clearOutputState();
     setSplitPointsByPdf((current) => {
       const points = splitPointsFor(currentFile.pageCount, current[currentFile.path]);
       return { ...current, [currentFile.path]: points.slice(0, -1) };
@@ -344,6 +458,7 @@ export default function Page() {
     if (!currentFile) {
       return;
     }
+    clearOutputState();
     setSplitPointsByPdf((current) => ({
       ...current,
       [currentFile.path]: Array.from({ length: Math.max(0, currentFile.pageCount - 1) }, (_value, index) => index + 2)
@@ -351,7 +466,13 @@ export default function Page() {
     setStatus("1ページごとの分割にしました。");
   }
 
+  function updateCommonMetadata(key: "box_no" | "binder_no", value: string): void {
+    clearOutputState();
+    setCommonMetadata((current) => ({ ...current, [key]: value }));
+  }
+
   function updateMetadata(segment: SegmentView, key: string, value: string): void {
+    clearOutputState();
     setSegmentMetadata((current) => ({
       ...current,
       [segment.key]: {
@@ -362,6 +483,7 @@ export default function Page() {
   }
 
   function resequence(): void {
+    clearOutputState();
     setSegmentMetadata((current) => {
       const next = { ...current };
       allSegments.forEach((segment, index) => {
@@ -447,6 +569,7 @@ export default function Page() {
       setCommonMetadata({ ...emptyCommonMetadata, ...(state.common_metadata ?? {}) });
       setCurrentPdf(state.current_pdf || loaded[0].path);
       setCurrentPage(state.current_page ?? 1);
+      clearOutputState();
       await loadPreview(state.current_pdf || loaded[0].path, state.current_page ?? 1);
       setStatus("状態を復元しました。");
     } catch (error) {
@@ -462,411 +585,534 @@ export default function Page() {
         ? "ok"
         : "";
 
-  return (
-    <main className="app-shell">
-      <aside className="rail" aria-label="作業ステップ">
-        <div className="brand">
-          <span className="brand-mark">PDF</span>
-          <div>
-            <h1>PDF整理ツール</h1>
-            <p>Local Desktop</p>
-          </div>
-        </div>
-        <nav className="step-list">
-          {steps.map((step, index) => {
-            const state = stepState(step.id);
-            const Icon = step.icon;
-            return (
-              <button
-                aria-current={activeStep === step.id ? "step" : undefined}
-                className={`step ${state}`}
-                data-testid={`step-${step.id}`}
-                key={step.id}
-                onClick={() => setActiveStep(step.id)}
-                type="button"
-              >
-                <span className="step-index">{index + 1}</span>
-                <span className="step-copy">
-                  <strong>
-                    <Icon aria-hidden="true" size={16} strokeWidth={2.1} />
-                    {step.label}
-                  </strong>
-                  <span>{step.hint}</span>
-                </span>
-                <span className={`step-badge ${state}`}>{stepStateLabel(state)}</span>
-              </button>
-            );
-          })}
-        </nav>
-      </aside>
-
-      <section className="workspace" aria-label="PDF整理ワークスペース">
-        <header className="topbar">
-          <div>
-            <p className="section-label">PDF分割命名ツール</p>
-            <h2>{steps.find((step) => step.id === activeStep)?.label}</h2>
-          </div>
-          <div className={`status-pill ${statusTone}`} role="status">
-            {statusTone === "danger" ? (
-              <AlertTriangle aria-hidden="true" size={16} />
-            ) : statusTone === "ok" ? (
-              <CheckCircle2 aria-hidden="true" size={16} />
-            ) : (
-              <ClipboardCheck aria-hidden="true" size={16} />
-            )}
-            <span>{status}</span>
-          </div>
-        </header>
-
-        <section className="work-summary" aria-label="作業状況">
-          <div>
-            <span>PDF</span>
-            <strong>{pdfFiles.length}件</strong>
-            <small>{totalPages ? `${totalPages}ページ` : "未選択"}</small>
-          </div>
-          <div>
-            <span>分割</span>
-            <strong>{allSegments.length}件</strong>
-            <small>{currentFile ? `${basename(currentFile.path)} を表示中` : "PDF未選択"}</small>
-          </div>
-          <div className={incompleteSegments ? "needs-attention" : ""}>
-            <span>入力</span>
-            <strong>{allSegments.length ? `${readySegments}件 OK` : "未確認"}</strong>
-            <small>{allSegments.length ? (incompleteSegments ? `${incompleteSegments}件 未入力` : "未入力なし") : "入力対象なし"}</small>
-          </div>
-          <div className={outputDir ? "" : "needs-attention"}>
-            <span>出力先</span>
-            <strong>{outputDir ? "設定済み" : "未設定"}</strong>
-            <small>{outputDir || "フォルダを選択"}</small>
-          </div>
-        </section>
-
-        {activeStep === "import" && (
-          <section className="panel stack" aria-label="PDF取込">
-            <div className="panel-heading">
-              <div>
-                <h3>取込設定</h3>
-                <p>対象PDF、出力先、共通項目をここで揃えます。</p>
+  function renderImportList() {
+    return (
+      <div className="pane stack">
+        <PaneHeader
+          title="PDF一覧"
+          description={pdfFiles.length ? `${pdfFiles.length}件 / ${totalPages}ページ` : "処理対象PDFを追加します。"}
+          action={
+            <button className="ghost danger" disabled={!pdfFiles.length} onClick={clearPdfSelection} type="button">
+              <IconLabel icon={Trash2}>全クリア</IconLabel>
+            </button>
+          }
+        />
+        {pdfFiles.length ? (
+          <div className="queue-list">
+            {pdfFiles.map((file) => (
+              <div className={file.path === currentPdf ? "queue-row selected" : "queue-row"} key={file.path}>
+                <button className="queue-main" onClick={() => void selectPdf(file.path)} type="button">
+                  <strong>{basename(file.path)}</strong>
+                  <small>{file.pageCount}ページ</small>
+                  <span>{file.path}</span>
+                </button>
+                <button
+                  aria-label={`${basename(file.path)} を一覧から外す`}
+                  className="icon-button danger"
+                  onClick={() => void removePdf(file.path)}
+                  type="button"
+                >
+                  <XCircle aria-hidden="true" size={17} />
+                </button>
               </div>
-              <button disabled={!canContinueFromImport} onClick={() => setActiveStep("split")} type="button">
-                <IconLabel icon={ChevronRight}>分割へ進む</IconLabel>
-              </button>
-            </div>
-            <div className="action-row">
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            action={
               <button className="primary" onClick={choosePdfs} type="button">
                 <IconLabel icon={Upload}>PDFを選択</IconLabel>
               </button>
-              <button onClick={chooseOutputDir} type="button">
-                <IconLabel icon={FolderOpen}>出力フォルダ</IconLabel>
-              </button>
-              <button onClick={loadState} type="button">
-                <IconLabel icon={RotateCcw}>状態を復元</IconLabel>
-              </button>
-              <button onClick={saveState} type="button">
-                <IconLabel icon={Save}>状態を保存</IconLabel>
-              </button>
-            </div>
-            <div className="field-grid two">
-              <label>
-                箱No
-                <input
-                  value={commonMetadata.box_no}
-                  onChange={(event) => setCommonMetadata((current) => ({ ...current, box_no: event.target.value }))}
-                />
-              </label>
-              <label>
-                バインダーNo
-                <input
-                  value={commonMetadata.binder_no}
-                  onChange={(event) => setCommonMetadata((current) => ({ ...current, binder_no: event.target.value }))}
-                />
-              </label>
-            </div>
-            <div className="summary-grid">
-              <div>
-                <span>出力先</span>
-                <strong>{outputDir || "未設定"}</strong>
-              </div>
-              <div>
-                <span>PDF</span>
-                <strong>{pdfFiles.length}件</strong>
-              </div>
-              <div>
-                <span>分割</span>
-                <strong>{allSegments.length}件</strong>
-              </div>
-            </div>
-            {pdfFiles.length ? (
-              <div className="list">
-                {pdfFiles.map((file) => (
-                  <button
-                    className={file.path === currentPdf ? "list-row selected" : "list-row"}
-                    key={file.path}
-                    onClick={() => void selectPdf(file.path)}
-                    type="button"
-                  >
-                    <span>
-                      <strong>{basename(file.path)}</strong>
-                      <small>{file.path}</small>
-                    </span>
-                    <span>{file.pageCount}ページ</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <EmptyState
-                action={
-                  <button className="primary" onClick={choosePdfs} type="button">
-                    <IconLabel icon={Upload}>PDFを選択</IconLabel>
-                  </button>
-                }
-                icon={FileText}
-                title="PDFが未選択です"
-              >
-                最初に処理対象のPDFを追加します。
-              </EmptyState>
-            )}
-          </section>
+            }
+            icon={FileText}
+            title="PDFが未選択です"
+          >
+            最初に処理対象のPDFを追加します。
+          </EmptyState>
         )}
+      </div>
+    );
+  }
 
-        {activeStep === "split" && (
-          <section className="split-layout" aria-label="分割">
-            <div className="panel stack">
-              <div className="panel-heading">
-                <div>
-                  <h3>{currentPdf ? basename(currentPdf) : "PDF未選択"}</h3>
-                  <p>{currentFile ? `${currentPage} / ${currentFile.pageCount}ページ` : "PDFを取込画面で選択してください。"}</p>
-                </div>
-                <button disabled={!allSegments.length} onClick={() => setActiveStep("input")} type="button">
-                  <IconLabel icon={ChevronRight}>入力へ進む</IconLabel>
-                </button>
-              </div>
-              <div className="action-row">
-                <button disabled={!currentFile || currentPage <= 1} onClick={() => void movePage(-1)} type="button">
-                  <IconLabel icon={ArrowLeft}>前ページ</IconLabel>
-                </button>
+  function renderSplitList() {
+    return (
+      <div className="pane stack">
+        <PaneHeader
+          title="分割対象"
+          description={currentFile ? `${basename(currentFile.path)} / ${currentPage}ページ目` : "PDF未選択"}
+        />
+        {pdfFiles.length ? (
+          <div className="compact-group">
+            <span className="group-label">PDF</span>
+            <div className="queue-list slim">
+              {pdfFiles.map((file) => (
                 <button
-                  disabled={!currentFile || currentPage >= (currentFile?.pageCount ?? 1)}
-                  onClick={() => void movePage(1)}
+                  className={file.path === currentPdf ? "list-row selected" : "list-row"}
+                  key={file.path}
+                  onClick={() => void selectPdf(file.path)}
                   type="button"
                 >
-                  <IconLabel icon={ArrowRight}>次ページ</IconLabel>
+                  <span>
+                    <strong>{basename(file.path)}</strong>
+                    <small>{file.pageCount}ページ</small>
+                  </span>
                 </button>
-                <button className="primary" disabled={!currentFile} onClick={addSplitBeforeCurrentPage} type="button">
-                  <IconLabel icon={Split}>現在ページの前で分割</IconLabel>
-                </button>
-                <button disabled={!currentFile} onClick={splitEveryPage} type="button">
-                  <IconLabel icon={ClipboardCheck}>1ページごとに分割</IconLabel>
-                </button>
-                <button disabled={!currentFile} onClick={undoLastSplit} type="button">
-                  <IconLabel icon={Undo2}>最後の分割を取り消す</IconLabel>
-                </button>
-              </div>
-              <div className="preview-frame">
-                {previewDataUrl ? (
-                  <img alt="PDFページプレビュー" src={previewDataUrl} />
-                ) : (
-                  <EmptyState icon={FileText} title="プレビューなし">
-                    PDFを選択するとページプレビューを表示します。
-                  </EmptyState>
-                )}
-              </div>
+              ))}
             </div>
-            <aside className="panel stack">
-              <div className="panel-heading compact-heading">
-                <div>
-                  <h3>分割一覧</h3>
-                  <p>{allSegments.length ? `${allSegments.length}件` : "未作成"}</p>
-                </div>
-              </div>
-              <div className="list compact">
-                {allSegments.length ? (
-                  allSegments.map((segment) => (
-                    <button
-                      className={segment.key === selectedSegmentKey ? "list-row selected" : "list-row"}
-                      key={segment.key}
-                      onClick={() => setSelectedSegmentKey(segment.key)}
-                      type="button"
-                    >
-                      <span>
-                        <strong>{basename(segment.pdfPath)}</strong>
-                        <small>{previewFilename(segment.metadata)}</small>
-                      </span>
-                      <span>{segment.pages}ページ</span>
-                    </button>
-                  ))
-                ) : (
-                  <EmptyState icon={Split} title="分割なし">
-                    PDFを選択するとページ範囲が表示されます。
-                  </EmptyState>
-                )}
-              </div>
-            </aside>
-          </section>
-        )}
-
-        {activeStep === "input" && (
-          <section className="panel stack" aria-label="入力">
-            <div className="panel-heading">
-              <div>
-                <h3>命名入力</h3>
-                <p>
-                  {selectedSegment
-                    ? `${basename(selectedSegment.pdfPath)} / ${selectedSegment.pages}ページ`
-                    : "分割セグメントがありません。"}
-                </p>
-              </div>
-              <div className="filename-preview">
-                <span>出力名</span>
-                <strong>{selectedSegment ? previewFilename(selectedSegment.metadata) : "-"}</strong>
-              </div>
-            </div>
-            <div className="action-row">
-              <button className="primary" disabled={!allSegments.length} onClick={resequence} type="button">
-                <IconLabel icon={ClipboardCheck}>連番を再採番</IconLabel>
-              </button>
-              <button disabled={!allSegments.length || !outputDir} onClick={runPreflight} type="button">
-                <IconLabel icon={ChevronRight}>出力前チェック</IconLabel>
-              </button>
-            </div>
-            {selectedSegment && (
-              <div className="field-grid three">
-                <label>
-                  箱No
-                  <input
-                    value={selectedSegment.metadata.box_no}
-                    onChange={(event) => updateMetadata(selectedSegment, "box_no", event.target.value)}
-                  />
-                </label>
-                <label>
-                  バインダーNo
-                  <input
-                    value={selectedSegment.metadata.binder_no}
-                    onChange={(event) => updateMetadata(selectedSegment, "binder_no", event.target.value)}
-                  />
-                </label>
-                <label>
-                  連番
-                  <input
-                    value={selectedSegment.metadata.seq}
-                    onChange={(event) => updateMetadata(selectedSegment, "seq", event.target.value)}
-                  />
-                </label>
-              </div>
-            )}
+          </div>
+        ) : null}
+        <div className="compact-group">
+          <span className="group-label">セグメント</span>
+          <div className="queue-list slim">
             {allSegments.length ? (
-              <div className="table input-table">
-                <div className="table-head">
-                  <span>PDF</span>
-                  <span>ページ</span>
-                  <span>箱No</span>
-                  <span>バインダー</span>
-                  <span>連番</span>
-                  <span>出力名</span>
-                  <span>状態</span>
-                </div>
-                {allSegments.map((segment) => {
-                  const missing = missingMetadata(segment.metadata);
-                  return (
-                    <button
-                      className={segment.key === selectedSegment?.key ? "table-row selected" : "table-row"}
-                      key={segment.key}
-                      onClick={() => setSelectedSegmentKey(segment.key)}
-                      type="button"
-                    >
-                      <span>{basename(segment.pdfPath)}</span>
-                      <span>{segment.pages}</span>
-                      <span>{segment.metadata.box_no || "-"}</span>
-                      <span>{segment.metadata.binder_no || "-"}</span>
-                      <span>{segment.metadata.seq || "-"}</span>
-                      <span>{previewFilename(segment.metadata)}</span>
-                      <span className={missing.length ? "state-text warning" : "state-text ok"}>
-                        {missing.length ? "未入力" : "OK"}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+              allSegments.map((segment) => (
+                <button
+                  className={segment.key === selectedSegmentKey ? "list-row selected" : "list-row"}
+                  key={segment.key}
+                  onClick={() => setSelectedSegmentKey(segment.key)}
+                  type="button"
+                >
+                  <span>
+                    <strong>{segment.pages}ページ</strong>
+                    <small>{basename(segment.pdfPath)}</small>
+                  </span>
+                  <span className="row-meta">{previewFilename(segment.metadata)}</span>
+                </button>
+              ))
             ) : (
-              <EmptyState icon={PencilLine} title="入力対象がありません">
-                PDFを取込み、分割を確認してから入力します。
+              <EmptyState icon={Split} title="分割なし">
+                PDFを選択するとページ範囲が表示されます。
               </EmptyState>
             )}
-          </section>
-        )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-        {activeStep === "output" && (
-          <section className="panel stack" aria-label="出力">
-            <div className="panel-heading">
-              <div>
-                <h3>出力確認</h3>
-                <p>{preflightChecks.length ? `${preflightChecks.length}件の出力予定` : "出力前チェック待ち"}</p>
-              </div>
-              <div className={!preflightChecks.length || outputIssues ? "check-summary warning" : "check-summary"}>
-                <strong>{preflightChecks.length ? (outputIssues ? `${outputIssues}件 要修正` : "出力可能") : "未確認"}</strong>
-                <span>{outputDir || "出力先未設定"}</span>
-              </div>
+  function renderInputList() {
+    return (
+      <div className="pane stack">
+        <PaneHeader title="セグメント一覧" description={`${readySegments}件 OK / ${incompleteSegments}件 未入力`} />
+        {allSegments.length ? (
+          <div className="mini-table">
+            <div className="mini-head">
+              <span>範囲</span>
+              <span>命名</span>
+              <span>状態</span>
             </div>
-            <div className="action-row">
-              <button disabled={!allSegments.length || !outputDir} onClick={runPreflight} type="button">
+            {allSegments.map((segment) => {
+              const missing = missingMetadata(segment.metadata);
+              return (
+                <button
+                  className={segment.key === selectedSegment?.key ? "mini-row selected" : "mini-row"}
+                  key={segment.key}
+                  onClick={() => setSelectedSegmentKey(segment.key)}
+                  type="button"
+                >
+                  <span>
+                    <strong>{segment.pages}</strong>
+                    <small>{basename(segment.pdfPath)}</small>
+                  </span>
+                  <span>{`${segment.metadata.box_no || "-"} / ${segment.metadata.binder_no || "-"} / ${
+                    segment.metadata.seq || "-"
+                  }`}</span>
+                  <span className={missing.length ? "state-text warning" : "state-text ok"}>
+                    {missing.length ? "未入力" : "OK"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <EmptyState icon={PencilLine} title="入力対象がありません">
+            PDFを取込み、分割を確認してから入力します。
+          </EmptyState>
+        )}
+      </div>
+    );
+  }
+
+  function renderOutputList() {
+    return (
+      <div className="pane stack">
+        <PaneHeader
+          title="出力予定"
+          description={preflightChecks.length ? `${preflightChecks.length}件` : "出力前チェック待ち"}
+        />
+        {preflightChecks.length ? (
+          <div className="output-list">
+            {preflightChecks.map((check, index) => (
+              <div className={check.ok ? "output-row" : "output-row error"} key={`${check.pdf_path}-${check.pages}-${index}`}>
+                <span>
+                  <strong>{check.filename || check.requested_filename || "-"}</strong>
+                  <small>{check.pages}ページ</small>
+                </span>
+                <span className={check.ok ? "state-text ok" : "state-text warning"}>
+                  {check.ok ? (check.has_existing_output ? "既存あり" : "出力可能") : "要修正"}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            action={
+              <button disabled={!canRunPreflight} onClick={runPreflight} type="button">
                 <IconLabel icon={ClipboardCheck}>出力前チェック</IconLabel>
               </button>
-              <button
-                className="primary"
-                disabled={!canExport}
-                onClick={runExport}
-                type="button"
-              >
-                <IconLabel icon={Download}>出力実行</IconLabel>
-              </button>
-            </div>
-            {exportResult && (
-              <div className="summary-grid">
-                <div>
-                  <span>作成</span>
-                  <strong>{exportResult.summary.created}件</strong>
-                </div>
-                <div>
-                  <span>失敗</span>
-                  <strong>{exportResult.summary.failed}件</strong>
-                </div>
-              </div>
-            )}
-            {preflightChecks.length ? (
-              <div className="table output-table">
-                <div className="table-head">
-                  <span>ページ</span>
-                  <span>予定ファイル名</span>
-                  <span>既存</span>
-                  <span>状態</span>
-                </div>
-                {preflightChecks.map((check, index) => (
-                  <div
-                    className={check.ok ? "table-row" : "table-row error"}
-                    key={`${check.pdf_path}-${check.pages}-${index}`}
-                  >
-                    <span>{check.pages}</span>
-                    <span>{check.filename || check.requested_filename || "-"}</span>
-                    <span>{check.has_existing_output ? "あり" : "なし"}</span>
-                    <span>{check.ok ? "出力可能" : check.messages.join(" / ")}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <EmptyState
-                action={
-                  <button disabled={!canRunPreflight} onClick={runPreflight} type="button">
-                    <IconLabel icon={ClipboardCheck}>出力前チェック</IconLabel>
-                  </button>
-                }
-                icon={Download}
-                title="出力前チェック待ちです"
-              >
-                入力内容が揃ったら、ここで出力可否を確認します。
-              </EmptyState>
-            )}
-          </section>
+            }
+            icon={Download}
+            title="未確認です"
+          >
+            入力内容が揃ったら、ここで出力可否を確認します。
+          </EmptyState>
         )}
+      </div>
+    );
+  }
+
+  function renderLeftPane() {
+    if (activeStep === "import") {
+      return renderImportList();
+    }
+    if (activeStep === "split") {
+      return renderSplitList();
+    }
+    if (activeStep === "input") {
+      return renderInputList();
+    }
+    return renderOutputList();
+  }
+
+  function renderImportWork() {
+    return (
+      <section className="work-card stack" aria-label="PDF取込">
+        <PaneHeader title="取込設定" description="対象PDF、出力先、共通項目をここで揃えます。" />
+        <div className="action-row">
+          <button className="primary" onClick={choosePdfs} type="button">
+            <IconLabel icon={Upload}>PDFを選択</IconLabel>
+          </button>
+          <button onClick={chooseOutputDir} type="button">
+            <IconLabel icon={FolderOpen}>出力フォルダ</IconLabel>
+          </button>
+          <button disabled={!outputDir} onClick={resetOutputDir} type="button">
+            <IconLabel icon={XCircle}>出力先リセット</IconLabel>
+          </button>
+          <button onClick={loadState} type="button">
+            <IconLabel icon={RotateCcw}>状態を復元</IconLabel>
+          </button>
+          <button onClick={saveState} type="button">
+            <IconLabel icon={Save}>状態を保存</IconLabel>
+          </button>
+        </div>
+        <div className="field-grid two">
+          <label>
+            箱No
+            <input value={commonMetadata.box_no} onChange={(event) => updateCommonMetadata("box_no", event.target.value)} />
+          </label>
+          <label>
+            バインダーNo
+            <input
+              value={commonMetadata.binder_no}
+              onChange={(event) => updateCommonMetadata("binder_no", event.target.value)}
+            />
+          </label>
+        </div>
+        <div className="summary-strip">
+          <StatLine label="出力先" value={outputDir || "未設定"} />
+          <StatLine label="PDF" value={`${pdfFiles.length}件`} />
+          <StatLine label="ページ" value={totalPages ? `${totalPages}ページ` : "-"} />
+        </div>
+      </section>
+    );
+  }
+
+  function renderSplitWork() {
+    return (
+      <section className="work-card stack" aria-label="分割">
+        <PaneHeader
+          title={currentPdf ? basename(currentPdf) : "PDF未選択"}
+          description={currentFile ? `${currentPage} / ${currentFile.pageCount}ページ` : "PDFを取込画面で選択してください。"}
+        />
+        <div className="action-row">
+          <button disabled={!currentFile || currentPage <= 1} onClick={() => void movePage(-1)} type="button">
+            <IconLabel icon={ArrowLeft}>前ページ</IconLabel>
+          </button>
+          <button
+            disabled={!currentFile || currentPage >= (currentFile?.pageCount ?? 1)}
+            onClick={() => void movePage(1)}
+            type="button"
+          >
+            <IconLabel icon={ArrowRight}>次ページ</IconLabel>
+          </button>
+          <button className="primary" disabled={!currentFile} onClick={addSplitBeforeCurrentPage} type="button">
+            <IconLabel icon={Split}>現在ページの前で分割</IconLabel>
+          </button>
+          <button disabled={!currentFile} onClick={splitEveryPage} type="button">
+            <IconLabel icon={ClipboardCheck}>1ページごとに分割</IconLabel>
+          </button>
+          <button disabled={!currentFile} onClick={undoLastSplit} type="button">
+            <IconLabel icon={Undo2}>最後の分割を取り消す</IconLabel>
+          </button>
+        </div>
+        <div className="preview-frame">
+          {previewDataUrl ? (
+            <img alt="PDFページプレビュー" src={previewDataUrl} />
+          ) : (
+            <EmptyState icon={FileText} title="プレビューなし">
+              PDFを選択するとページプレビューを表示します。
+            </EmptyState>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  function renderInputWork() {
+    return (
+      <section className="work-card stack" aria-label="入力">
+        <PaneHeader
+          title="命名入力"
+          description={
+            selectedSegment
+              ? `${basename(selectedSegment.pdfPath)} / ${selectedSegment.pages}ページ`
+              : "分割セグメントがありません。"
+          }
+        />
+        <div className="filename-preview">
+          <span>出力名プレビュー</span>
+          <strong>{selectedSegment ? previewFilename(selectedSegment.metadata) : "-"}</strong>
+        </div>
+        <div className="action-row">
+          <button className="primary" disabled={!allSegments.length} onClick={resequence} type="button">
+            <IconLabel icon={ClipboardCheck}>連番を再採番</IconLabel>
+          </button>
+          <button disabled={!allSegments.length || !outputDir} onClick={runPreflight} type="button">
+            <IconLabel icon={ChevronRight}>出力前チェック</IconLabel>
+          </button>
+        </div>
+        {selectedSegment ? (
+          <div className="field-grid three">
+            <label>
+              箱No
+              <input
+                value={selectedSegment.metadata.box_no}
+                onChange={(event) => updateMetadata(selectedSegment, "box_no", event.target.value)}
+              />
+            </label>
+            <label>
+              バインダーNo
+              <input
+                value={selectedSegment.metadata.binder_no}
+                onChange={(event) => updateMetadata(selectedSegment, "binder_no", event.target.value)}
+              />
+            </label>
+            <label>
+              連番
+              <input
+                value={selectedSegment.metadata.seq}
+                onChange={(event) => updateMetadata(selectedSegment, "seq", event.target.value)}
+              />
+            </label>
+          </div>
+        ) : (
+          <EmptyState icon={PencilLine} title="入力対象がありません">
+            分割セグメントを作成してから入力します。
+          </EmptyState>
+        )}
+      </section>
+    );
+  }
+
+  function renderOutputWork() {
+    return (
+      <section className="work-card stack" aria-label="出力">
+        <PaneHeader
+          title="出力確認"
+          description={preflightChecks.length ? `${preflightChecks.length}件の出力予定` : "出力前チェック待ち"}
+        />
+        <div className="action-row">
+          <button disabled={!allSegments.length || !outputDir} onClick={runPreflight} type="button">
+            <IconLabel icon={ClipboardCheck}>出力前チェック</IconLabel>
+          </button>
+          <button className="primary" disabled={!canExport} onClick={runExport} type="button">
+            <IconLabel icon={Download}>出力実行</IconLabel>
+          </button>
+        </div>
+        <div className="summary-strip">
+          <StatLine label="要修正" value={`${outputIssues}件`} />
+          <StatLine label="既存あり" value={`${existingOutputs}件`} />
+          <StatLine label="出力先" value={outputDir || "未設定"} />
+        </div>
+        {exportResult ? (
+          <div className="log-box">
+            <strong>出力結果</strong>
+            <p>{`作成 ${exportResult.summary.created}件 / 失敗 ${exportResult.summary.failed}件`}</p>
+          </div>
+        ) : null}
+        {preflightChecks.length ? (
+          <div className="check-table">
+            <div className="check-head">
+              <span>ページ</span>
+              <span>予定ファイル名</span>
+              <span>既存</span>
+              <span>状態</span>
+            </div>
+            {preflightChecks.map((check, index) => (
+              <div className={check.ok ? "check-row" : "check-row error"} key={`${check.pdf_path}-${check.pages}-${index}`}>
+                <span>{check.pages}</span>
+                <span>{check.filename || check.requested_filename || "-"}</span>
+                <span>{check.has_existing_output ? "あり" : "なし"}</span>
+                <span>{check.ok ? "出力可能" : check.messages.join(" / ")}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState icon={Download} title="出力前チェック待ちです">
+            入力内容が揃ったら、ここで出力可否を確認します。
+          </EmptyState>
+        )}
+      </section>
+    );
+  }
+
+  function renderWorkPane() {
+    if (activeStep === "import") {
+      return renderImportWork();
+    }
+    if (activeStep === "split") {
+      return renderSplitWork();
+    }
+    if (activeStep === "input") {
+      return renderInputWork();
+    }
+    return renderOutputWork();
+  }
+
+  function renderRightPanel() {
+    if (activeStep === "import") {
+      return (
+        <aside className="right-panel stack" aria-label="進捗と次アクション">
+          <PaneHeader title="次アクション" description="PDF取込の完了条件" />
+          <StatusCheck ok={pdfFiles.length > 0} label="PDF選択" detail={pdfFiles.length ? `${pdfFiles.length}件` : "未選択"} />
+          <StatusCheck ok={Boolean(outputDir)} label="出力先" detail={outputDir || "未設定"} />
+          <StatusCheck ok={Boolean(commonMetadata.box_no || commonMetadata.binder_no)} label="共通項目" detail="未入力でも後で修正可能" />
+          <button className="primary wide" disabled={!canContinueFromImport} onClick={() => setActiveStep("split")} type="button">
+            <IconLabel icon={ChevronRight}>分割へ進む</IconLabel>
+          </button>
+        </aside>
+      );
+    }
+    if (activeStep === "split") {
+      return (
+        <aside className="right-panel stack" aria-label="進捗と次アクション">
+          <PaneHeader title="次アクション" description="分割の確認" />
+          <StatusCheck ok={Boolean(currentFile)} label="表示PDF" detail={currentFile ? basename(currentFile.path) : "未選択"} />
+          <StatusCheck ok={allSegments.length > 0} label="セグメント" detail={`${allSegments.length}件`} />
+          <StatusCheck ok={Boolean(currentFile)} label="ページ位置" detail={currentFile ? `${currentPage} / ${currentFile.pageCount}` : "-"} />
+          <button className="primary wide" disabled={!allSegments.length} onClick={() => setActiveStep("input")} type="button">
+            <IconLabel icon={ChevronRight}>入力へ進む</IconLabel>
+          </button>
+        </aside>
+      );
+    }
+    if (activeStep === "input") {
+      return (
+        <aside className="right-panel stack" aria-label="進捗と次アクション">
+          <PaneHeader title="次アクション" description="命名入力の完了条件" />
+          <StatusCheck ok={allSegments.length > 0} label="入力対象" detail={`${allSegments.length}件`} />
+          <StatusCheck ok={!incompleteSegments && allSegments.length > 0} label="未入力" detail={`${incompleteSegments}件`} />
+          <StatusCheck ok={Boolean(outputDir)} label="出力先" detail={outputDir || "未設定"} />
+          <div className="progress-count">
+            <strong>{readySegments}</strong>
+            <span>/ {allSegments.length}件 OK</span>
+          </div>
+          <button className="primary wide" disabled={!canRunPreflight} onClick={runPreflight} type="button">
+            <IconLabel icon={ChevronRight}>出力前チェック</IconLabel>
+          </button>
+        </aside>
+      );
+    }
+    return (
+      <aside className="right-panel stack" aria-label="進捗と次アクション">
+        <PaneHeader title="次アクション" description="出力前チェックと実行" />
+        <StatusCheck ok={preflightChecks.length > 0} label="チェック" detail={preflightChecks.length ? `${preflightChecks.length}件` : "未実行"} />
+        <StatusCheck ok={outputIssues === 0 && preflightChecks.length > 0} label="要修正" detail={`${outputIssues}件`} />
+        <StatusCheck
+          ok={preflightChecks.length > 0}
+          label="既存ファイル"
+          detail={preflightChecks.length ? (existingOutputs ? `${existingOutputs}件は一意名で回避` : "既存なし") : "未確認"}
+        />
+        <button disabled={!canRunPreflight} onClick={runPreflight} type="button">
+          <IconLabel icon={ClipboardCheck}>再チェック</IconLabel>
+        </button>
+        <button className="primary wide" disabled={!canExport} onClick={runExport} type="button">
+          <IconLabel icon={Download}>出力実行</IconLabel>
+        </button>
+      </aside>
+    );
+  }
+
+  return (
+    <main className="app-shell">
+      <header className="app-header">
+        <div className="brand-row">
+          <span className="brand-mark">PDF</span>
+          <div>
+            <p className="section-label">PDF分割命名ツール</p>
+            <h1>PDF整理ツール</h1>
+          </div>
+        </div>
+        <div className={`status-pill ${statusTone}`} role="status">
+          {statusTone === "danger" ? (
+            <AlertTriangle aria-hidden="true" size={16} />
+          ) : statusTone === "ok" ? (
+            <CheckCircle2 aria-hidden="true" size={16} />
+          ) : (
+            <ClipboardCheck aria-hidden="true" size={16} />
+          )}
+          <span>{status}</span>
+        </div>
+      </header>
+
+      <nav className="stepper" aria-label="作業ステップ">
+        {steps.map((step, index) => {
+          const state = stepState(step.id);
+          const Icon = step.icon;
+          return (
+            <button
+              aria-current={activeStep === step.id ? "step" : undefined}
+              className={`step-tab ${state}`}
+              data-testid={`step-${step.id}`}
+              key={step.id}
+              onClick={() => setActiveStep(step.id)}
+              type="button"
+            >
+              <span className="step-index">{index + 1}</span>
+              <span className="step-copy">
+                <strong>
+                  <Icon aria-hidden="true" size={16} strokeWidth={2.1} />
+                  {step.label}
+                </strong>
+                <small>{step.hint}</small>
+              </span>
+              <span className={`step-badge ${state}`}>{stepStateLabel(state)}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      <section className="overview-strip" aria-label="作業状況">
+        <StatLine label="PDF" value={`${pdfFiles.length}件`} />
+        <StatLine label="分割" value={`${allSegments.length}件`} />
+        <StatLine label="入力" value={allSegments.length ? `${readySegments}件 OK` : "未確認"} />
+        <StatLine label="出力先" value={outputDir ? "設定済み" : "未設定"} />
+      </section>
+
+      <section className="task-layout" aria-label="PDF整理ワークスペース">
+        {renderLeftPane()}
+        {renderWorkPane()}
+        {renderRightPanel()}
       </section>
     </main>
   );
