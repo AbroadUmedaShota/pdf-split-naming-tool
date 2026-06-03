@@ -61,6 +61,7 @@ npm run release:manifest
 ```
 
 6. GitHub Releases に installer、`.sig`、`latest.json` をアップロードします。
+   アップロードには `src-tauri\target\release\bundle\release-assets\` 配下の ASCII 名ファイルを使います。
 
 `latest.json` は GitHub Releases の asset として、次の URL で取得できる名前にします。
 

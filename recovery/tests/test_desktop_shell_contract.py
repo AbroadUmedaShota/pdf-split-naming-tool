@@ -93,6 +93,8 @@ def test_release_docs_explain_updater_signing_and_latest_json() -> None:
     assert "windows-x86_64" in manifest_script
     assert "latest.json" in manifest_script
     assert "encodeURIComponent" in manifest_script
+    assert "release-assets" in manifest_script
+    assert "pdf-organizer-desktop_" in manifest_script
 
 
 def test_desktop_sidecar_contract_is_minimal_mvp() -> None:

@@ -1,10 +1,11 @@
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const appRoot = join(scriptDir, "..");
 const bundleRoot = join(appRoot, "src-tauri", "target", "release", "bundle");
+const releaseAssetRoot = join(bundleRoot, "release-assets");
 const packageJson = JSON.parse(readFileSync(join(appRoot, "package.json"), "utf-8"));
 const releaseBaseUrl =
   process.env.PDF_ORGANIZER_RELEASE_BASE_URL ??
@@ -39,7 +40,18 @@ function findUpdaterAsset() {
   throw new Error("Updater installer and .sig were not found. Run `npm run tauri build` first.");
 }
 
-const { assetName, signaturePath } = findUpdaterAsset();
+function releaseAssetNameFor(sourceName) {
+  const suffix = sourceName.endsWith(".msi") ? "_x64_ja-JP.msi" : "_x64-setup.exe";
+  return `pdf-organizer-desktop_${packageJson.version}${suffix}`;
+}
+
+const { assetName, assetPath, signaturePath } = findUpdaterAsset();
+const releaseAssetName = releaseAssetNameFor(assetName);
+const releaseSignatureName = `${releaseAssetName}.sig`;
+mkdirSync(releaseAssetRoot, { recursive: true });
+copyFileSync(assetPath, join(releaseAssetRoot, releaseAssetName));
+copyFileSync(signaturePath, join(releaseAssetRoot, releaseSignatureName));
+
 const signature = readFileSync(signaturePath, "utf-8").trim();
 const manifest = {
   version: packageJson.version,
@@ -48,12 +60,13 @@ const manifest = {
   platforms: {
     "windows-x86_64": {
       signature,
-      url: `${releaseBaseUrl}${encodeURIComponent(assetName)}`
+      url: `${releaseBaseUrl}${encodeURIComponent(releaseAssetName)}`
     }
   }
 };
 
-const manifestPath = join(bundleRoot, "latest.json");
+const manifestPath = join(releaseAssetRoot, "latest.json");
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
 console.log(`Updater manifest: ${manifestPath}`);
-console.log(`Updater asset: ${assetName}`);
+console.log(`Updater asset: ${releaseAssetName}`);
+console.log(`Updater signature: ${releaseSignatureName}`);
