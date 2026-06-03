@@ -13,6 +13,7 @@ import {
   FolderOpen,
   ListChecks,
   PencilLine,
+  RefreshCw,
   RotateCcw,
   Save,
   Split,
@@ -22,7 +23,7 @@ import {
   XCircle,
   type LucideIcon
 } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   invokeSidecar,
   type AppPersistedState,
@@ -34,6 +35,13 @@ import {
   type SidecarResponse,
   type SidecarSegment
 } from "../lib/sidecar";
+import {
+  checkForAppUpdate,
+  installAppUpdate,
+  readCurrentVersion,
+  updateErrorMessage,
+  type AppUpdate
+} from "../lib/updates";
 
 type StepId = "import" | "split" | "input" | "output";
 
@@ -52,6 +60,7 @@ type SegmentView = {
 };
 
 type StepState = "active" | "done" | "attention" | "idle";
+type UpdateState = "idle" | "checking" | "current" | "available" | "installing" | "installed" | "error";
 
 const steps: Array<{ id: StepId; label: string; hint: string; icon: LucideIcon }> = [
   { id: "import", label: "PDF取込", hint: "PDF / 出力先", icon: FileText },
@@ -233,6 +242,11 @@ export default function Page() {
   const [preflightChecks, setPreflightChecks] = useState<SidecarOutputCheck[]>([]);
   const [exportResult, setExportResult] = useState<SidecarExportResponse | null>(null);
   const [status, setStatus] = useState("PDFを選択してください。");
+  const [currentVersion, setCurrentVersion] = useState("0.1.0");
+  const [updateState, setUpdateState] = useState<UpdateState>("idle");
+  const [updateMessage, setUpdateMessage] = useState("更新未確認");
+  const [updateProgress, setUpdateProgress] = useState("");
+  const [availableUpdate, setAvailableUpdate] = useState<AppUpdate | null>(null);
 
   const currentFile = pdfFiles.find((file) => file.path === currentPdf);
   const allSegments = useMemo(
@@ -255,6 +269,98 @@ export default function Page() {
   function clearOutputState(): void {
     setPreflightChecks([]);
     setExportResult(null);
+  }
+
+  useEffect(() => {
+    let disposed = false;
+
+    void readCurrentVersion()
+      .then((version) => {
+        if (!disposed) {
+          setCurrentVersion(version);
+        }
+      })
+      .catch(() => {
+        if (!disposed) {
+          setCurrentVersion("0.1.0");
+        }
+      });
+
+    void checkForUpdates(false, () => disposed);
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  async function checkForUpdates(manual: boolean, isDisposed: () => boolean = () => false): Promise<void> {
+    setUpdateState("checking");
+    setUpdateMessage("更新を確認しています。");
+    setUpdateProgress("");
+    if (manual) {
+      setStatus("更新を確認しています。");
+    }
+    try {
+      const update = await checkForAppUpdate();
+      if (isDisposed()) {
+        return;
+      }
+      setAvailableUpdate(update);
+      if (update) {
+        setUpdateState("available");
+        setUpdateMessage(`新しいバージョン ${update.version} があります。`);
+        setStatus(`新しいバージョン ${update.version} があります。`);
+        return;
+      }
+      setUpdateState("current");
+      setUpdateMessage("最新版です。");
+      if (manual) {
+        setStatus("最新版です。");
+      }
+    } catch (error) {
+      if (isDisposed()) {
+        return;
+      }
+      const message = updateErrorMessage(error);
+      setAvailableUpdate(null);
+      setUpdateState("error");
+      setUpdateMessage(message);
+      if (manual) {
+        setStatus(`更新確認エラー: ${message}`);
+      }
+    }
+  }
+
+  async function installAvailableUpdate(): Promise<void> {
+    if (!availableUpdate) {
+      return;
+    }
+    setUpdateState("installing");
+    setUpdateMessage("更新をダウンロードしています。");
+    setUpdateProgress("");
+    setStatus("更新をダウンロードしています。");
+    try {
+      await installAppUpdate(availableUpdate, (progress) => {
+        if (progress.finished) {
+          setUpdateProgress("ダウンロード完了");
+          return;
+        }
+        if (progress.contentLength && progress.contentLength > 0) {
+          const percent = Math.min(100, Math.round((progress.downloadedBytes / progress.contentLength) * 100));
+          setUpdateProgress(`${percent}%`);
+          return;
+        }
+        setUpdateProgress(`${Math.round(progress.downloadedBytes / 1024)} KB`);
+      });
+      setUpdateState("installed");
+      setUpdateMessage("更新をインストールしました。再起動します。");
+      setStatus("更新をインストールしました。");
+    } catch (error) {
+      const message = updateErrorMessage(error);
+      setUpdateState("error");
+      setUpdateMessage(`更新インストールに失敗しました: ${message}`);
+      setStatus(`更新インストールエラー: ${message}`);
+    }
   }
 
   function stepState(stepId: StepId): StepState {
@@ -584,6 +690,14 @@ export default function Page() {
       : status.includes("完了") || status.includes("できます")
         ? "ok"
         : "";
+  const updateTone =
+    updateState === "error"
+      ? "danger"
+      : updateState === "available" || updateState === "installing"
+        ? "warning"
+        : updateState === "current" || updateState === "installed"
+          ? "ok"
+          : "";
 
   function renderImportList() {
     return (
@@ -1063,15 +1177,40 @@ export default function Page() {
             <h1>PDF整理ツール</h1>
           </div>
         </div>
-        <div className={`status-pill ${statusTone}`} role="status">
-          {statusTone === "danger" ? (
-            <AlertTriangle aria-hidden="true" size={16} />
-          ) : statusTone === "ok" ? (
-            <CheckCircle2 aria-hidden="true" size={16} />
-          ) : (
-            <ClipboardCheck aria-hidden="true" size={16} />
-          )}
-          <span>{status}</span>
+        <div className="header-actions">
+          <div className={`update-card ${updateTone}`}>
+            <div className="update-copy">
+              <small>現在のバージョン: {currentVersion}</small>
+              <strong>{updateMessage}</strong>
+              {updateProgress ? <span>{updateProgress}</span> : null}
+              {availableUpdate?.body ? (
+                <details className="update-notes">
+                  <summary>リリースメモ</summary>
+                  <p>{availableUpdate.body}</p>
+                </details>
+              ) : null}
+            </div>
+            <div className="update-actions">
+              <button disabled={updateState === "checking" || updateState === "installing"} onClick={() => void checkForUpdates(true)} type="button">
+                <IconLabel icon={RefreshCw}>更新確認</IconLabel>
+              </button>
+              {availableUpdate ? (
+                <button className="primary" disabled={updateState === "installing"} onClick={() => void installAvailableUpdate()} type="button">
+                  <IconLabel icon={Download}>インストール</IconLabel>
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <div className={`status-pill ${statusTone}`} role="status">
+            {statusTone === "danger" ? (
+              <AlertTriangle aria-hidden="true" size={16} />
+            ) : statusTone === "ok" ? (
+              <CheckCircle2 aria-hidden="true" size={16} />
+            ) : (
+              <ClipboardCheck aria-hidden="true" size={16} />
+            )}
+            <span>{status}</span>
+          </div>
         </div>
       </header>
 
