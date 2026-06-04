@@ -5,8 +5,8 @@ import json
 import sys
 from pathlib import Path
 
-from pdf_splitter_tool.app import default_work_dir, main
 from pdf_splitter_tool.app_metadata import APP_ID, APP_NAME, __version__
+from pdf_splitter_tool.runtime import default_work_dir
 from pdf_splitter_tool.sidecar import handle_request
 from pdf_splitter_tool.state import STATE_BAK_FILENAME, STATE_FILENAME, STATE_TMP_FILENAME
 
@@ -24,10 +24,10 @@ def sidecar_error_response(exc: Exception) -> str:
     )
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--smoke", action="store_true", help="Print runtime paths and exit without opening the GUI.")
-    parser.add_argument("--smoke-output", help="Write --smoke JSON to this file. Useful for windowed EXE checks.")
+    parser.add_argument("--smoke", action="store_true", help="Print runtime paths and exit.")
+    parser.add_argument("--smoke-output", help="Write --smoke JSON to this file.")
     parser.add_argument("--sidecar-request", help="Read a sidecar JSON request from this file, or '-' for stdin.")
     parser.add_argument("--sidecar-output", help="Write sidecar JSON response to this file instead of stdout.")
     args = parser.parse_args()
@@ -45,7 +45,8 @@ if __name__ == "__main__":
             Path(args.sidecar_output).write_text(response, encoding="utf-8")
         else:
             print(response)
-    elif args.smoke:
+        return
+    if args.smoke:
         work_dir = default_work_dir()
         payload = json.dumps(
             {
@@ -53,7 +54,6 @@ if __name__ == "__main__":
                 "app_name": APP_NAME,
                 "version": __version__,
                 "work_dir": str(work_dir),
-                "presets_path": str(work_dir / "presets.json"),
                 "state_path": str(work_dir / STATE_FILENAME),
                 "state_backup_path": str(work_dir / STATE_BAK_FILENAME),
                 "state_tmp_path": str(work_dir / STATE_TMP_FILENAME),
@@ -65,5 +65,9 @@ if __name__ == "__main__":
             Path(args.smoke_output).write_text(payload, encoding="utf-8")
         else:
             print(payload)
-    else:
-        main()
+        return
+    parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
