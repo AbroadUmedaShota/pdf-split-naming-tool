@@ -74,7 +74,7 @@ Expected: Step 2 details are opened by smoke, search succeeds, output PDF count 
 ### Task 2: 仕様書へ表示方針を追記する
 
 **Files:**
-- Modify: `docs/2026-05-20_画面別機能仕様書.md`
+- Modify: `docs/archive/2026-05-20_画面別機能仕様書.md`
 
 - [ ] **Step 1: 通常作業モード記述を更新する**
 
