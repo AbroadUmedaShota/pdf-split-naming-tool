@@ -15,6 +15,9 @@ except Exception:  # pragma: no cover - depends on local runtime
     fitz = None
 
 
+MAX_PREVIEW_SIDE_PX = 2400
+
+
 class PdfService:
     @staticmethod
     def _require_fitz():
@@ -60,6 +63,16 @@ class PdfService:
             return doc.page_count
 
     @staticmethod
+    def _bounded_preview_zoom(page_rect, requested_zoom: float) -> float:
+        max_page_side = max(float(page_rect.width), float(page_rect.height))
+        requested_zoom = float(requested_zoom)
+        if max_page_side <= 0:
+            return requested_zoom
+
+        max_zoom = MAX_PREVIEW_SIDE_PX / max_page_side
+        return min(requested_zoom, max_zoom)
+
+    @staticmethod
     def page_preview_data_url(pdf_path: Path, page_no: int, zoom: float = 1.2) -> str:
         fitz_module = PdfService._require_fitz()
         with fitz_module.open(pdf_path) as doc:
@@ -67,7 +80,8 @@ class PdfService:
             if page_index >= doc.page_count:
                 raise ValueError("PDF page number exceeds document page count.")
             page = doc.load_page(page_index)
-            pixmap = page.get_pixmap(matrix=fitz_module.Matrix(zoom, zoom), alpha=False)
+            bounded_zoom = PdfService._bounded_preview_zoom(page.rect, zoom)
+            pixmap = page.get_pixmap(matrix=fitz_module.Matrix(bounded_zoom, bounded_zoom), alpha=False)
         encoded = base64.b64encode(pixmap.tobytes("png")).decode("ascii")
         return f"data:image/png;base64,{encoded}"
 

@@ -1,19 +1,27 @@
+import base64
 from pathlib import Path
 
 import fitz
 import pytest
 
 from pdf_splitter_tool.models import Segment
-from pdf_splitter_tool.pdf_service import PdfService
+from pdf_splitter_tool.pdf_service import MAX_PREVIEW_SIDE_PX, PdfService
 
 
-def make_pdf(path: Path, pages: int) -> None:
+def make_pdf(path: Path, pages: int, width: float = 595, height: float = 842) -> None:
     doc = fitz.open()
     for index in range(pages):
-        page = doc.new_page()
+        page = doc.new_page(width=width, height=height)
         page.insert_text((72, 72), f"Page {index + 1}")
     doc.save(path)
     doc.close()
+
+
+def png_dimensions_from_data_url(data_url: str) -> tuple[int, int]:
+    prefix = "data:image/png;base64,"
+    assert data_url.startswith(prefix)
+    pixmap = fitz.Pixmap(base64.b64decode(data_url.removeprefix(prefix), validate=True))
+    return pixmap.width, pixmap.height
 
 
 def test_page_count_returns_document_page_count(tmp_path: Path) -> None:
@@ -30,6 +38,31 @@ def test_page_preview_returns_png_data_url_for_one_based_page(tmp_path: Path) ->
     data_url = PdfService.page_preview_data_url(source, 1)
 
     assert data_url.startswith("data:image/png;base64,")
+    width, height = png_dimensions_from_data_url(data_url)
+    assert max(width, height) < MAX_PREVIEW_SIDE_PX
+    assert width > 595
+    assert height > 842
+
+
+def test_page_preview_allows_exact_max_side_boundary(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    make_pdf(source, 1, width=2_000, height=2_000)
+
+    data_url = PdfService.page_preview_data_url(source, 1)
+
+    assert png_dimensions_from_data_url(data_url) == (MAX_PREVIEW_SIDE_PX, MAX_PREVIEW_SIDE_PX)
+
+
+def test_page_preview_bounds_large_page_dimensions(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    make_pdf(source, 1, width=10_000, height=4_000)
+
+    data_url = PdfService.page_preview_data_url(source, 1)
+
+    width, height = png_dimensions_from_data_url(data_url)
+    assert max(width, height) <= MAX_PREVIEW_SIDE_PX
+    assert width < 10_000 * 1.2
+    assert height < 4_000 * 1.2
 
 
 def test_page_preview_returns_final_page_from_one_based_page_number(tmp_path: Path) -> None:
