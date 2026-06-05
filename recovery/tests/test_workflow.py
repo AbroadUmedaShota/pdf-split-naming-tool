@@ -60,6 +60,26 @@ def test_check_segment_outputs_detects_existing_and_defaults_to_unique(tmp_path:
     assert checks[0].output_path == tmp_path / "01_02_003_2.pdf"
 
 
+def test_check_segment_outputs_keeps_requested_name_when_existing_and_batch_collide(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    (tmp_path / "01_02_003.pdf").write_text("existing", encoding="utf-8")
+    (tmp_path / "01_02_003_2.pdf").write_text("existing", encoding="utf-8")
+    segments = [
+        Segment(source, 1, 1, {"box_no": "1", "binder_no": "2", "seq": "3"}),
+        Segment(source, 2, 2, {"box_no": "1", "binder_no": "2", "seq": "3"}),
+    ]
+
+    checks = check_segment_outputs(segments, tmp_path, processor=PageCountProcessor(page_count=2))
+
+    assert [check.ok for check in checks] == [True, True]
+    assert [check.requested_filename for check in checks] == ["01_02_003.pdf", "01_02_003.pdf"]
+    assert [check.requested_path for check in checks] == [tmp_path / "01_02_003.pdf", tmp_path / "01_02_003.pdf"]
+    assert [check.filename for check in checks] == ["01_02_003_3.pdf", "01_02_003_4.pdf"]
+    assert [check.output_path for check in checks] == [tmp_path / "01_02_003_3.pdf", tmp_path / "01_02_003_4.pdf"]
+    assert [check.existing_path for check in checks] == [tmp_path / "01_02_003.pdf", tmp_path / "01_02_003.pdf"]
+    assert [check.has_existing_output for check in checks] == [True, True]
+
+
 def test_check_segment_outputs_detects_invalid_page_range(tmp_path: Path) -> None:
     source = tmp_path / "source.pdf"
     segment = Segment(source, 1, 3, {"box_no": "1", "binder_no": "2", "seq": "3"})

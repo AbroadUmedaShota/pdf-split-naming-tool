@@ -115,6 +115,23 @@ def test_sidecar_state_load_and_save_round_trip(tmp_path: Path) -> None:
     assert load_response["state"] == state
 
 
+def test_sidecar_state_load_preserves_missing_input_pdf_state_with_warning(tmp_path: Path) -> None:
+    missing_pdf = tmp_path / "missing.pdf"
+    state = {"version": 1, "input_paths": [str(missing_pdf)], "current_page": 2}
+
+    save_response = handle_request({"command": "state_save", "work_dir": str(tmp_path), "state": state})
+    raw_saved_state = (tmp_path / "_pdf_split_state.json").read_text(encoding="utf-8")
+    load_response = handle_request({"command": "state_load", "work_dir": str(tmp_path)})
+
+    assert save_response["ok"] is True
+    assert load_response["ok"] is True
+    # Missing PDF paths are reported at the sidecar boundary, not filtered out of saved state.
+    assert load_response["state"] == state
+    assert load_response["messages"] == ["missing_input_pdf"]
+    assert load_response["missing_input_paths"] == [str(missing_pdf)]
+    assert (tmp_path / "_pdf_split_state.json").read_text(encoding="utf-8") == raw_saved_state
+
+
 def test_sidecar_export_writes_pdf_and_sha256(tmp_path: Path) -> None:
     source = tmp_path / "source.pdf"
     output_dir = tmp_path / "output"

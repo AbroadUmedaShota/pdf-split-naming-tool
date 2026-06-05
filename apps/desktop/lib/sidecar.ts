@@ -103,6 +103,8 @@ export type SidecarStateLoadResponse = {
   command: "state_load";
   work_dir: string;
   state: AppPersistedState | Record<string, never>;
+  messages?: string[];
+  missing_input_paths?: string[];
 };
 
 export type SidecarStateSaveResponse = {
