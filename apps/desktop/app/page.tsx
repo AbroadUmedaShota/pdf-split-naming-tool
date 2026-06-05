@@ -31,13 +31,13 @@ import {
   type SidecarOutputCheck,
   type SidecarPdfInfoResponse,
   type SidecarPreflightResponse,
-  type SidecarPreviewResponse,
   type SidecarResponse,
   type SidecarSegment
 } from "../lib/sidecar";
 import { resolveMissingSavedPdfRestore, restorableInputPaths } from "../lib/restore-state";
 import { missingMetadata, previewFilename } from "../lib/filename-policy";
 import { isOutputCheckOk, outputDetailStateText, outputIssueCount, outputListStateText } from "../lib/output-state";
+import { loadPagePreview } from "../lib/preview-flow";
 import { createPreviewRequestGate, previewCache } from "../lib/preview-cache";
 import {
   buildSegments,
@@ -378,27 +378,19 @@ export default function Page() {
   }
 
   async function loadPreview(pdfPath: string, pageNo: number): Promise<void> {
-    const requestId = previewRequestGateRef.current.next();
-    const cachedPreview = previewCache.get(pdfPath, pageNo);
-    if (cachedPreview) {
-      setPreviewDataUrl(cachedPreview.imageDataUrl);
-      setCurrentPage(cachedPreview.pageNo);
-      return;
-    }
-    const response = await invokeSidecar({ command: "page_preview", pdf_path: pdfPath, page_no: pageNo });
-    if (!previewRequestGateRef.current.isCurrent(requestId)) {
-      return;
-    }
-    if (!response.ok || response.command !== "page_preview") {
-      throw new Error(response.ok ? "プレビューを取得できませんでした。" : sidecarError(response));
-    }
-    const preview = response as SidecarPreviewResponse;
-    previewCache.set(pdfPath, pageNo, {
-      imageDataUrl: preview.image_data_url,
-      pageNo: preview.page_no
+    await loadPagePreview({
+      applyPreview(preview) {
+        setPreviewDataUrl(preview.imageDataUrl);
+        setCurrentPage(preview.pageNo);
+      },
+      cache: previewCache,
+      gate: previewRequestGateRef.current,
+      invalidPreviewMessage: "プレビューを取得できませんでした。",
+      pageNo,
+      pdfPath,
+      requestPreview: (request) => invokeSidecar(request),
+      responseErrorMessage: (response) => sidecarError(response as SidecarResponse)
     });
-    setPreviewDataUrl(preview.image_data_url);
-    setCurrentPage(preview.page_no);
   }
 
   async function choosePdfs(): Promise<void> {

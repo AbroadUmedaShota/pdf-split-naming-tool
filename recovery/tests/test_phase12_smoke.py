@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import base64
 from hashlib import sha256
 from pathlib import Path
 
 import fitz
 
+from pdf_splitter_tool.pdf_service import MAX_PREVIEW_SIDE_PX
 from pdf_splitter_tool.sidecar import handle_request
 
 
-def make_pdf(path: Path, page_labels: list[str]) -> None:
+def make_pdf(path: Path, page_labels: list[str], width: float = 595, height: float = 842) -> None:
     doc = fitz.open()
     for label in page_labels:
-        page = doc.new_page()
+        page = doc.new_page(width=width, height=height)
         page.insert_text((72, 72), label)
     doc.save(path)
     doc.close()
@@ -30,11 +32,20 @@ def pdf_texts(path: Path) -> list[str]:
         return [doc.load_page(index).get_text() for index in range(doc.page_count)]
 
 
+def png_dimensions_from_data_url(data_url: str) -> tuple[int, int]:
+    prefix = "data:image/png;base64,"
+    assert data_url.startswith(prefix)
+    pixmap = fitz.Pixmap(base64.b64decode(data_url.removeprefix(prefix), validate=True))
+    return pixmap.width, pixmap.height
+
+
 def test_phase12_sidecar_smoke_exports_segments_and_preserves_state(tmp_path: Path) -> None:
     source = tmp_path / "source.pdf"
+    large_source = tmp_path / "large-source.pdf"
     output_dir = tmp_path / "output"
     work_dir = tmp_path / "work"
     make_pdf(source, ["Alpha page 1", "Bravo page 2", "Charlie page 3", "Delta page 4"])
+    make_pdf(large_source, ["Large preview page"], width=10_000, height=4_000)
     segments = [
         {
             "pdf_path": str(source),
@@ -52,6 +63,7 @@ def test_phase12_sidecar_smoke_exports_segments_and_preserves_state(tmp_path: Pa
 
     info = handle_request({"command": "pdf_info", "pdf_path": str(source)})
     preview = handle_request({"command": "page_preview", "pdf_path": str(source), "page_no": 3})
+    large_preview = handle_request({"command": "page_preview", "pdf_path": str(large_source), "page_no": 1})
     preflight = handle_request({"command": "preflight", "output_dir": str(output_dir), "segments": segments})
     export = handle_request({"command": "export", "output_dir": str(output_dir), "segments": segments})
     state_payload = {
@@ -71,6 +83,16 @@ def test_phase12_sidecar_smoke_exports_segments_and_preserves_state(tmp_path: Pa
     assert preview["ok"] is True
     assert preview["page_no"] == 3
     assert preview["image_data_url"].startswith("data:image/png;base64,")
+
+    required_preview_keys = {"ok", "command", "pdf_path", "page_no", "page_count", "image_data_url"}
+    assert required_preview_keys <= set(large_preview)
+    assert large_preview["ok"] is True
+    assert large_preview["command"] == "page_preview"
+    assert large_preview["pdf_path"] == str(large_source)
+    assert large_preview["page_no"] == 1
+    assert large_preview["page_count"] == 1
+    large_width, large_height = png_dimensions_from_data_url(large_preview["image_data_url"])
+    assert max(large_width, large_height) <= MAX_PREVIEW_SIDE_PX
 
     assert preflight["ok"] is True
     assert preflight["can_run"] is True
