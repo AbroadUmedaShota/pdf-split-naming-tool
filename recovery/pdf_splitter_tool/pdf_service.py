@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import base64
+import os
+import shutil
+from uuid import uuid4
 from hashlib import sha256
 from pathlib import Path
 
@@ -80,7 +83,7 @@ class PdfService:
     def split_pdf(segment: Segment, output_path: Path) -> Path:
         fitz_module = PdfService._require_fitz()
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        final_path = PdfService.ensure_unique_path(output_path)
+        temp_path = output_path.with_name(f".{output_path.name}.{uuid4().hex}.tmp")
         with fitz_module.open(segment.pdf_path) as src:
             start_index, end_index = PdfService.one_based_range_to_fitz_indexes(
                 src.page_count,
@@ -89,5 +92,23 @@ class PdfService:
             )
             with fitz_module.open() as dst:
                 dst.insert_pdf(src, from_page=start_index, to_page=end_index)
-                dst.save(final_path)
-        return final_path
+                dst.save(temp_path)
+        try:
+            PdfService.publish_file_exclusive(temp_path, output_path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+        return output_path
+
+    @staticmethod
+    def publish_file_exclusive(source_path: Path, output_path: Path) -> None:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        try:
+            fd = os.open(output_path, flags)
+        except FileExistsError as exc:
+            raise FileExistsError(f"Output path already exists: {output_path}") from exc
+        try:
+            with os.fdopen(fd, "wb") as target, source_path.open("rb") as source:
+                shutil.copyfileobj(source, target)
+        except Exception:
+            Path(output_path).unlink(missing_ok=True)
+            raise

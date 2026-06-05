@@ -8,6 +8,8 @@
     "build": "next build",
     "typecheck": "tsc --noEmit",
     "test:restore-state": "node scripts/check-restore-state.mjs",
+    "test:filename-policy": "node scripts/check-filename-policy.mjs",
+    "test:output-state": "node scripts/check-output-state.mjs",
     "test:segment-state": "node scripts/check-segment-state.mjs",
     "tauri": "tauri",
     "release:manifest": "node scripts/create-updater-manifest.mjs"

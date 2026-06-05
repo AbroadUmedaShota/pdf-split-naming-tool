@@ -6,6 +6,7 @@ from typing import Any
 import fitz
 import pytest
 
+from pdf_splitter_tool.pdf_service import PdfService
 from pdf_splitter_tool import sidecar
 from pdf_splitter_tool.sidecar import handle_request
 
@@ -89,7 +90,7 @@ def test_sidecar_export_preflight_invalid_writes_no_pdf(tmp_path: Path) -> None:
     assert_no_pdfs(output_dir)
 
 
-def test_sidecar_export_uses_final_unique_path_when_file_appears_after_preflight(
+def test_sidecar_export_fails_when_reserved_output_path_appears_after_preflight(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = tmp_path / "source.pdf"
@@ -113,16 +114,17 @@ def test_sidecar_export_uses_final_unique_path_when_file_appears_after_preflight
         }
     )
 
-    first_path = output_dir / "01_02_003.pdf"
+    reserved_path = output_dir / "01_02_003.pdf"
     escaped_path = output_dir / "01_02_003_2.pdf"
-    assert response["ok"] is True
-    assert response["summary"] == {"created": 1, "failed": 0}
+    assert response["ok"] is False
+    assert response["summary"] == {"created": 0, "failed": 1}
+    assert response["items"][0]["status"] == "failed"
     assert response["items"][0]["requested_filename"] == "01_02_003.pdf"
-    assert Path(response["items"][0]["output_path"]) == escaped_path
-    assert Path(response["items"][0]["output_path"]).name == "01_02_003_2.pdf"
-    assert first_path.read_bytes() == b"created after preflight"
-    assert escaped_path.exists()
-    assert "Page 1" in pdf_text(escaped_path)
+    assert Path(response["items"][0]["output_path"]) == reserved_path
+    assert response["items"][0]["error_type"] == "FileExistsError"
+    assert "Output path already exists" in response["items"][0]["error"]
+    assert reserved_path.read_bytes() == b"created after preflight"
+    assert not escaped_path.exists()
 
 
 def test_sidecar_export_duplicate_requested_filenames_do_not_collide(tmp_path: Path) -> None:
@@ -149,3 +151,47 @@ def test_sidecar_export_duplicate_requested_filenames_do_not_collide(tmp_path: P
     assert len(set(output_paths)) == 2
     assert "Page 1" in pdf_text(output_paths[0])
     assert "Page 2" in pdf_text(output_paths[1])
+
+
+def test_sidecar_preflight_and_export_number_duplicates_after_existing_output(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    make_pdf(source, 2)
+    existing_path = output_dir / "01_02_003.pdf"
+    existing_path.write_bytes(b"existing")
+    request = {
+        "output_dir": str(output_dir),
+        "segments": [
+            segment(source, 1, 1),
+            segment(source, 2, 2),
+        ],
+    }
+
+    preflight_response = handle_request({"command": "preflight", **request})
+    export_response = handle_request({"command": "export", **request})
+
+    output_paths = [Path(item["output_path"]) for item in export_response["items"]]
+    assert preflight_response["ok"] is True
+    assert [Path(item["output_path"]).name for item in preflight_response["checks"]] == [
+        "01_02_003_2.pdf",
+        "01_02_003_3.pdf",
+    ]
+    assert export_response["ok"] is True
+    assert export_response["summary"] == {"created": 2, "failed": 0}
+    assert [path.name for path in output_paths] == ["01_02_003_2.pdf", "01_02_003_3.pdf"]
+    assert existing_path.read_bytes() == b"existing"
+    assert "Page 1" in pdf_text(output_paths[0])
+    assert "Page 2" in pdf_text(output_paths[1])
+
+
+def test_pdf_service_publish_file_exclusive_does_not_overwrite_existing_path(tmp_path: Path) -> None:
+    source = tmp_path / "source.tmp"
+    output = tmp_path / "output.pdf"
+    source.write_bytes(b"new")
+    output.write_bytes(b"existing")
+
+    with pytest.raises(FileExistsError):
+        PdfService.publish_file_exclusive(source, output)
+
+    assert output.read_bytes() == b"existing"

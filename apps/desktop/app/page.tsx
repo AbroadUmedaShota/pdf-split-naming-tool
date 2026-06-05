@@ -36,6 +36,8 @@ import {
   type SidecarSegment
 } from "../lib/sidecar";
 import { resolveMissingSavedPdfRestore, restorableInputPaths } from "../lib/restore-state";
+import { missingMetadata, previewFilename } from "../lib/filename-policy";
+import { isOutputCheckOk, outputDetailStateText, outputIssueCount, outputListStateText } from "../lib/output-state";
 import {
   buildSegments,
   reconcileSegmentMetadataForPdf,
@@ -65,37 +67,9 @@ const steps: Array<{ id: StepId; label: string; hint: string; icon: LucideIcon }
 ];
 
 const emptyCommonMetadata = { box_no: "", binder_no: "" };
-const requiredMetadata = ["box_no", "binder_no", "seq"] as const;
-const invalidFilenameChars = /[<>:"/\\|?*]/g;
 
 function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-}
-
-function padMetadata(value: string, length: number): string {
-  const trimmed = value.trim();
-  return trimmed.length >= length ? trimmed : trimmed.padStart(length, "0");
-}
-
-function sanitizeFilename(filename: string): string {
-  const sanitized = filename.replace(invalidFilenameChars, "_").trim().replace(/[. ]+$/g, "").replace(/\s+/g, " ");
-  return sanitized || "output.pdf";
-}
-
-function previewFilename(metadata: Record<string, string>): string {
-  if (missingMetadata(metadata).length) {
-    return "未入力";
-  }
-  return sanitizeFilename(
-    `${padMetadata(metadata.box_no ?? "", 2)}_${padMetadata(metadata.binder_no ?? "", 2)}_${padMetadata(
-      metadata.seq ?? "",
-      3
-    )}.pdf`
-  );
-}
-
-function missingMetadata(metadata: Record<string, string>): string[] {
-  return requiredMetadata.filter((key) => !String(metadata[key] ?? "").trim());
 }
 
 function sidecarError(response: SidecarResponse): string {
@@ -211,7 +185,7 @@ export default function Page() {
     [allSegments]
   );
   const readySegments = Math.max(0, allSegments.length - incompleteSegments);
-  const outputIssues = preflightChecks.filter((check) => !check.ok).length;
+  const outputIssues = outputIssueCount(preflightChecks);
   const existingOutputs = preflightChecks.filter((check) => check.has_existing_output).length;
   const canContinueFromImport = pdfFiles.length > 0 && Boolean(outputDir);
   const canRunPreflight = allSegments.length > 0 && Boolean(outputDir);
@@ -843,13 +817,16 @@ export default function Page() {
         {preflightChecks.length ? (
           <div className="output-list">
             {preflightChecks.map((check, index) => (
-              <div className={check.ok ? "output-row" : "output-row error"} key={`${check.pdf_path}-${check.pages}-${index}`}>
+              <div
+                className={isOutputCheckOk(check) ? "output-row" : "output-row error"}
+                key={`${check.pdf_path}-${check.pages}-${index}`}
+              >
                 <span>
                   <strong>{check.filename || check.requested_filename || "-"}</strong>
                   <small>{check.pages}ページ</small>
                 </span>
-                <span className={check.ok ? "state-text ok" : "state-text warning"}>
-                  {check.ok ? (check.has_existing_output ? "既存あり" : "出力可能") : "要修正"}
+                <span className={isOutputCheckOk(check) ? "state-text ok" : "state-text warning"}>
+                  {outputListStateText(check)}
                 </span>
               </div>
             ))}
@@ -1059,11 +1036,14 @@ export default function Page() {
               <span>状態</span>
             </div>
             {preflightChecks.map((check, index) => (
-              <div className={check.ok ? "check-row" : "check-row error"} key={`${check.pdf_path}-${check.pages}-${index}`}>
+              <div
+                className={isOutputCheckOk(check) ? "check-row" : "check-row error"}
+                key={`${check.pdf_path}-${check.pages}-${index}`}
+              >
                 <span>{check.pages}</span>
                 <span>{check.filename || check.requested_filename || "-"}</span>
                 <span>{check.has_existing_output ? "あり" : "なし"}</span>
-                <span>{check.ok ? "出力可能" : check.messages.join(" / ")}</span>
+                <span>{outputDetailStateText(check)}</span>
               </div>
             ))}
           </div>
