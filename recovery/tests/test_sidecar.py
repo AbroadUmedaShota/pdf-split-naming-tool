@@ -148,6 +148,44 @@ def test_sidecar_state_save_rejects_invalid_input_paths_without_saving(tmp_path:
     assert not (tmp_path / "_pdf_split_state.json").exists()
 
 
+def test_sidecar_state_save_rejects_invalid_segment_metadata_without_saving(tmp_path: Path) -> None:
+    response = handle_request(
+        {
+            "command": "state_save",
+            "work_dir": str(tmp_path),
+            "state": {
+                "version": 1,
+                "input_paths": ["source.pdf"],
+                "segment_metadata": {"source.pdf#1-1": {"seq": 1}},
+            },
+        }
+    )
+
+    assert response["ok"] is False
+    assert response["error_type"] == "TypeError"
+    assert "segment_metadata metadata values must be strings" in response["error"]
+    assert not (tmp_path / "_pdf_split_state.json").exists()
+
+
+def test_sidecar_state_save_rejects_invalid_common_metadata_without_saving(tmp_path: Path) -> None:
+    response = handle_request(
+        {
+            "command": "state_save",
+            "work_dir": str(tmp_path),
+            "state": {
+                "version": 1,
+                "input_paths": ["source.pdf"],
+                "common_metadata": {"box_no": 1},
+            },
+        }
+    )
+
+    assert response["ok"] is False
+    assert response["error_type"] == "TypeError"
+    assert "common_metadata values must be strings" in response["error"]
+    assert not (tmp_path / "_pdf_split_state.json").exists()
+
+
 def test_sidecar_state_save_archives_existing_state_with_invalid_input_paths(tmp_path: Path) -> None:
     state_path = tmp_path / "_pdf_split_state.json"
     state_path.write_text(
@@ -176,6 +214,36 @@ def test_sidecar_state_save_archives_existing_state_with_invalid_input_paths(tmp
 def test_sidecar_state_load_archives_invalid_state_and_falls_back_to_empty(tmp_path: Path) -> None:
     state_path = tmp_path / "_pdf_split_state.json"
     state_path.write_text(json.dumps({"version": 1, "current_page": 0}), encoding="utf-8")
+
+    response = handle_request({"command": "state_load", "work_dir": str(tmp_path)})
+
+    assert response["ok"] is True
+    assert response["state"] == {}
+    assert not state_path.exists()
+    assert (tmp_path / "_pdf_split_state.json.corrupt").exists()
+
+
+def test_sidecar_state_load_archives_invalid_segment_metadata_and_falls_back_to_empty(tmp_path: Path) -> None:
+    state_path = tmp_path / "_pdf_split_state.json"
+    state_path.write_text(
+        json.dumps({"version": 1, "segment_metadata": {"source.pdf#1-1": {"seq": 1}}}),
+        encoding="utf-8",
+    )
+
+    response = handle_request({"command": "state_load", "work_dir": str(tmp_path)})
+
+    assert response["ok"] is True
+    assert response["state"] == {}
+    assert not state_path.exists()
+    assert (tmp_path / "_pdf_split_state.json.corrupt").exists()
+
+
+def test_sidecar_state_load_archives_invalid_common_metadata_and_falls_back_to_empty(tmp_path: Path) -> None:
+    state_path = tmp_path / "_pdf_split_state.json"
+    state_path.write_text(
+        json.dumps({"version": 1, "common_metadata": {"box_no": 1}}),
+        encoding="utf-8",
+    )
 
     response = handle_request({"command": "state_load", "work_dir": str(tmp_path)})
 

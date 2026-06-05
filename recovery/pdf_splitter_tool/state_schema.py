@@ -6,7 +6,6 @@ from typing import Any
 
 CURRENT_SCHEMA_VERSION = 1
 _KNOWN_STRING_FIELDS = {"current_pdf", "output_dir"}
-_KNOWN_OBJECT_FIELDS = {"segment_metadata", "common_metadata"}
 
 
 def normalize_state_payload(payload: object, *, allow_invalid_input_paths: bool = False) -> dict[str, Any]:
@@ -35,9 +34,10 @@ def normalize_state_payload(payload: object, *, allow_invalid_input_paths: bool 
     for field in _KNOWN_STRING_FIELDS:
         if field in normalized and not isinstance(normalized[field], str):
             raise TypeError(f"{field} must be a string.")
-    for field in _KNOWN_OBJECT_FIELDS:
-        if field in normalized and not isinstance(normalized[field], dict):
-            raise TypeError(f"{field} must be a JSON object.")
+    if "segment_metadata" in normalized:
+        normalized["segment_metadata"] = _normalize_segment_metadata(normalized["segment_metadata"])
+    if "common_metadata" in normalized:
+        normalized["common_metadata"] = _normalize_common_metadata(normalized["common_metadata"])
 
     return normalized
 
@@ -85,6 +85,37 @@ def _normalize_split_point(pdf_path: str, index: int, value: object) -> int:
     if isinstance(value, str) and value.isdecimal():
         return int(value)
     raise TypeError(f"split_points_by_pdf[{pdf_path!r}][{index}] must be an integer.")
+
+
+def _normalize_segment_metadata(value: object) -> dict[str, dict[str, str]]:
+    if not isinstance(value, dict):
+        raise TypeError("segment_metadata must be a JSON object.")
+
+    normalized: dict[str, dict[str, str]] = {}
+    for raw_segment_key, raw_metadata in value.items():
+        if not isinstance(raw_segment_key, str) or raw_segment_key == "":
+            raise TypeError("segment_metadata keys must be non-empty strings.")
+        if not isinstance(raw_metadata, dict):
+            raise TypeError("segment_metadata values must be JSON objects.")
+        normalized[raw_segment_key] = _normalize_metadata_values("segment_metadata metadata", raw_metadata)
+    return normalized
+
+
+def _normalize_common_metadata(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise TypeError("common_metadata must be a JSON object.")
+    return _normalize_metadata_values("common_metadata", value)
+
+
+def _normalize_metadata_values(field: str, value: dict[object, object]) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for raw_key, raw_value in value.items():
+        if not isinstance(raw_key, str):
+            raise TypeError(f"{field} keys must be strings.")
+        if not isinstance(raw_value, str):
+            raise TypeError(f"{field} values must be strings.")
+        normalized[raw_key] = raw_value
+    return normalized
 
 
 def missing_input_paths(state: object) -> list[str]:
