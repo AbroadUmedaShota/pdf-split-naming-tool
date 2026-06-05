@@ -37,8 +37,51 @@ const secondSplitKey = segmentKey(pdfPath, 6, 10);
 const otherPdfKey = segmentKey(otherPdfPath, 1, 3);
 const otherPdfFirstSplitKey = segmentKey(otherPdfPath, 1, 1);
 const otherPdfSecondSplitKey = segmentKey(otherPdfPath, 2, 3);
+const hashPdfPath = "C:\\docs\\a#draft.pdf";
+const hashPdfKey = segmentKey(hashPdfPath, 1, 2);
 
 assert.deepEqual(splitPointsFor(5, [5, 2, 5, 1, 0, 6]), [2, 5]);
+
+{
+  const metadata = {
+    [hashPdfKey]: { box_no: "hash-box", binder_no: "hash-binder", seq: "old-hash", note: "keep-hash" },
+  };
+  const segments = buildSegments(
+    [{ path: hashPdfPath, pageCount: 2 }],
+    {},
+    metadata,
+    {
+      box_no: "common-box",
+      binder_no: "common-binder",
+    },
+  );
+
+  assert.deepEqual(
+    segments.map((segment) => segment.key),
+    [hashPdfKey],
+  );
+  assert.deepEqual(segments[0].metadata, {
+    box_no: "hash-box",
+    binder_no: "hash-binder",
+    seq: "old-hash",
+    note: "keep-hash",
+  });
+
+  const resequenced = resequenceSegmentMetadata(segments, metadata);
+
+  assert.deepEqual(resequenced[hashPdfKey], {
+    box_no: "hash-box",
+    binder_no: "hash-binder",
+    seq: "1",
+    note: "keep-hash",
+  });
+  assert.deepEqual(metadata[hashPdfKey], {
+    box_no: "hash-box",
+    binder_no: "hash-binder",
+    seq: "old-hash",
+    note: "keep-hash",
+  });
+}
 
 {
   const segments = buildSegments(
