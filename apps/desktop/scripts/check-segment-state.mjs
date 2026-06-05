@@ -34,8 +34,60 @@ const wholeKey = segmentKey(pdfPath, 1, 10);
 const firstSplitKey = segmentKey(pdfPath, 1, 5);
 const secondSplitKey = segmentKey(pdfPath, 6, 10);
 const otherPdfKey = segmentKey(otherPdfPath, 1, 3);
+const otherPdfFirstSplitKey = segmentKey(otherPdfPath, 1, 1);
+const otherPdfSecondSplitKey = segmentKey(otherPdfPath, 2, 3);
 
 assert.deepEqual(splitPointsFor(5, [5, 2, 5, 1, 0, 6]), [2, 5]);
+
+{
+  const segments = buildSegments(
+    [
+      { path: otherPdfPath, pageCount: 3 },
+      { path: pdfPath, pageCount: 10 },
+    ],
+    {
+      [pdfPath]: [6],
+      [otherPdfPath]: [2],
+    },
+    {
+      [firstSplitKey]: { box_no: "segment-box", binder_no: "segment-binder", seq: "001" },
+      [otherPdfSecondSplitKey]: { binder_no: "other-binder", seq: "002" },
+    },
+    {
+      box_no: "common-box",
+      binder_no: "common-binder",
+    },
+  );
+
+  assert.deepEqual(
+    segments.map((segment) => segment.key),
+    [otherPdfFirstSplitKey, otherPdfSecondSplitKey, firstSplitKey, secondSplitKey],
+  );
+  assert.deepEqual(
+    segments.map((segment) => segment.pages),
+    ["1", "2-3", "1-5", "6-10"],
+  );
+  assert.deepEqual(segments[0].metadata, {
+    box_no: "common-box",
+    binder_no: "common-binder",
+    seq: "",
+  });
+  assert.deepEqual(segments[1].metadata, {
+    box_no: "common-box",
+    binder_no: "other-binder",
+    seq: "002",
+  });
+  assert.deepEqual(segments[2].metadata, {
+    box_no: "segment-box",
+    binder_no: "segment-binder",
+    seq: "001",
+  });
+  assert.deepEqual(segments[3].metadata, {
+    box_no: "common-box",
+    binder_no: "common-binder",
+    seq: "",
+  });
+}
 
 {
   const metadata = {
@@ -55,30 +107,50 @@ assert.deepEqual(splitPointsFor(5, [5, 2, 5, 1, 0, 6]), [2, 5]);
 }
 
 {
+  const splitPointsByPdf = {
+    [pdfPath]: [],
+    [otherPdfPath]: [2],
+  };
   const reconciled = reconcileSegmentMetadataForPdf({
     pageCount: 10,
     pdfPath,
-    previousSplitPoints: [],
+    previousSplitPoints: splitPointsByPdf[pdfPath],
     nextSplitPoints: [6],
     segmentMetadata: {
       [wholeKey]: { box_no: "09", binder_no: "12", seq: "007", custom: "old" },
       [otherPdfKey]: { box_no: "77", binder_no: "88", seq: "999" },
+      [otherPdfFirstSplitKey]: { box_no: "55", binder_no: "66", seq: "111" },
     },
   });
 
   assert.deepEqual(reconciled[firstSplitKey], { box_no: "09", binder_no: "12", seq: "" });
   assert.deepEqual(reconciled[secondSplitKey], { box_no: "09", binder_no: "12", seq: "" });
   assert.deepEqual(reconciled[otherPdfKey], { box_no: "77", binder_no: "88", seq: "999" });
-
-  const segments = buildSegments([{ path: pdfPath, pageCount: 10 }], { [pdfPath]: [6] }, reconciled, {
-    box_no: "",
-    binder_no: "",
+  assert.deepEqual(reconciled[otherPdfFirstSplitKey], { box_no: "55", binder_no: "66", seq: "111" });
+  assert.deepEqual(splitPointsByPdf, {
+    [pdfPath]: [],
+    [otherPdfPath]: [2],
   });
+
+  const segments = buildSegments(
+    [
+      { path: pdfPath, pageCount: 10 },
+      { path: otherPdfPath, pageCount: 3 },
+    ],
+    { ...splitPointsByPdf, [pdfPath]: [6] },
+    reconciled,
+    {
+      box_no: "",
+      binder_no: "",
+    },
+  );
   assert.deepEqual(
     segments.map((segment) => segment.metadata),
     [
       { box_no: "09", binder_no: "12", seq: "" },
       { box_no: "09", binder_no: "12", seq: "" },
+      { box_no: "55", binder_no: "66", seq: "111" },
+      { box_no: "", binder_no: "", seq: "" },
     ],
   );
 }

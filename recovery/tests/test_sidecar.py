@@ -115,6 +115,102 @@ def test_sidecar_state_load_and_save_round_trip(tmp_path: Path) -> None:
     assert load_response["state"] == state
 
 
+def test_sidecar_state_save_normalizes_known_keys_and_preserves_unknown_keys(tmp_path: Path) -> None:
+    state = {
+        "version": 1,
+        "input_paths": ["source.pdf"],
+        "split_points_by_pdf": {"source.pdf": ["2", 4]},
+        "current_page": 1,
+        "future_client_state": {"selected_tab": "split"},
+    }
+
+    save_response = handle_request({"command": "state_save", "work_dir": str(tmp_path), "state": state})
+    load_response = handle_request({"command": "state_load", "work_dir": str(tmp_path)})
+
+    assert save_response["ok"] is True
+    assert load_response["ok"] is True
+    assert load_response["state"]["split_points_by_pdf"] == {"source.pdf": [2, 4]}
+    assert load_response["state"]["future_client_state"] == {"selected_tab": "split"}
+
+
+def test_sidecar_state_save_rejects_invalid_input_paths_without_saving(tmp_path: Path) -> None:
+    response = handle_request(
+        {
+            "command": "state_save",
+            "work_dir": str(tmp_path),
+            "state": {"version": 1, "input_paths": ["source.pdf", ""]},
+        }
+    )
+
+    assert response["ok"] is False
+    assert response["error_type"] == "TypeError"
+    assert "input_paths[1] must be a non-empty string" in response["error"]
+    assert not (tmp_path / "_pdf_split_state.json").exists()
+
+
+def test_sidecar_state_save_archives_existing_state_with_invalid_input_paths(tmp_path: Path) -> None:
+    state_path = tmp_path / "_pdf_split_state.json"
+    state_path.write_text(
+        json.dumps({"version": 1, "input_paths": ["source.pdf", ""]}),
+        encoding="utf-8",
+    )
+
+    response = handle_request(
+        {
+            "command": "state_save",
+            "work_dir": str(tmp_path),
+            "state": {"version": 1, "input_paths": ["source.pdf"], "current_page": 1},
+        }
+    )
+
+    assert response["ok"] is True
+    assert json.loads(state_path.read_text(encoding="utf-8")) == {
+        "version": 1,
+        "input_paths": ["source.pdf"],
+        "current_page": 1,
+    }
+    assert (tmp_path / "_pdf_split_state.json.corrupt").exists()
+    assert not (tmp_path / "_pdf_split_state.bak.json").exists()
+
+
+def test_sidecar_state_load_archives_invalid_state_and_falls_back_to_empty(tmp_path: Path) -> None:
+    state_path = tmp_path / "_pdf_split_state.json"
+    state_path.write_text(json.dumps({"version": 1, "current_page": 0}), encoding="utf-8")
+
+    response = handle_request({"command": "state_load", "work_dir": str(tmp_path)})
+
+    assert response["ok"] is True
+    assert response["state"] == {}
+    assert not state_path.exists()
+    assert (tmp_path / "_pdf_split_state.json.corrupt").exists()
+
+
+def test_sidecar_state_load_partially_restores_legacy_input_paths_with_invalid_entries(tmp_path: Path) -> None:
+    state_path = tmp_path / "_pdf_split_state.json"
+    existing_pdf = tmp_path / "existing.pdf"
+    missing_pdf = tmp_path / "missing.pdf"
+    make_pdf(existing_pdf, 1)
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "input_paths": [str(existing_pdf), "", 123, str(missing_pdf)],
+                "current_page": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = handle_request({"command": "state_load", "work_dir": str(tmp_path)})
+
+    assert response["ok"] is True
+    assert response["state"]["input_paths"] == [str(existing_pdf), str(missing_pdf)]
+    assert response["messages"] == ["missing_input_pdf"]
+    assert response["missing_input_paths"] == [str(missing_pdf)]
+    assert state_path.exists()
+    assert not (tmp_path / "_pdf_split_state.json.corrupt").exists()
+
+
 def test_sidecar_state_load_preserves_missing_input_pdf_state_with_warning(tmp_path: Path) -> None:
     missing_pdf = tmp_path / "missing.pdf"
     state = {"version": 1, "input_paths": [str(missing_pdf)], "current_page": 2}

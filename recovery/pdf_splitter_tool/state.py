@@ -29,7 +29,7 @@ class StateManager:
                 return self._load_backup_or_tmp()
             return self._load_tmp_or_empty()
         try:
-            return self._load_file(self.state_path)
+            return self._load_file(self.state_path, allow_invalid_input_paths=True)
         except Exception:
             self._archive_corrupt_file(self.state_path)
             if self.backup_path.exists():
@@ -38,7 +38,7 @@ class StateManager:
 
     def _load_backup_or_tmp(self) -> dict[str, Any]:
         try:
-            payload = self._load_file(self.backup_path)
+            payload = self._load_file(self.backup_path, allow_invalid_input_paths=True)
         except Exception:
             self._archive_corrupt_file(self.backup_path)
             return self._load_tmp_or_empty()
@@ -55,7 +55,7 @@ class StateManager:
     def _load_tmp_or_empty(self) -> dict[str, Any]:
         if self.tmp_path.exists():
             try:
-                payload = self._load_file(self.tmp_path)
+                payload = self._load_file(self.tmp_path, allow_invalid_input_paths=True)
             except Exception:
                 self._archive_corrupt_file(self.tmp_path)
                 return {}
@@ -66,10 +66,10 @@ class StateManager:
             return payload
         return {}
 
-    def _load_file(self, path: Path) -> dict[str, Any]:
+    def _load_file(self, path: Path, *, allow_invalid_input_paths: bool = False) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
         try:
-            return normalize_state_payload(payload)
+            return normalize_state_payload(payload, allow_invalid_input_paths=allow_invalid_input_paths)
         except TypeError as exc:
             raise StateFormatError(str(exc)) from exc
 

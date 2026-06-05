@@ -7,7 +7,7 @@ from .models import Segment
 from .processor import PdfProcessor, YOSHIDA_TEMPLATE
 from .runtime import work_dir_from_request
 from .state import StateManager
-from .state_schema import missing_input_paths
+from .state_schema import missing_input_paths, normalize_state_payload
 from .workflow import SegmentOutputCheck, check_segment_outputs
 
 
@@ -193,9 +193,13 @@ def state_load(request: dict[str, Any]) -> dict[str, Any]:
 def state_save(request: dict[str, Any]) -> dict[str, Any]:
     work_dir = work_dir_from_request(request)
     state = request.get("state", {})
-    if not isinstance(state, dict):
-        raise TypeError("state must be a JSON object.")
-    StateManager(work_dir).save(state)
+    try:
+        normalized_state = normalize_state_payload(state)
+    except TypeError as exc:
+        if not isinstance(state, dict):
+            raise TypeError("state must be a JSON object.") from exc
+        raise
+    StateManager(work_dir).save(normalized_state)
     return {
         "ok": True,
         "command": "state_save",

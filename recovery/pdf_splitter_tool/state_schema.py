@@ -5,9 +5,11 @@ from typing import Any
 
 
 CURRENT_SCHEMA_VERSION = 1
+_KNOWN_STRING_FIELDS = {"current_pdf", "output_dir"}
+_KNOWN_OBJECT_FIELDS = {"segment_metadata", "common_metadata"}
 
 
-def normalize_state_payload(payload: object) -> dict[str, Any]:
+def normalize_state_payload(payload: object, *, allow_invalid_input_paths: bool = False) -> dict[str, Any]:
     """Validate and return a shallow copy of a saved state payload.
 
     The current state file is client-owned JSON. Keep unknown keys intact so
@@ -15,11 +17,80 @@ def normalize_state_payload(payload: object) -> dict[str, Any]:
     """
     if not isinstance(payload, dict):
         raise TypeError("State payload must be a JSON object.")
-    return dict(payload)
+    normalized = dict(payload)
+
+    if "version" in normalized:
+        normalized["version"] = _require_int("version", normalized["version"])
+    if "input_paths" in normalized:
+        normalized["input_paths"] = _normalize_input_paths(
+            normalized["input_paths"], allow_invalid_entries=allow_invalid_input_paths
+        )
+    if "split_points_by_pdf" in normalized:
+        normalized["split_points_by_pdf"] = _normalize_split_points_by_pdf(normalized["split_points_by_pdf"])
+    if "current_page" in normalized:
+        current_page = _require_int("current_page", normalized["current_page"])
+        if current_page < 1:
+            raise TypeError("current_page must be an integer greater than or equal to 1.")
+        normalized["current_page"] = current_page
+    for field in _KNOWN_STRING_FIELDS:
+        if field in normalized and not isinstance(normalized[field], str):
+            raise TypeError(f"{field} must be a string.")
+    for field in _KNOWN_OBJECT_FIELDS:
+        if field in normalized and not isinstance(normalized[field], dict):
+            raise TypeError(f"{field} must be a JSON object.")
+
+    return normalized
+
+
+def _require_int(field: str, value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field} must be an integer.")
+    return value
+
+
+def _normalize_input_paths(value: object, *, allow_invalid_entries: bool) -> list[str]:
+    if not isinstance(value, list):
+        raise TypeError("input_paths must be a list of strings.")
+    normalized: list[str] = []
+    for index, raw_path in enumerate(value):
+        if not isinstance(raw_path, str) or raw_path == "":
+            if allow_invalid_entries:
+                continue
+            raise TypeError(f"input_paths[{index}] must be a non-empty string.")
+        normalized.append(raw_path)
+    return normalized
+
+
+def _normalize_split_points_by_pdf(value: object) -> dict[str, list[int]]:
+    if not isinstance(value, dict):
+        raise TypeError("split_points_by_pdf must be a JSON object.")
+
+    normalized: dict[str, list[int]] = {}
+    for raw_pdf_path, raw_points in value.items():
+        if not isinstance(raw_pdf_path, str) or raw_pdf_path == "":
+            raise TypeError("split_points_by_pdf keys must be non-empty strings.")
+        if not isinstance(raw_points, list):
+            raise TypeError("split_points_by_pdf values must be lists of integers.")
+        normalized[raw_pdf_path] = [
+            _normalize_split_point(raw_pdf_path, index, point) for index, point in enumerate(raw_points)
+        ]
+    return normalized
+
+
+def _normalize_split_point(pdf_path: str, index: int, value: object) -> int:
+    if isinstance(value, bool):
+        raise TypeError(f"split_points_by_pdf[{pdf_path!r}][{index}] must be an integer.")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdecimal():
+        return int(value)
+    raise TypeError(f"split_points_by_pdf[{pdf_path!r}][{index}] must be an integer.")
 
 
 def missing_input_paths(state: object) -> list[str]:
-    payload = normalize_state_payload(state)
+    if not isinstance(state, dict):
+        raise TypeError("State payload must be a JSON object.")
+    payload = dict(state)
     input_paths = payload.get("input_paths", [])
     if not isinstance(input_paths, list):
         return []
