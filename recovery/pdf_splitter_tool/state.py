@@ -26,25 +26,27 @@ class StateManager:
     def load(self) -> dict[str, Any]:
         if not self.state_path.exists():
             if self.backup_path.exists():
-                try:
-                    payload = self._load_file(self.backup_path)
-                    self._restore_loaded_payload(payload)
-                    return payload
-                except Exception:
-                    self._archive_corrupt_file(self.backup_path)
+                return self._load_backup_or_tmp()
             return self._load_tmp_or_empty()
         try:
             return self._load_file(self.state_path)
         except Exception:
             self._archive_corrupt_file(self.state_path)
             if self.backup_path.exists():
-                try:
-                    payload = self._load_file(self.backup_path)
-                    self._restore_loaded_payload(payload)
-                    return payload
-                except Exception:
-                    self._archive_corrupt_file(self.backup_path)
+                return self._load_backup_or_tmp()
             return self._load_tmp_or_empty()
+
+    def _load_backup_or_tmp(self) -> dict[str, Any]:
+        try:
+            payload = self._load_file(self.backup_path)
+        except Exception:
+            self._archive_corrupt_file(self.backup_path)
+            return self._load_tmp_or_empty()
+        try:
+            self._restore_loaded_payload(payload)
+        except OSError:
+            pass
+        return payload
 
     def _restore_loaded_payload(self, payload: dict[str, Any]) -> None:
         self.work_dir.mkdir(parents=True, exist_ok=True)
@@ -54,10 +56,14 @@ class StateManager:
         if self.tmp_path.exists():
             try:
                 payload = self._load_file(self.tmp_path)
-                self.tmp_path.replace(self.state_path)
-                return payload
             except Exception:
                 self._archive_corrupt_file(self.tmp_path)
+                return {}
+            try:
+                self.tmp_path.replace(self.state_path)
+            except OSError:
+                pass
+            return payload
         return {}
 
     def _load_file(self, path: Path) -> dict[str, Any]:

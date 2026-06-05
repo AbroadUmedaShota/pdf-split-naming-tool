@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .export_policy import ExportPathPolicy
+from .export_policy import unique_output_path as policy_unique_output_path
 from .models import Segment
 from .processor import PdfProcessor
 
@@ -66,15 +68,14 @@ def check_segment_outputs(
 ) -> list[SegmentOutputCheck]:
     processor = processor or PdfProcessor()
     checks: list[SegmentOutputCheck] = []
-    reserved: set[Path] = set()
+    export_policy = ExportPathPolicy()
     for segment in segments:
         result = processor.build_yoshida_filename(segment.metadata)
         messages = [*error_messages(result.errors), *segment_page_errors(segment, processor)]
         if result.ok and not messages:
             requested_path = output_dir / result.normalized_filename
             has_existing_output = requested_path.exists()
-            output_path = unique_output_path(requested_path, reserved)
-            reserved.add(output_path)
+            output_path = export_policy.reserve_output_path(requested_path)
             checks.append(
                 SegmentOutputCheck(
                     segment=segment,
@@ -103,14 +104,4 @@ def check_segment_outputs(
 
 
 def unique_output_path(path: Path, reserved: set[Path]) -> Path:
-    if not path.exists() and path not in reserved:
-        return path
-    stem = path.stem
-    suffix = path.suffix
-    parent = path.parent
-    counter = 2
-    while True:
-        candidate = parent / f"{stem}_{counter}{suffix}"
-        if not candidate.exists() and candidate not in reserved:
-            return candidate
-        counter += 1
+    return policy_unique_output_path(path, reserved)
