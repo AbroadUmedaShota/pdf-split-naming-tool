@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .state_schema import normalize_state_payload
+
 
 STATE_FILENAME = "_pdf_split_state.json"
 STATE_BAK_FILENAME = "_pdf_split_state.bak.json"
@@ -60,9 +62,10 @@ class StateManager:
 
     def _load_file(self, path: Path) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            raise StateFormatError("State payload must be a JSON object.")
-        return payload
+        try:
+            return normalize_state_payload(payload)
+        except TypeError as exc:
+            raise StateFormatError(str(exc)) from exc
 
     def _corrupt_archive_path(self) -> Path:
         return self._corrupt_archive_path_for(self.state_path)

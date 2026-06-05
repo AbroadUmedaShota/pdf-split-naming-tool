@@ -7,6 +7,7 @@ from .models import Segment
 from .processor import PdfProcessor, YOSHIDA_TEMPLATE
 from .runtime import work_dir_from_request
 from .state import StateManager
+from .state_schema import missing_input_paths
 from .workflow import SegmentOutputCheck, check_segment_outputs
 
 
@@ -176,16 +177,16 @@ def export(request: dict[str, Any]) -> dict[str, Any]:
 def state_load(request: dict[str, Any]) -> dict[str, Any]:
     work_dir = work_dir_from_request(request)
     state = StateManager(work_dir).load()
-    missing_input_paths = _missing_input_paths(state)
+    missing_paths = missing_input_paths(state)
     response = {
         "ok": True,
         "command": "state_load",
         "work_dir": str(work_dir),
         "state": state,
     }
-    if missing_input_paths:
+    if missing_paths:
         response["messages"] = ["missing_input_pdf"]
-        response["missing_input_paths"] = missing_input_paths
+        response["missing_input_paths"] = missing_paths
     return response
 
 
@@ -200,20 +201,6 @@ def state_save(request: dict[str, Any]) -> dict[str, Any]:
         "command": "state_save",
         "work_dir": str(work_dir),
     }
-
-
-def _missing_input_paths(state: dict[str, Any]) -> list[str]:
-    input_paths = state.get("input_paths", [])
-    if not isinstance(input_paths, list):
-        return []
-    missing_paths: list[str] = []
-    for raw_path in input_paths:
-        if not isinstance(raw_path, str) or not raw_path:
-            continue
-        input_path = Path(raw_path)
-        if not input_path.exists():
-            missing_paths.append(str(input_path))
-    return missing_paths
 
 
 def _build_checks(request: dict[str, Any], output_dir: Path) -> list[SegmentOutputCheck]:
