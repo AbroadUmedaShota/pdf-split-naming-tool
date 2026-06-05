@@ -39,6 +39,16 @@ UIはPDFプレビュー、分割一覧、入力表を扱う業務ツールのた
 - `artifacts/analysis/`: 配布物から抽出した解析用ファイル。Git管理対象外
 - `recovery/dist/`: 旧PyInstaller配布候補。Git管理対象外
 
+## 自動回帰検証
+
+リポジトリ単位の自動回帰検証は、ルートから次を実行します。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify.ps1
+```
+
+このスクリプトは Python pytest、desktop 側 JS 回帰テスト、desktop typecheck をまとめて確認するためのものです。実ブラウザ/Tauri E2E や、現場PDFを使った手動受入確認の代替ではありません。
+
 ## 次に決めること
 
 1. 現場PDFで、PDF取込、手動分割、1ページ分割、命名、出力が成立するか確認する。
