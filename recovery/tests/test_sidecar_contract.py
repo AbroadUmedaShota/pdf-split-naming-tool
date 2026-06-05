@@ -31,6 +31,11 @@ def assert_required_keys(response: dict[str, Any], keys: set[str]) -> None:
     assert keys <= response.keys()
 
 
+def assert_page_number(value: Any) -> None:
+    assert isinstance(value, int)
+    assert not isinstance(value, bool)
+
+
 def segment_request(pdf_path: Path) -> dict[str, Any]:
     return {
         "pdf_path": str(pdf_path),
@@ -65,6 +70,8 @@ def test_page_preview_response_public_contract_is_json_ready(tmp_path: Path) -> 
     assert response["ok"] is True
     assert response["command"] == "page_preview"
     assert response["pdf_path"] == str(source)
+    assert_page_number(response["page_no"])
+    assert_page_number(response["page_count"])
     assert response["page_no"] == 1
     assert response["page_count"] == 1
     assert isinstance(response["image_data_url"], str)

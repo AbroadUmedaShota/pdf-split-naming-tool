@@ -59,6 +59,41 @@ async function withTimeout(promise, label, timeoutMs = 1000) {
   }
 }
 
+async function assertRejectedPreviewResponse({
+  expectedMessage,
+  label,
+  pageNo = 2,
+  response,
+  responseErrorMessage,
+}) {
+  const cache = createPreviewCache(5);
+  const gate = createPreviewRequestGate();
+  const appliedPreviews = [];
+  const sidecarRequests = [];
+  const pdfPath = `C:\\docs\\rejected-${label}.pdf`;
+
+  await assert.rejects(
+    loadPagePreview({
+      applyPreview: (preview) => appliedPreviews.push(preview),
+      cache,
+      gate,
+      invalidPreviewMessage: "invalid preview",
+      pageNo,
+      pdfPath,
+      requestPreview: async (request) => {
+        sidecarRequests.push(request);
+        return response;
+      },
+      responseErrorMessage,
+    }),
+    expectedMessage
+  );
+
+  assert.deepEqual(sidecarRequests, [{ command: "page_preview", pdf_path: pdfPath, page_no: pageNo }]);
+  assert.equal(cache.get(pdfPath, pageNo), null);
+  assert.deepEqual(appliedPreviews, []);
+}
+
 {
   const cache = createPreviewCache(3);
 
@@ -232,6 +267,224 @@ async function withTimeout(promise, label, timeoutMs = 1000) {
   assert.equal(secondResult, "cache");
   assert.deepEqual(sidecarRequests, [{ command: "page_preview", pdf_path: pdfPath, page_no: 2 }]);
   assert.deepEqual(appliedPreviews.at(-1), { imageDataUrl: "data:image/png;base64,page-2", pageNo: 2 });
+}
+
+for (const { label, response } of [
+  {
+    label: "missing image URL",
+    response: {
+      ok: true,
+      command: "page_preview",
+      page_count: 8,
+      page_no: 2,
+    },
+  },
+  {
+    label: "empty PNG payload",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,",
+      page_count: 8,
+      page_no: 2,
+    },
+  },
+  {
+    label: "wrong data URL prefix",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/jpeg;base64,page-2",
+      page_count: 8,
+      page_no: 2,
+    },
+  },
+  {
+    label: "missing page number",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_count: 8,
+    },
+  },
+  {
+    label: "non-number page number",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_count: 8,
+      page_no: "2",
+    },
+  },
+  {
+    label: "NaN page number",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_count: 8,
+      page_no: NaN,
+    },
+  },
+  {
+    label: "Infinity page number",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_count: 8,
+      page_no: Infinity,
+    },
+  },
+  {
+    label: "fractional page number",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_count: 8,
+      page_no: 2.5,
+    },
+  },
+  {
+    label: "zero page number",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_count: 8,
+      page_no: 0,
+    },
+  },
+  {
+    label: "negative page number",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_count: 8,
+      page_no: -1,
+    },
+  },
+  {
+    label: "mismatched page number",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-3",
+      page_count: 8,
+      page_no: 3,
+    },
+  },
+  {
+    label: "missing page count",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_no: 2,
+    },
+  },
+  {
+    label: "non-number page count",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_count: "8",
+      page_no: 2,
+    },
+  },
+  {
+    label: "bool page count",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_count: true,
+      page_no: 2,
+    },
+  },
+  {
+    label: "NaN page count",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_count: NaN,
+      page_no: 2,
+    },
+  },
+  {
+    label: "Infinity page count",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_count: Infinity,
+      page_no: 2,
+    },
+  },
+  {
+    label: "fractional page count",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_count: 8.5,
+      page_no: 2,
+    },
+  },
+  {
+    label: "zero page count",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_count: 0,
+      page_no: 2,
+    },
+  },
+  {
+    label: "negative page count",
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-2",
+      page_count: -1,
+      page_no: 2,
+    },
+  },
+]) {
+  await assertRejectedPreviewResponse({ expectedMessage: /invalid preview/, label, response });
+}
+
+{
+  await assertRejectedPreviewResponse({
+    expectedMessage: /sidecar failed/,
+    label: "error response",
+    response: {
+      ok: false,
+      command: "page_preview",
+      error: "raw sidecar error",
+    },
+    responseErrorMessage: (response) => `sidecar failed: ${response.error}`,
+  });
+}
+
+{
+  await assertRejectedPreviewResponse({
+    expectedMessage: /invalid preview/,
+    label: "wrong command",
+    response: {
+      ok: true,
+      command: "other_command",
+      image_data_url: "data:image/png;base64,page-2",
+      page_no: 2,
+    },
+  });
 }
 
 {

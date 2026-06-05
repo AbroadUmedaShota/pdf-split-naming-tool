@@ -11,6 +11,7 @@ export type PreviewFlowResponse = {
   command: string;
   error?: string;
   image_data_url?: string;
+  page_count?: number;
   page_no?: number;
 };
 
@@ -26,6 +27,26 @@ export type LoadPagePreviewOptions = {
   requestPreview(request: PreviewFlowRequest): Promise<PreviewFlowResponse>;
   responseErrorMessage?(response: PreviewFlowResponse): string;
 };
+
+const previewImageDataUrlPrefix = "data:image/png;base64,";
+
+function isValidPagePreviewResponse(
+  response: PreviewFlowResponse,
+  expectedPageNo: number
+): response is PreviewFlowResponse & { image_data_url: string; page_count: number; page_no: number } {
+  return (
+    typeof response.image_data_url === "string" &&
+    response.image_data_url.startsWith(previewImageDataUrlPrefix) &&
+    response.image_data_url.length > previewImageDataUrlPrefix.length &&
+    typeof response.page_count === "number" &&
+    Number.isInteger(response.page_count) &&
+    response.page_count > 0 &&
+    typeof response.page_no === "number" &&
+    Number.isInteger(response.page_no) &&
+    response.page_no > 0 &&
+    response.page_no === expectedPageNo
+  );
+}
 
 export async function loadPagePreview({
   applyPreview,
@@ -51,11 +72,13 @@ export async function loadPagePreview({
   if (!response.ok || response.command !== "page_preview") {
     throw new Error(response.ok ? invalidPreviewMessage : responseErrorMessage(response));
   }
+  if (!isValidPagePreviewResponse(response, pageNo)) {
+    throw new Error(invalidPreviewMessage);
+  }
 
-  const previewResponse = response as { image_data_url: string; page_no: number };
   const preview = {
-    imageDataUrl: previewResponse.image_data_url,
-    pageNo: previewResponse.page_no
+    imageDataUrl: response.image_data_url,
+    pageNo: response.page_no
   };
   cache.set(pdfPath, pageNo, preview);
   applyPreview(preview);
