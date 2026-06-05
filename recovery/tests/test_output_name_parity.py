@@ -99,6 +99,37 @@ def test_preflight_keeps_preview_requested_name_when_existing_file_forces_number
     ]
 
 
+def test_preflight_reserves_numbered_names_after_existing_outputs_without_changing_requested_preview_name(
+    tmp_path: Path,
+) -> None:
+    metadata = {"box_no": "1", "binder_no": "2", "seq": "3"}
+    preview = build_yoshida_filename_preview(metadata)
+    source = tmp_path / "source.pdf"
+    (tmp_path / "01_02_003.pdf").write_text("existing", encoding="utf-8")
+    (tmp_path / "01_02_003_2.pdf").write_text("existing numbered", encoding="utf-8")
+    segments = [
+        Segment(source, 1, 1, metadata),
+        Segment(source, 2, 2, metadata),
+    ]
+
+    checks = check_segment_outputs(segments, tmp_path, processor=PageCountProcessor(page_count=2))
+
+    assert preview.normalized_filename == "01_02_003.pdf"
+    assert [check.requested_filename for check in checks] == [
+        preview.normalized_filename,
+        preview.normalized_filename,
+    ]
+    assert [check.requested_path for check in checks] == [
+        tmp_path / preview.normalized_filename,
+        tmp_path / preview.normalized_filename,
+    ]
+    assert [check.filename for check in checks] == ["01_02_003_3.pdf", "01_02_003_4.pdf"]
+    assert [check.output_path for check in checks] == [
+        tmp_path / "01_02_003_3.pdf",
+        tmp_path / "01_02_003_4.pdf",
+    ]
+
+
 class PageCountProcessor:
     def __init__(self, page_count: int) -> None:
         self._page_count = page_count

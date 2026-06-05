@@ -71,6 +71,32 @@ def test_page_preview_response_public_contract_is_json_ready(tmp_path: Path) -> 
     assert response["image_data_url"].startswith("data:image/png;base64,")
 
 
+def test_page_preview_rejects_zero_page_number_with_json_ready_error(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    make_pdf(source, pages=2)
+
+    response = assert_json_ready(handle_request({"command": "page_preview", "pdf_path": str(source), "page_no": 0}))
+
+    assert_required_keys(response, {"ok", "command", "error", "error_type"})
+    assert response["ok"] is False
+    assert response["command"] == "page_preview"
+    assert response["error_type"] == "ValueError"
+    assert "page_no must be between 1" in response["error"]
+
+
+def test_page_preview_rejects_page_after_page_count_with_json_ready_error(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    make_pdf(source, pages=2)
+
+    response = assert_json_ready(handle_request({"command": "page_preview", "pdf_path": str(source), "page_no": 3}))
+
+    assert_required_keys(response, {"ok", "command", "error", "error_type"})
+    assert response["ok"] is False
+    assert response["command"] == "page_preview"
+    assert response["error_type"] == "ValueError"
+    assert "page_no must be between 1" in response["error"]
+
+
 def test_preflight_response_public_contract_is_json_ready(tmp_path: Path) -> None:
     source = tmp_path / "source.pdf"
     output_dir = tmp_path / "output"
