@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import base64
-import re
 from hashlib import sha256
 from pathlib import Path
 
+from .domain import (
+    INVALID_FILENAME_CHARS,
+    MAX_FILENAME_LENGTH,
+    METADATA_REQUIRED_KEYS,
+    YOSHIDA_FILENAME_TEMPLATE,
+    build_yoshida_filename_preview,
+    sanitize_filename_with_warnings,
+)
 from .models import FilenameBuildResult, Segment
 
 try:
@@ -13,42 +20,18 @@ except Exception:  # pragma: no cover - depends on local runtime
     fitz = None
 
 
-INVALID_FILENAME_CHARS = r'<>:"/\|?*'
-YOSHIDA_TEMPLATE = "{box_no:0>2}_{binder_no:0>2}_{seq:0>3}.pdf"
-REQUIRED_METADATA = ("box_no", "binder_no", "seq")
-MAX_FILENAME_LENGTH = 180
+YOSHIDA_TEMPLATE = YOSHIDA_FILENAME_TEMPLATE
+REQUIRED_METADATA = METADATA_REQUIRED_KEYS
 
 
 class PdfProcessor:
     @staticmethod
     def sanitize_filename(filename: str) -> tuple[str, tuple[str, ...]]:
-        warnings: list[str] = []
-        sanitized = re.sub(f"[{re.escape(INVALID_FILENAME_CHARS)}]", "_", filename)
-        sanitized = sanitized.strip().rstrip(". ")
-        sanitized = re.sub(r"\s+", " ", sanitized)
-        if sanitized != filename:
-            warnings.append("filename_sanitized")
-        if not sanitized:
-            sanitized = "output.pdf"
-            warnings.append("filename_empty_after_sanitize")
-        return sanitized, tuple(warnings)
+        return sanitize_filename_with_warnings(filename)
 
     @staticmethod
     def build_yoshida_filename(metadata: dict[str, str]) -> FilenameBuildResult:
-        values = {key: str(metadata.get(key, "")) for key in REQUIRED_METADATA}
-        errors = [f"missing_required:{key}" for key in REQUIRED_METADATA if not values[key].strip()]
-        raw = ""
-        if not errors:
-            try:
-                raw = YOSHIDA_TEMPLATE.format(**values)
-            except Exception as exc:
-                errors.append(f"template_format_error:{exc}")
-        if raw and not raw.lower().endswith(".pdf"):
-            errors.append("template_must_end_with_pdf")
-        normalized, warnings = PdfProcessor.sanitize_filename(raw) if raw else ("", ())
-        if normalized and len(normalized) > MAX_FILENAME_LENGTH:
-            warnings = (*warnings, "filename_length_warning")
-        return FilenameBuildResult(raw, normalized, warnings, tuple(errors))
+        return build_yoshida_filename_preview(metadata)
 
     @staticmethod
     def ensure_unique_path(path: Path) -> Path:

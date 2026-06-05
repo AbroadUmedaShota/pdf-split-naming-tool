@@ -35,6 +35,7 @@ import {
   type SidecarResponse,
   type SidecarSegment
 } from "../lib/sidecar";
+import { resolveMissingSavedPdfRestore, restorableInputPaths } from "../lib/restore-state";
 import {
   checkForAppUpdate,
   installAppUpdate,
@@ -113,15 +114,6 @@ function missingMetadata(metadata: Record<string, string>): string[] {
 
 function sidecarError(response: SidecarResponse): string {
   return "error" in response ? response.error : "Sidecar response is not usable for this operation.";
-}
-
-function missingPdfStatus(paths: string[], allMissing: boolean): string {
-  const names = paths.slice(0, 2).map(basename).join("、");
-  const suffix = paths.length > 2 ? ` ほか${paths.length - 2}件` : "";
-  const target = names ? `（${names}${suffix}）` : "";
-  return allMissing
-    ? `保存済みPDFが見つかりません${target}。再選択してください。`
-    : `一部の保存済みPDFが見つかりません${target}。再選択してください。`;
 }
 
 function splitPointsFor(pageCount: number, splitPoints: number[] | undefined): number[] {
@@ -675,38 +667,35 @@ export default function Page() {
       setStatus("保存済み状態はありません。");
       return;
     }
-    const missingInputPaths = new Set(response.missing_input_paths ?? []);
-    const hasMissingInputPdf = response.messages?.includes("missing_input_pdf") || missingInputPaths.size > 0;
-    const restorableInputPaths = state.input_paths.filter((path) => !missingInputPaths.has(path));
+    const missingInputPaths = response.missing_input_paths ?? [];
+    const hasMissingInputPdf = response.messages?.includes("missing_input_pdf") || missingInputPaths.length > 0;
     try {
-      const loaded = await Promise.all(restorableInputPaths.map((path) => loadPdfInfo(path)));
-      if (!loaded.length) {
-        setPdfFiles([]);
-        setOutputDir(state.output_dir ?? "");
-        setSplitPointsByPdf(state.split_points_by_pdf ?? {});
-        setSegmentMetadata(state.segment_metadata ?? {});
-        setCommonMetadata({ ...emptyCommonMetadata, ...(state.common_metadata ?? {}) });
-        setCurrentPdf("");
-        setCurrentPage(1);
-        setSelectedSegmentKey("");
-        setPreviewDataUrl("");
-        clearOutputState();
-        setStatus(hasMissingInputPdf ? missingPdfStatus([...missingInputPaths], true) : "保存済み状態はありません。");
-        return;
-      }
+      const inputPathsToRestore = restorableInputPaths(state.input_paths, missingInputPaths);
+      const loaded = await Promise.all(inputPathsToRestore.map((path) => loadPdfInfo(path)));
+      const restoreDecision = resolveMissingSavedPdfRestore({
+        currentPage: state.current_page,
+        currentPdf: state.current_pdf,
+        hasMissingInputPdf,
+        loadedPdfFiles: loaded,
+        missingInputPaths,
+        savedInputPaths: state.input_paths
+      });
       setPdfFiles(loaded);
       setOutputDir(state.output_dir ?? "");
       setSplitPointsByPdf(state.split_points_by_pdf ?? {});
       setSegmentMetadata(state.segment_metadata ?? {});
       setCommonMetadata({ ...emptyCommonMetadata, ...(state.common_metadata ?? {}) });
-      const nextPdf = loaded.some((file) => file.path === state.current_pdf) ? state.current_pdf || loaded[0].path : loaded[0].path;
-      const nextFile = loaded.find((file) => file.path === nextPdf) ?? loaded[0];
-      const nextPage = Math.min(Math.max(state.current_page ?? 1, 1), nextFile.pageCount);
-      setCurrentPdf(nextPdf);
-      setCurrentPage(nextPage);
+      setCurrentPdf(restoreDecision.currentPdf);
+      setCurrentPage(restoreDecision.currentPage);
+      if (!restoreDecision.shouldLoadPreview) {
+        setSelectedSegmentKey("");
+        setPreviewDataUrl("");
+      }
       clearOutputState();
-      await loadPreview(nextPdf, nextPage);
-      setStatus(hasMissingInputPdf ? missingPdfStatus([...missingInputPaths], false) : "状態を復元しました。");
+      if (restoreDecision.shouldLoadPreview) {
+        await loadPreview(restoreDecision.currentPdf, restoreDecision.currentPage);
+      }
+      setStatus(restoreDecision.statusText);
     } catch (error) {
       setStatus(`状態復元エラー: ${String(error)}`);
     }
