@@ -37,6 +37,14 @@ import {
 } from "../lib/sidecar";
 import { resolveMissingSavedPdfRestore, restorableInputPaths } from "../lib/restore-state";
 import {
+  buildSegments,
+  reconcileSegmentMetadataForPdf,
+  splitPointsFor,
+  type PdfFile,
+  type SegmentMetadata,
+  type SegmentView
+} from "../lib/segment-state";
+import {
   checkForAppUpdate,
   installAppUpdate,
   readCurrentVersion,
@@ -45,20 +53,6 @@ import {
 } from "../lib/updates";
 
 type StepId = "import" | "split" | "input" | "output";
-
-type PdfFile = {
-  path: string;
-  pageCount: number;
-};
-
-type SegmentView = {
-  key: string;
-  pdfPath: string;
-  startPage: number;
-  endPage: number;
-  pages: string;
-  metadata: Record<string, string>;
-};
 
 type StepState = "active" | "done" | "attention" | "idle";
 type UpdateState = "idle" | "checking" | "current" | "available" | "installing" | "installed" | "error";
@@ -76,14 +70,6 @@ const invalidFilenameChars = /[<>:"/\\|?*]/g;
 
 function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-}
-
-function segmentKey(pdfPath: string, startPage: number, endPage: number): string {
-  return `${pdfPath}#${startPage}-${endPage}`;
-}
-
-function pageLabel(startPage: number, endPage: number): string {
-  return startPage === endPage ? `${startPage}` : `${startPage}-${endPage}`;
 }
 
 function padMetadata(value: string, length: number): string {
@@ -114,42 +100,6 @@ function missingMetadata(metadata: Record<string, string>): string[] {
 
 function sidecarError(response: SidecarResponse): string {
   return "error" in response ? response.error : "Sidecar response is not usable for this operation.";
-}
-
-function splitPointsFor(pageCount: number, splitPoints: number[] | undefined): number[] {
-  return [...new Set(splitPoints ?? [])]
-    .filter((page) => page > 1 && page <= pageCount)
-    .sort((a, b) => a - b);
-}
-
-function buildSegments(
-  pdfFiles: PdfFile[],
-  splitPointsByPdf: Record<string, number[]>,
-  segmentMetadata: Record<string, Record<string, string>>,
-  commonMetadata: Record<string, string>
-): SegmentView[] {
-  return pdfFiles.flatMap((file) => {
-    const points = splitPointsFor(file.pageCount, splitPointsByPdf[file.path]);
-    const starts = [1, ...points];
-    const ends = [...points.map((point) => point - 1), file.pageCount];
-    return starts.map((startPage, index) => {
-      const endPage = ends[index];
-      const key = segmentKey(file.path, startPage, endPage);
-      return {
-        key,
-        pdfPath: file.path,
-        startPage,
-        endPage,
-        pages: pageLabel(startPage, endPage),
-        metadata: {
-          box_no: commonMetadata.box_no ?? "",
-          binder_no: commonMetadata.binder_no ?? "",
-          seq: "",
-          ...(segmentMetadata[key] ?? {})
-        }
-      };
-    });
-  });
 }
 
 function IconLabel({ children, icon: Icon }: { children: ReactNode; icon: LucideIcon }) {
@@ -238,7 +188,7 @@ export default function Page() {
   const [outputDir, setOutputDir] = useState("");
   const [commonMetadata, setCommonMetadata] = useState<Record<string, string>>(emptyCommonMetadata);
   const [splitPointsByPdf, setSplitPointsByPdf] = useState<Record<string, number[]>>({});
-  const [segmentMetadata, setSegmentMetadata] = useState<Record<string, Record<string, string>>>({});
+  const [segmentMetadata, setSegmentMetadata] = useState<SegmentMetadata>({});
   const [selectedSegmentKey, setSelectedSegmentKey] = useState("");
   const [preflightChecks, setPreflightChecks] = useState<SidecarOutputCheck[]>([]);
   const [exportResult, setExportResult] = useState<SidecarExportResponse | null>(null);
@@ -270,6 +220,31 @@ export default function Page() {
   function clearOutputState(): void {
     setPreflightChecks([]);
     setExportResult(null);
+  }
+
+  function updateCurrentPdfSplitPoints(nextPointsFor: (currentPoints: number[]) => number[]): void {
+    if (!currentFile) {
+      return;
+    }
+
+    const pdfPath = currentFile.path;
+    const pageCount = currentFile.pageCount;
+    const previousPoints = splitPointsFor(pageCount, splitPointsByPdf[pdfPath]);
+    const nextPoints = splitPointsFor(pageCount, nextPointsFor(previousPoints));
+
+    setSegmentMetadata((metadata) =>
+      reconcileSegmentMetadataForPdf({
+        pageCount,
+        pdfPath,
+        previousSplitPoints: previousPoints,
+        nextSplitPoints: nextPoints,
+        segmentMetadata: metadata
+      })
+    );
+    setSplitPointsByPdf((current) => ({
+      ...current,
+      [pdfPath]: nextPoints
+    }));
   }
 
   useEffect(() => {
@@ -542,10 +517,7 @@ export default function Page() {
       return;
     }
     clearOutputState();
-    setSplitPointsByPdf((current) => ({
-      ...current,
-      [currentFile.path]: splitPointsFor(currentFile.pageCount, [...(current[currentFile.path] ?? []), currentPage])
-    }));
+    updateCurrentPdfSplitPoints((currentPoints) => [...currentPoints, currentPage]);
     setStatus(`${currentPage}ページの前に分割を追加しました。`);
   }
 
@@ -554,10 +526,7 @@ export default function Page() {
       return;
     }
     clearOutputState();
-    setSplitPointsByPdf((current) => {
-      const points = splitPointsFor(currentFile.pageCount, current[currentFile.path]);
-      return { ...current, [currentFile.path]: points.slice(0, -1) };
-    });
+    updateCurrentPdfSplitPoints((currentPoints) => currentPoints.slice(0, -1));
     setStatus("最後の分割を取り消しました。");
   }
 
@@ -566,10 +535,9 @@ export default function Page() {
       return;
     }
     clearOutputState();
-    setSplitPointsByPdf((current) => ({
-      ...current,
-      [currentFile.path]: Array.from({ length: Math.max(0, currentFile.pageCount - 1) }, (_value, index) => index + 2)
-    }));
+    updateCurrentPdfSplitPoints(() =>
+      Array.from({ length: Math.max(0, currentFile.pageCount - 1) }, (_value, index) => index + 2)
+    );
     setStatus("1ページごとの分割にしました。");
   }
 

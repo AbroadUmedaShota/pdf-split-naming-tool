@@ -32,6 +32,14 @@ assert.deepEqual(
   ["C:\\docs\\a.pdf"],
 );
 
+assert.deepEqual(
+  restorableInputPaths(
+    ["C:\\docs\\z.pdf", "C:\\docs\\a.pdf", "C:\\docs\\m.pdf", "C:\\docs\\b.pdf"],
+    ["C:\\docs\\a.pdf", "C:\\docs\\b.pdf"],
+  ),
+  ["C:\\docs\\z.pdf", "C:\\docs\\m.pdf"],
+);
+
 {
   const decision = resolveMissingSavedPdfRestore({
     currentPage: 4,
@@ -83,6 +91,35 @@ assert.deepEqual(
   assert.equal(decision.currentPage, 2);
   assert.equal(decision.shouldLoadPreview, true);
   assert.deepEqual(decision.restorableInputPaths, ["C:\\docs\\a.pdf"]);
+}
+
+{
+  const decision = resolveMissingSavedPdfRestore({
+    currentPage: 5,
+    currentPdf: "C:\\docs\\missing-current.pdf",
+    hasMissingInputPdf: true,
+    loadedPdfFiles: [
+      { path: "C:\\docs\\third.pdf", pageCount: 8 },
+      { path: "C:\\docs\\first.pdf", pageCount: 3 },
+      { path: "C:\\docs\\second.pdf", pageCount: 10 },
+    ],
+    missingInputPaths: ["C:\\docs\\missing-current.pdf"],
+    savedInputPaths: [
+      "C:\\docs\\missing-current.pdf",
+      "C:\\docs\\first.pdf",
+      "C:\\docs\\second.pdf",
+      "C:\\docs\\third.pdf",
+    ],
+  });
+
+  assert.equal(decision.currentPdf, "C:\\docs\\first.pdf");
+  assert.equal(decision.currentPage, 3);
+  assert.equal(decision.shouldLoadPreview, true);
+  assert.deepEqual(decision.restorableInputPaths, [
+    "C:\\docs\\first.pdf",
+    "C:\\docs\\second.pdf",
+    "C:\\docs\\third.pdf",
+  ]);
 }
 
 assert.equal(

@@ -72,7 +72,9 @@ export function resolveMissingSavedPdfRestore({
     };
   }
 
-  const restoredPdf = loadedPdfFiles.some((file) => file.path === currentPdf) ? currentPdf || firstLoadedPdf.path : firstLoadedPdf.path;
+  const loadedPdfByPath = new Map(loadedPdfFiles.map((file) => [file.path, file]));
+  const firstRestorablePdf = restorablePaths.find((path) => loadedPdfByPath.has(path)) ?? firstLoadedPdf.path;
+  const restoredPdf = loadedPdfByPath.has(currentPdf ?? "") ? currentPdf || firstRestorablePdf : firstRestorablePdf;
   const restoredFile = loadedPdfFiles.find((file) => file.path === restoredPdf) ?? firstLoadedPdf;
   const restoredPage = Math.min(Math.max(currentPage ?? 1, 1), restoredFile.pageCount);
   const missingStatusInput = hasMissingInputPdf
