@@ -133,6 +133,27 @@ def test_sidecar_state_save_normalizes_known_keys_and_preserves_unknown_keys(tmp
     assert load_response["state"]["future_client_state"] == {"selected_tab": "split"}
 
 
+def test_sidecar_state_save_preserves_common_metadata_known_and_unknown_string_keys(tmp_path: Path) -> None:
+    common_metadata = {
+        "box_no": "01",
+        "binder_no": "02",
+        "note": "front desk copy",
+        "custom_label": "urgent",
+    }
+    state = {
+        "version": 1,
+        "input_paths": ["source.pdf"],
+        "common_metadata": common_metadata,
+    }
+
+    save_response = handle_request({"command": "state_save", "work_dir": str(tmp_path), "state": state})
+    load_response = handle_request({"command": "state_load", "work_dir": str(tmp_path)})
+
+    assert save_response["ok"] is True
+    assert load_response["ok"] is True
+    assert load_response["state"]["common_metadata"] == common_metadata
+
+
 def test_sidecar_state_save_rejects_invalid_input_paths_without_saving(tmp_path: Path) -> None:
     response = handle_request(
         {

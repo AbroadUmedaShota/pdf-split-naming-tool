@@ -71,6 +71,19 @@ export function buildSegments(
   );
 }
 
+export function resequenceSegmentMetadata(
+  segments: SegmentView[],
+  segmentMetadata: SegmentMetadata
+): SegmentMetadata {
+  const nextMetadata: SegmentMetadata = { ...segmentMetadata };
+
+  segments.forEach((segment, index) => {
+    nextMetadata[segment.key] = { ...(nextMetadata[segment.key] ?? {}), seq: String(index + 1) };
+  });
+
+  return nextMetadata;
+}
+
 export function reconcileSegmentMetadataForPdf({
   pageCount,
   pdfPath,

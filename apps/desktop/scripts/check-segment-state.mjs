@@ -24,6 +24,7 @@ compile(segmentStateModule.exports, require, segmentStateModule, sourcePath, dir
 const {
   buildSegments,
   reconcileSegmentMetadataForPdf,
+  resequenceSegmentMetadata,
   segmentKey,
   splitPointsFor,
 } = segmentStateModule.exports;
@@ -86,6 +87,61 @@ assert.deepEqual(splitPointsFor(5, [5, 2, 5, 1, 0, 6]), [2, 5]);
     box_no: "common-box",
     binder_no: "common-binder",
     seq: "",
+  });
+}
+
+{
+  const segments = buildSegments(
+    [
+      { path: otherPdfPath, pageCount: 3 },
+      { path: pdfPath, pageCount: 10 },
+    ],
+    {
+      [pdfPath]: [6],
+      [otherPdfPath]: [2],
+    },
+    {},
+    {
+      box_no: "",
+      binder_no: "",
+    },
+  );
+  const metadata = {
+    [firstSplitKey]: { box_no: "a-box", binder_no: "a-binder", seq: "old-a", custom: "keep-a" },
+    [secondSplitKey]: { box_no: "b-box", binder_no: "b-binder", seq: "old-b" },
+    [otherPdfFirstSplitKey]: { box_no: "other-box-1", binder_no: "other-binder-1", seq: "old-other-1" },
+    [otherPdfSecondSplitKey]: { box_no: "other-box-2", binder_no: "other-binder-2", seq: "old-other-2", note: "keep-other" },
+  };
+
+  const resequenced = resequenceSegmentMetadata(segments, metadata);
+
+  assert.deepEqual(resequenced[otherPdfFirstSplitKey], {
+    box_no: "other-box-1",
+    binder_no: "other-binder-1",
+    seq: "1",
+  });
+  assert.deepEqual(resequenced[otherPdfSecondSplitKey], {
+    box_no: "other-box-2",
+    binder_no: "other-binder-2",
+    seq: "2",
+    note: "keep-other",
+  });
+  assert.deepEqual(resequenced[firstSplitKey], {
+    box_no: "a-box",
+    binder_no: "a-binder",
+    seq: "3",
+    custom: "keep-a",
+  });
+  assert.deepEqual(resequenced[secondSplitKey], {
+    box_no: "b-box",
+    binder_no: "b-binder",
+    seq: "4",
+  });
+  assert.deepEqual(metadata[firstSplitKey], {
+    box_no: "a-box",
+    binder_no: "a-binder",
+    seq: "old-a",
+    custom: "keep-a",
   });
 }
 

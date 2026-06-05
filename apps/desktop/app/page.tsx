@@ -42,6 +42,7 @@ import { createPreviewRequestGate, previewCache } from "../lib/preview-cache";
 import {
   buildSegments,
   reconcileSegmentMetadataForPdf,
+  resequenceSegmentMetadata,
   splitPointsFor,
   type PdfFile,
   type SegmentMetadata,
@@ -592,13 +593,7 @@ export default function Page() {
   function resequence(): void {
     invalidateWorkspaceRequests();
     clearOutputState();
-    setSegmentMetadata((current) => {
-      const next = { ...current };
-      allSegments.forEach((segment, index) => {
-        next[segment.key] = { ...(next[segment.key] ?? {}), seq: String(index + 1) };
-      });
-      return next;
-    });
+    setSegmentMetadata((current) => resequenceSegmentMetadata(allSegments, current));
     setStatus("連番を再採番しました。");
   }
 
