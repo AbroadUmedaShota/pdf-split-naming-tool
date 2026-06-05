@@ -7,6 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "typecheck": "tsc --noEmit",
+    "test:preview-cache": "node scripts/check-preview-cache.mjs",
     "test:restore-state": "node scripts/check-restore-state.mjs",
     "test:filename-policy": "node scripts/check-filename-policy.mjs",
     "test:output-state": "node scripts/check-output-state.mjs",

@@ -23,7 +23,7 @@ import {
   XCircle,
   type LucideIcon
 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   invokeSidecar,
   type AppPersistedState,
@@ -38,6 +38,7 @@ import {
 import { resolveMissingSavedPdfRestore, restorableInputPaths } from "../lib/restore-state";
 import { missingMetadata, previewFilename } from "../lib/filename-policy";
 import { isOutputCheckOk, outputDetailStateText, outputIssueCount, outputListStateText } from "../lib/output-state";
+import { createPreviewRequestGate, previewCache } from "../lib/preview-cache";
 import {
   buildSegments,
   reconcileSegmentMetadataForPdf,
@@ -172,6 +173,8 @@ export default function Page() {
   const [updateMessage, setUpdateMessage] = useState("更新未確認");
   const [updateProgress, setUpdateProgress] = useState("");
   const [availableUpdate, setAvailableUpdate] = useState<AppUpdate | null>(null);
+  const previewRequestGateRef = useRef(createPreviewRequestGate());
+  const workspaceRequestGateRef = useRef(createPreviewRequestGate());
 
   const currentFile = pdfFiles.find((file) => file.path === currentPdf);
   const allSegments = useMemo(
@@ -360,17 +363,45 @@ export default function Page() {
     return { path: info.pdf_path, pageCount: info.page_count };
   }
 
+  function invalidatePreviewRequests(): void {
+    previewRequestGateRef.current.invalidate();
+  }
+
+  function invalidateWorkspaceRequests(): void {
+    workspaceRequestGateRef.current.invalidate();
+  }
+
+  function invalidateWorkspaceAndPreviewRequests(): void {
+    invalidateWorkspaceRequests();
+    invalidatePreviewRequests();
+  }
+
   async function loadPreview(pdfPath: string, pageNo: number): Promise<void> {
+    const requestId = previewRequestGateRef.current.next();
+    const cachedPreview = previewCache.get(pdfPath, pageNo);
+    if (cachedPreview) {
+      setPreviewDataUrl(cachedPreview.imageDataUrl);
+      setCurrentPage(cachedPreview.pageNo);
+      return;
+    }
     const response = await invokeSidecar({ command: "page_preview", pdf_path: pdfPath, page_no: pageNo });
+    if (!previewRequestGateRef.current.isCurrent(requestId)) {
+      return;
+    }
     if (!response.ok || response.command !== "page_preview") {
       throw new Error(response.ok ? "プレビューを取得できませんでした。" : sidecarError(response));
     }
     const preview = response as SidecarPreviewResponse;
+    previewCache.set(pdfPath, pageNo, {
+      imageDataUrl: preview.image_data_url,
+      pageNo: preview.page_no
+    });
     setPreviewDataUrl(preview.image_data_url);
     setCurrentPage(preview.page_no);
   }
 
   async function choosePdfs(): Promise<void> {
+    let requestId = 0;
     try {
       const selected = await open({
         multiple: true,
@@ -380,7 +411,15 @@ export default function Page() {
       if (!paths.length) {
         return;
       }
+      requestId = workspaceRequestGateRef.current.next();
+      invalidatePreviewRequests();
+      for (const path of paths) {
+        previewCache.clearPdf(path);
+      }
       const loaded = await Promise.all(paths.map((path) => loadPdfInfo(path)));
+      if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
+        return;
+      }
       setPdfFiles((existing) => {
         const byPath = new Map(existing.map((file) => [file.path, file]));
         for (const file of loaded) {
@@ -392,8 +431,14 @@ export default function Page() {
       setCurrentPage(1);
       clearOutputState();
       await loadPreview(loaded[0].path, 1);
+      if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
+        return;
+      }
       setStatus(`${loaded.length}件のPDFを読み込みました。`);
     } catch (error) {
+      if (requestId && !workspaceRequestGateRef.current.isCurrent(requestId)) {
+        return;
+      }
       setStatus(`PDF取込エラー: ${String(error)}`);
     }
   }
@@ -401,6 +446,7 @@ export default function Page() {
   async function chooseOutputDir(): Promise<void> {
     const selected = await open({ directory: true, multiple: false });
     if (typeof selected === "string") {
+      invalidateWorkspaceRequests();
       setOutputDir(selected);
       clearOutputState();
       setStatus("出力フォルダを設定しました。");
@@ -408,6 +454,7 @@ export default function Page() {
   }
 
   async function selectPdf(path: string): Promise<void> {
+    invalidateWorkspaceRequests();
     setCurrentPdf(path);
     setCurrentPage(1);
     try {
@@ -419,6 +466,8 @@ export default function Page() {
 
   async function removePdf(path: string): Promise<void> {
     const remaining = pdfFiles.filter((file) => file.path !== path);
+    invalidateWorkspaceAndPreviewRequests();
+    previewCache.clearPdf(path);
     setPdfFiles(remaining);
     setSplitPointsByPdf((current) => {
       const next = { ...current };
@@ -456,6 +505,8 @@ export default function Page() {
   }
 
   function clearPdfSelection(): void {
+    invalidateWorkspaceAndPreviewRequests();
+    previewCache.clear();
     setPdfFiles([]);
     setCurrentPdf("");
     setCurrentPage(1);
@@ -468,6 +519,7 @@ export default function Page() {
   }
 
   function resetOutputDir(): void {
+    invalidateWorkspaceRequests();
     setOutputDir("");
     clearOutputState();
     setStatus("出力先をリセットしました。");
@@ -478,6 +530,7 @@ export default function Page() {
       return;
     }
     const nextPage = Math.max(1, Math.min(currentFile.pageCount, currentPage + offset));
+    invalidateWorkspaceRequests();
     try {
       await loadPreview(currentFile.path, nextPage);
     } catch (error) {
@@ -486,6 +539,7 @@ export default function Page() {
   }
 
   function addSplitBeforeCurrentPage(): void {
+    invalidateWorkspaceRequests();
     if (!currentFile || currentPage <= 1) {
       setStatus("先頭ページの前では分割できません。");
       return;
@@ -496,6 +550,7 @@ export default function Page() {
   }
 
   function undoLastSplit(): void {
+    invalidateWorkspaceRequests();
     if (!currentFile) {
       return;
     }
@@ -505,6 +560,7 @@ export default function Page() {
   }
 
   function splitEveryPage(): void {
+    invalidateWorkspaceRequests();
     if (!currentFile) {
       return;
     }
@@ -516,11 +572,13 @@ export default function Page() {
   }
 
   function updateCommonMetadata(key: "box_no" | "binder_no", value: string): void {
+    invalidateWorkspaceRequests();
     clearOutputState();
     setCommonMetadata((current) => ({ ...current, [key]: value }));
   }
 
   function updateMetadata(segment: SegmentView, key: string, value: string): void {
+    invalidateWorkspaceRequests();
     clearOutputState();
     setSegmentMetadata((current) => ({
       ...current,
@@ -532,6 +590,7 @@ export default function Page() {
   }
 
   function resequence(): void {
+    invalidateWorkspaceRequests();
     clearOutputState();
     setSegmentMetadata((current) => {
       const next = { ...current };
@@ -599,7 +658,12 @@ export default function Page() {
   }
 
   async function loadState(): Promise<void> {
+    const requestId = workspaceRequestGateRef.current.next();
+    invalidatePreviewRequests();
     const response = await invokeSidecar({ command: "state_load" });
+    if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
+      return;
+    }
     if (!response.ok || response.command !== "state_load") {
       setStatus(response.ok ? "状態読込に失敗しました。" : `状態読込エラー: ${sidecarError(response)}`);
       return;
@@ -614,6 +678,9 @@ export default function Page() {
     try {
       const inputPathsToRestore = restorableInputPaths(state.input_paths, missingInputPaths);
       const loaded = await Promise.all(inputPathsToRestore.map((path) => loadPdfInfo(path)));
+      if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
+        return;
+      }
       const restoreDecision = resolveMissingSavedPdfRestore({
         currentPage: state.current_page,
         currentPdf: state.current_pdf,
@@ -622,6 +689,7 @@ export default function Page() {
         missingInputPaths,
         savedInputPaths: state.input_paths
       });
+      previewCache.clear();
       setPdfFiles(loaded);
       setOutputDir(state.output_dir ?? "");
       setSplitPointsByPdf(state.split_points_by_pdf ?? {});
@@ -637,8 +705,14 @@ export default function Page() {
       if (restoreDecision.shouldLoadPreview) {
         await loadPreview(restoreDecision.currentPdf, restoreDecision.currentPage);
       }
+      if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
+        return;
+      }
       setStatus(restoreDecision.statusText);
     } catch (error) {
+      if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
+        return;
+      }
       setStatus(`状態復元エラー: ${String(error)}`);
     }
   }
