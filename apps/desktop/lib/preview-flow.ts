@@ -44,7 +44,8 @@ function isValidPagePreviewResponse(
     typeof response.page_no === "number" &&
     Number.isInteger(response.page_no) &&
     response.page_no > 0 &&
-    response.page_no === expectedPageNo
+    response.page_no === expectedPageNo &&
+    response.page_no <= response.page_count
   );
 }
 

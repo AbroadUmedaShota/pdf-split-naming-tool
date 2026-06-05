@@ -463,6 +463,21 @@ for (const { label, response } of [
 
 {
   await assertRejectedPreviewResponse({
+    expectedMessage: /invalid preview/,
+    label: "page number beyond page count",
+    pageNo: 5,
+    response: {
+      ok: true,
+      command: "page_preview",
+      image_data_url: "data:image/png;base64,page-5",
+      page_count: 4,
+      page_no: 5,
+    },
+  });
+}
+
+{
+  await assertRejectedPreviewResponse({
     expectedMessage: /sidecar failed/,
     label: "error response",
     response: {

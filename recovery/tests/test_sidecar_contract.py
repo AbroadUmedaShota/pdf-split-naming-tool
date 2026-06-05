@@ -72,6 +72,7 @@ def test_page_preview_response_public_contract_is_json_ready(tmp_path: Path) -> 
     assert response["pdf_path"] == str(source)
     assert_page_number(response["page_no"])
     assert_page_number(response["page_count"])
+    assert 1 <= response["page_no"] <= response["page_count"]
     assert response["page_no"] == 1
     assert response["page_count"] == 1
     assert isinstance(response["image_data_url"], str)
