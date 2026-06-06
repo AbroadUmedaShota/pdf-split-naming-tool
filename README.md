@@ -49,6 +49,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify.ps1
 
 このスクリプトは Python pytest、desktop 側 JS 回帰テスト、desktop typecheck をまとめて確認するためのものです。実ブラウザ/Tauri E2E や、現場PDFを使った手動受入確認の代替ではありません。
 
+現場PDFまたはサンプルPDFで、受入前の手元スモークを行う場合は次を実行します。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\sample-pdf-smoke.ps1 -PdfPath "C:\path\to\sample.pdf"
+```
+
+この検証は元PDFを変更せず、一時フォルダへ1ページ目のみを出力し、sidecar の `pdf_info` / preview / preflight / export / state roundtrip を確認します。実ブラウザ/Tauri E2E や、人間による受入判断の代替ではありません。
+
 ## 次に決めること
 
 1. 現場PDFで、PDF取込、手動分割、1ページ分割、命名、出力が成立するか確認する。
