@@ -8,6 +8,7 @@
     "build": "next build",
     "typecheck": "tsc --noEmit",
     "test:desktop": "node scripts/check-all.mjs",
+    "test:step-render": "node scripts/check-step-render.mjs",
     "test:preview-cache": "node scripts/check-preview-cache.mjs",
     "test:restore-state": "node scripts/check-restore-state.mjs",
     "test:filename-policy": "node scripts/check-filename-policy.mjs",

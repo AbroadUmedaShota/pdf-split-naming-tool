@@ -4,6 +4,7 @@ export type PreviewFlowRequest = {
   command: "page_preview";
   pdf_path: string;
   page_no: number;
+  zoom?: number;
 };
 
 export type PreviewFlowResponse = {
@@ -26,6 +27,7 @@ export type LoadPagePreviewOptions = {
   pdfPath: string;
   requestPreview(request: PreviewFlowRequest): Promise<PreviewFlowResponse>;
   responseErrorMessage?(response: PreviewFlowResponse): string;
+  zoom?: number;
 };
 
 const previewImageDataUrlPrefix = "data:image/png;base64,";
@@ -57,7 +59,8 @@ export async function loadPagePreview({
   pageNo,
   pdfPath,
   requestPreview,
-  responseErrorMessage = (response) => response.error ?? "Preview response was not usable."
+  responseErrorMessage = (response) => response.error ?? "Preview response was not usable.",
+  zoom
 }: LoadPagePreviewOptions): Promise<PreviewFlowResult> {
   const requestId = gate.next();
   const cachedPreview = cache.get(pdfPath, pageNo);
@@ -66,7 +69,11 @@ export async function loadPagePreview({
     return "cache";
   }
 
-  const response = await requestPreview({ command: "page_preview", pdf_path: pdfPath, page_no: pageNo });
+  const request: PreviewFlowRequest = { command: "page_preview", pdf_path: pdfPath, page_no: pageNo };
+  if (typeof zoom === "number") {
+    request.zoom = zoom;
+  }
+  const response = await requestPreview(request);
   if (!gate.isCurrent(requestId)) {
     return "stale";
   }

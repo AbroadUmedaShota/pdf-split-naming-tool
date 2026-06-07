@@ -274,6 +274,45 @@ assert.deepEqual(splitPointsFor(5, [5, 2, 5, 1, 0, 6]), [2, 5]);
 }
 
 {
+  const wholeOtherPdfKey = segmentKey(otherPdfPath, 1, 3);
+  const reconciled = reconcileSegmentMetadataForPdf({
+    pageCount: 10,
+    pdfPath,
+    previousSplitPoints: [2, 3, 4, 5, 6, 7, 8, 9, 10],
+    nextSplitPoints: [],
+    segmentMetadata: {
+      [wholeKey]: { box_no: "11", binder_no: "22", seq: "033", note: "restore whole" },
+      [segmentKey(pdfPath, 1, 1)]: { box_no: "11", binder_no: "22", seq: "001" },
+      [segmentKey(pdfPath, 2, 2)]: { box_no: "11", binder_no: "22", seq: "002" },
+      [wholeOtherPdfKey]: { box_no: "77", binder_no: "88", seq: "999", note: "keep other pdf" },
+    },
+  });
+
+  assert.deepEqual(reconciled[wholeKey], { box_no: "11", binder_no: "22", seq: "033", note: "restore whole" });
+  assert.deepEqual(reconciled[wholeOtherPdfKey], {
+    box_no: "77",
+    binder_no: "88",
+    seq: "999",
+    note: "keep other pdf",
+  });
+
+  const segments = buildSegments(
+    [
+      { path: pdfPath, pageCount: 10 },
+      { path: otherPdfPath, pageCount: 3 },
+    ],
+    { [pdfPath]: [], [otherPdfPath]: [] },
+    reconciled,
+    { box_no: "", binder_no: "" },
+  );
+
+  assert.deepEqual(
+    segments.map((segment) => segment.pages),
+    ["1-10", "1-3"],
+  );
+}
+
+{
   const noContainingSegmentKey = segmentKey(pdfPath, 1, 4);
   const reconciled = reconcileSegmentMetadataForPdf({
     pageCount: 10,

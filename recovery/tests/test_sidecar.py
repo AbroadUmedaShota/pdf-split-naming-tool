@@ -19,6 +19,15 @@ def make_pdf(path: Path, pages: int) -> None:
     doc.close()
 
 
+def make_text_pdf(path: Path, page_texts: list[str]) -> None:
+    doc = fitz.open()
+    for text in page_texts:
+        page = doc.new_page()
+        page.insert_text((72, 72), text)
+    doc.save(path)
+    doc.close()
+
+
 def test_sidecar_pdf_info_returns_import_metadata(tmp_path: Path) -> None:
     source = tmp_path / "source.pdf"
     make_pdf(source, 3)
@@ -42,6 +51,116 @@ def test_sidecar_page_preview_returns_data_url(tmp_path: Path) -> None:
     assert response["ok"] is True
     assert response["command"] == "page_preview"
     assert response["image_data_url"].startswith("data:image/png;base64,")
+
+
+def test_sidecar_page_thumbnail_returns_compact_data_url(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    make_pdf(source, 2)
+
+    response = handle_request({"command": "page_thumbnail", "pdf_path": str(source), "page_no": 2})
+
+    assert response["ok"] is True
+    assert response["command"] == "page_thumbnail"
+    assert response["page_no"] == 2
+    assert response["image_data_url"].startswith("data:image/png;base64,")
+
+
+def test_sidecar_page_text_returns_text_layer(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    make_pdf(source, 2)
+
+    response = handle_request({"command": "page_text", "pdf_path": str(source), "page_no": 2})
+
+    assert response["ok"] is True
+    assert response["command"] == "page_text"
+    assert response["page_no"] == 2
+    assert response["has_text"] is True
+    assert "Page 2" in response["text"]
+
+
+def test_sidecar_search_text_returns_page_hits(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    make_pdf(source, 3)
+
+    response = handle_request({"command": "search_text", "pdf_paths": [str(source)], "query": "Page 2"})
+
+    assert response["ok"] is True
+    assert response["command"] == "search_text"
+    assert response["query"] == "Page 2"
+    assert response["results"][0]["pdf_path"] == str(source)
+    assert response["results"][0]["page_no"] == 2
+    assert response["results"][0]["count"] >= 1
+
+
+def test_sidecar_search_text_supports_scope_and_extended_hit_metadata(tmp_path: Path) -> None:
+    current = tmp_path / "current.pdf"
+    other = tmp_path / "other.pdf"
+    make_text_pdf(current, ["表紙", "OCR target current"])
+    make_text_pdf(other, ["OCR target other"])
+
+    response = handle_request(
+        {
+            "command": "search_text",
+            "pdf_paths": [str(current), str(other)],
+            "query": "OCR",
+            "scope": "current_pdf",
+            "current_pdf": str(current),
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["command"] == "search_text"
+    assert len(response["results"]) == 1
+    hit = response["results"][0]
+    assert hit["pdf_path"] == str(current)
+    assert hit["page_no"] == 2
+    assert hit["matched_terms"] == ["OCR"]
+    assert hit["has_text"] is True
+    assert hit["is_current_pdf"] is True
+
+
+def test_sidecar_search_highlights_returns_page_rects(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    make_text_pdf(source, ["OCR target line"])
+
+    response = handle_request({"command": "search_highlights", "pdf_path": str(source), "page_no": 1, "query": "OCR"})
+
+    assert response["ok"] is True
+    assert response["command"] == "search_highlights"
+    assert response["page_no"] == 1
+    assert response["query"] == "OCR"
+    assert response["rects"]
+    assert set(response["rects"][0]) == {"x0", "y0", "x1", "y1", "page_width", "page_height"}
+
+
+def test_sidecar_index_candidates_returns_keyword_based_pages(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    make_text_pdf(source, ["normal page", "No. 001 company document", "OCR target"])
+
+    response = handle_request({"command": "index_candidates", "pdf_paths": [str(source)]})
+
+    assert response["ok"] is True
+    assert response["command"] == "index_candidates"
+    assert response["candidates"]
+    candidate = response["candidates"][0]
+    assert candidate["pdf_path"] == str(source)
+    assert candidate["page_no"] == 2
+    assert candidate["score"] > 0
+    assert "No." in candidate["reason"]
+    assert "company" in candidate["snippet"]
+
+
+def test_sidecar_blank_candidates_returns_json_ready_scores(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    make_pdf(source, 2)
+
+    response = handle_request({"command": "blank_candidates", "pdf_path": str(source)})
+
+    assert response["ok"] is True
+    assert response["command"] == "blank_candidates"
+    assert isinstance(response["candidates"], list)
+    for candidate in response["candidates"]:
+        assert set(candidate) == {"page_no", "score"}
 
 
 def test_sidecar_preflight_returns_json_ready_checks(tmp_path: Path) -> None:

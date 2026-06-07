@@ -21,6 +21,18 @@ def handle_request(request: object) -> dict[str, Any]:
             return pdf_info(request)
         if command == "page_preview":
             return page_preview(request)
+        if command == "page_thumbnail":
+            return page_thumbnail(request)
+        if command == "page_text":
+            return page_text(request)
+        if command == "search_text":
+            return search_text(request)
+        if command == "search_highlights":
+            return search_highlights(request)
+        if command == "index_candidates":
+            return index_candidates(request)
+        if command == "blank_candidates":
+            return blank_candidates(request)
         if command == "preflight":
             return preflight(request)
         if command == "export":
@@ -59,6 +71,7 @@ def pdf_info(request: dict[str, Any]) -> dict[str, Any]:
 def page_preview(request: dict[str, Any]) -> dict[str, Any]:
     pdf_path = Path(str(request.get("pdf_path", "")))
     page_no = int(request.get("page_no", 1))
+    zoom = float(request.get("zoom", 1.2))
     page_count = PdfProcessor.page_count(pdf_path)
     if page_no < 1 or page_no > page_count:
         raise ValueError(f"page_no must be between 1 and {page_count}")
@@ -68,7 +81,106 @@ def page_preview(request: dict[str, Any]) -> dict[str, Any]:
         "pdf_path": str(pdf_path),
         "page_no": page_no,
         "page_count": page_count,
-        "image_data_url": PdfProcessor.page_preview_data_url(pdf_path, page_no),
+        "image_data_url": PdfProcessor.page_preview_data_url(pdf_path, page_no, zoom),
+    }
+
+
+def page_thumbnail(request: dict[str, Any]) -> dict[str, Any]:
+    pdf_path = Path(str(request.get("pdf_path", "")))
+    page_no = int(request.get("page_no", 1))
+    zoom = float(request.get("zoom", 0.22))
+    page_count = PdfProcessor.page_count(pdf_path)
+    if page_no < 1 or page_no > page_count:
+        raise ValueError(f"page_no must be between 1 and {page_count}")
+    return {
+        "ok": True,
+        "command": "page_thumbnail",
+        "pdf_path": str(pdf_path),
+        "page_no": page_no,
+        "page_count": page_count,
+        "image_data_url": PdfProcessor.page_thumbnail_data_url(pdf_path, page_no, zoom),
+    }
+
+
+def page_text(request: dict[str, Any]) -> dict[str, Any]:
+    pdf_path = Path(str(request.get("pdf_path", "")))
+    page_no = int(request.get("page_no", 1))
+    page_count = PdfProcessor.page_count(pdf_path)
+    if page_no < 1 or page_no > page_count:
+        raise ValueError(f"page_no must be between 1 and {page_count}")
+    text = PdfProcessor.page_text(pdf_path, page_no)
+    return {
+        "ok": True,
+        "command": "page_text",
+        "pdf_path": str(pdf_path),
+        "page_no": page_no,
+        "page_count": page_count,
+        "text": text,
+        "has_text": bool(text.strip()),
+    }
+
+
+def search_text(request: dict[str, Any]) -> dict[str, Any]:
+    raw_paths = request.get("pdf_paths", [])
+    if not isinstance(raw_paths, list):
+        raise TypeError("pdf_paths must be a JSON array.")
+    query = str(request.get("query", "")).strip()
+    scope = str(request.get("scope", "all_pdfs")).strip() or "all_pdfs"
+    current_pdf_raw = str(request.get("current_pdf", "")).strip()
+    current_pdf = Path(current_pdf_raw) if current_pdf_raw else None
+    pdf_paths = [Path(str(path)) for path in raw_paths]
+    if scope == "current_pdf" and current_pdf is not None:
+        pdf_paths = [path for path in pdf_paths if path == current_pdf]
+    results = PdfProcessor.search_text(pdf_paths, query, current_pdf)
+    return {
+        "ok": True,
+        "command": "search_text",
+        "query": query,
+        "scope": scope,
+        "results": results,
+    }
+
+
+def search_highlights(request: dict[str, Any]) -> dict[str, Any]:
+    pdf_path = Path(str(request.get("pdf_path", "")))
+    page_no = int(request.get("page_no", 1))
+    query = str(request.get("query", "")).strip()
+    page_count = PdfProcessor.page_count(pdf_path)
+    if page_no < 1 or page_no > page_count:
+        raise ValueError(f"page_no must be between 1 and {page_count}")
+    return {
+        "ok": True,
+        "command": "search_highlights",
+        "pdf_path": str(pdf_path),
+        "page_no": page_no,
+        "page_count": page_count,
+        "query": query,
+        "rects": PdfProcessor.search_highlights(pdf_path, page_no, query),
+    }
+
+
+def index_candidates(request: dict[str, Any]) -> dict[str, Any]:
+    raw_paths = request.get("pdf_paths", [])
+    if not isinstance(raw_paths, list):
+        raise TypeError("pdf_paths must be a JSON array.")
+    raw_keywords = request.get("keywords")
+    keywords = [str(keyword) for keyword in raw_keywords] if isinstance(raw_keywords, list) else None
+    return {
+        "ok": True,
+        "command": "index_candidates",
+        "candidates": PdfProcessor.index_candidates([Path(str(path)) for path in raw_paths], keywords),
+    }
+
+
+def blank_candidates(request: dict[str, Any]) -> dict[str, Any]:
+    pdf_path = Path(str(request.get("pdf_path", "")))
+    threshold = float(request.get("threshold", 0.985))
+    return {
+        "ok": True,
+        "command": "blank_candidates",
+        "pdf_path": str(pdf_path),
+        "threshold": threshold,
+        "candidates": PdfProcessor.blank_candidates(pdf_path, threshold),
     }
 
 

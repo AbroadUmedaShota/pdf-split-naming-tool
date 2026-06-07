@@ -11,6 +11,7 @@ const checks = [
   "check-filename-policy.mjs",
   "check-output-state.mjs",
   "check-segment-state.mjs",
+  "check-step-layout.mjs",
 ];
 
 for (const check of checks) {

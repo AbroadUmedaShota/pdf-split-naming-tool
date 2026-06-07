@@ -3,6 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 export const SIDE_CAR_COMMANDS = [
   "pdf_info",
   "page_preview",
+  "page_thumbnail",
+  "page_text",
+  "search_text",
+  "search_highlights",
+  "index_candidates",
+  "blank_candidates",
   "preflight",
   "export",
   "state_load",
@@ -28,7 +34,13 @@ export type AppPersistedState = {
 
 export type SidecarRequest =
   | { command: "pdf_info"; pdf_path: string }
-  | { command: "page_preview"; pdf_path: string; page_no: number }
+  | { command: "page_preview"; pdf_path: string; page_no: number; zoom?: number }
+  | { command: "page_thumbnail"; pdf_path: string; page_no: number; zoom?: number }
+  | { command: "page_text"; pdf_path: string; page_no: number }
+  | { command: "search_text"; pdf_paths: string[]; query: string; scope?: SearchScope; current_pdf?: string }
+  | { command: "search_highlights"; pdf_path: string; page_no: number; query: string }
+  | { command: "index_candidates"; pdf_paths: string[]; keywords?: string[] }
+  | { command: "blank_candidates"; pdf_path: string; threshold?: number }
   | SidecarPreflightRequest
   | SidecarExportRequest
   | { command: "state_load"; work_dir?: string }
@@ -50,6 +62,12 @@ export type SidecarResponse =
   | SidecarErrorResponse
   | SidecarPdfInfoResponse
   | SidecarPreviewResponse
+  | SidecarThumbnailResponse
+  | SidecarPageTextResponse
+  | SidecarSearchTextResponse
+  | SidecarSearchHighlightsResponse
+  | SidecarIndexCandidatesResponse
+  | SidecarBlankCandidatesResponse
   | SidecarPreflightResponse
   | SidecarExportResponse
   | SidecarStateLoadResponse
@@ -78,6 +96,90 @@ export type SidecarPreviewResponse = {
   page_no: number;
   page_count: number;
   image_data_url: string;
+};
+
+export type SidecarThumbnailResponse = {
+  ok: true;
+  command: "page_thumbnail";
+  pdf_path: string;
+  page_no: number;
+  page_count: number;
+  image_data_url: string;
+};
+
+export type SidecarPageTextResponse = {
+  ok: true;
+  command: "page_text";
+  pdf_path: string;
+  page_no: number;
+  page_count: number;
+  text: string;
+  has_text: boolean;
+};
+
+export type SidecarSearchTextResponse = {
+  ok: true;
+  command: "search_text";
+  query: string;
+  scope?: SearchScope;
+  results: SidecarSearchResult[];
+};
+
+export type SearchScope = "current_pdf" | "all_pdfs";
+
+export type SidecarSearchResult = {
+  pdf_path: string;
+  page_no: number;
+  count: number;
+  snippet: string;
+  matched_terms?: string[];
+  has_text?: boolean;
+  is_current_pdf?: boolean;
+};
+
+export type SidecarSearchHighlightsResponse = {
+  ok: true;
+  command: "search_highlights";
+  pdf_path: string;
+  page_no: number;
+  query: string;
+  rects: SidecarSearchHighlightRect[];
+};
+
+export type SidecarSearchHighlightRect = {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  page_width: number;
+  page_height: number;
+};
+
+export type SidecarIndexCandidatesResponse = {
+  ok: true;
+  command: "index_candidates";
+  candidates: SidecarIndexCandidate[];
+};
+
+export type SidecarIndexCandidate = {
+  pdf_path: string;
+  page_no: number;
+  score: number;
+  reason: string;
+  snippet: string;
+};
+
+export type SidecarBlankCandidatesResponse = {
+  ok: true;
+  command: "blank_candidates";
+  pdf_path: string;
+  threshold: number;
+  candidates: SidecarBlankCandidate[];
+};
+
+export type SidecarBlankCandidate = {
+  page_no: number;
+  score: number;
 };
 
 export type SidecarPreflightResponse = {

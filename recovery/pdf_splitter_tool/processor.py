@@ -38,6 +38,30 @@ class PdfProcessor:
         return PdfService.page_preview_data_url(pdf_path, page_no, zoom)
 
     @staticmethod
+    def page_thumbnail_data_url(pdf_path: Path, page_no: int, zoom: float = 0.22) -> str:
+        return PdfService.page_thumbnail_data_url(pdf_path, page_no, zoom)
+
+    @staticmethod
+    def page_text(pdf_path: Path, page_no: int) -> str:
+        return PdfService.page_text(pdf_path, page_no)
+
+    @staticmethod
+    def search_text(pdf_paths: list[Path], query: str, current_pdf: Path | None = None) -> list[dict[str, object]]:
+        return PdfService.search_text(pdf_paths, query, current_pdf)
+
+    @staticmethod
+    def search_highlights(pdf_path: Path, page_no: int, query: str) -> list[dict[str, float]]:
+        return PdfService.search_highlights(pdf_path, page_no, query)
+
+    @staticmethod
+    def index_candidates(pdf_paths: list[Path], keywords: list[str] | None = None) -> list[dict[str, object]]:
+        return PdfService.index_candidates(pdf_paths, keywords)
+
+    @staticmethod
+    def blank_candidates(pdf_path: Path, threshold: float = 0.985) -> list[dict[str, object]]:
+        return PdfService.blank_candidates(pdf_path, threshold)
+
+    @staticmethod
     def calculate_sha256(path: Path) -> str:
         return PdfService.calculate_sha256(path)
 

@@ -16,6 +16,8 @@ except Exception:  # pragma: no cover - depends on local runtime
 
 
 MAX_PREVIEW_SIDE_PX = 2400
+THUMBNAIL_ZOOM = 0.22
+INDEX_CANDIDATE_KEYWORDS = ("インデックス", "目次", "表紙", "区切り", "No.", "番号", "会社名", "書類名")
 
 
 class PdfService:
@@ -84,6 +86,130 @@ class PdfService:
             pixmap = page.get_pixmap(matrix=fitz_module.Matrix(bounded_zoom, bounded_zoom), alpha=False)
         encoded = base64.b64encode(pixmap.tobytes("png")).decode("ascii")
         return f"data:image/png;base64,{encoded}"
+
+    @staticmethod
+    def page_thumbnail_data_url(pdf_path: Path, page_no: int, zoom: float = THUMBNAIL_ZOOM) -> str:
+        return PdfService.page_preview_data_url(pdf_path, page_no, zoom)
+
+    @staticmethod
+    def page_text(pdf_path: Path, page_no: int) -> str:
+        fitz_module = PdfService._require_fitz()
+        with fitz_module.open(pdf_path) as doc:
+            page_index = PdfService.one_based_page_to_fitz_index(page_no)
+            if page_index >= doc.page_count:
+                raise ValueError("PDF page number exceeds document page count.")
+            return doc.load_page(page_index).get_text("text").strip()
+
+    @staticmethod
+    def search_text(pdf_paths: list[Path], query: str, current_pdf: Path | None = None) -> list[dict[str, object]]:
+        query = query.strip()
+        if not query:
+            return []
+
+        fitz_module = PdfService._require_fitz()
+        query_lower = query.lower()
+        results: list[dict[str, object]] = []
+        for pdf_path in pdf_paths:
+            with fitz_module.open(pdf_path) as doc:
+                for page_index in range(doc.page_count):
+                    text = doc.load_page(page_index).get_text("text")
+                    text_lower = text.lower()
+                    count = text_lower.count(query_lower)
+                    if count <= 0:
+                        continue
+                    first_index = text_lower.find(query_lower)
+                    snippet_start = max(0, first_index - 28)
+                    snippet_end = min(len(text), first_index + len(query) + 42)
+                    snippet = " ".join(text[snippet_start:snippet_end].split())
+                    results.append(
+                        {
+                            "pdf_path": str(pdf_path),
+                            "page_no": page_index + 1,
+                            "count": count,
+                            "snippet": snippet,
+                            "matched_terms": [query],
+                            "has_text": bool(text.strip()),
+                            "is_current_pdf": current_pdf is not None and pdf_path == current_pdf,
+                        }
+                    )
+        return results
+
+    @staticmethod
+    def search_highlights(pdf_path: Path, page_no: int, query: str) -> list[dict[str, float]]:
+        query = query.strip()
+        if not query:
+            return []
+
+        fitz_module = PdfService._require_fitz()
+        with fitz_module.open(pdf_path) as doc:
+            page_index = PdfService.one_based_page_to_fitz_index(page_no)
+            if page_index >= doc.page_count:
+                raise ValueError("PDF page number exceeds document page count.")
+            page = doc.load_page(page_index)
+            page_rect = page.rect
+            rects = []
+            for rect in page.search_for(query):
+                rects.append(
+                    {
+                        "x0": round(float(rect.x0), 3),
+                        "y0": round(float(rect.y0), 3),
+                        "x1": round(float(rect.x1), 3),
+                        "y1": round(float(rect.y1), 3),
+                        "page_width": round(float(page_rect.width), 3),
+                        "page_height": round(float(page_rect.height), 3),
+                    }
+                )
+            return rects
+
+    @staticmethod
+    def index_candidates(pdf_paths: list[Path], keywords: list[str] | None = None) -> list[dict[str, object]]:
+        candidate_keywords = [keyword.strip() for keyword in (keywords or list(INDEX_CANDIDATE_KEYWORDS)) if keyword.strip()]
+        if not candidate_keywords:
+            return []
+
+        fitz_module = PdfService._require_fitz()
+        results: list[dict[str, object]] = []
+        for pdf_path in pdf_paths:
+            with fitz_module.open(pdf_path) as doc:
+                for page_index in range(doc.page_count):
+                    text = doc.load_page(page_index).get_text("text")
+                    if not text.strip():
+                        continue
+                    text_lower = text.lower()
+                    matched = [keyword for keyword in candidate_keywords if keyword.lower() in text_lower]
+                    if not matched:
+                        continue
+                    snippet = " ".join(text.split())[:120]
+                    results.append(
+                        {
+                            "pdf_path": str(pdf_path),
+                            "page_no": page_index + 1,
+                            "score": round(min(1.0, len(matched) / 3), 4),
+                            "reason": " / ".join(matched),
+                            "snippet": snippet,
+                        }
+                    )
+        return results
+
+    @staticmethod
+    def blank_candidates(pdf_path: Path, threshold: float = 0.985) -> list[dict[str, object]]:
+        fitz_module = PdfService._require_fitz()
+        candidates: list[dict[str, object]] = []
+        with fitz_module.open(pdf_path) as doc:
+            for page_index in range(doc.page_count):
+                page = doc.load_page(page_index)
+                text = page.get_text("text").strip()
+                if text:
+                    continue
+                pixmap = page.get_pixmap(matrix=fitz_module.Matrix(0.08, 0.08), alpha=False, colorspace=fitz_module.csGRAY)
+                samples = pixmap.samples
+                if not samples:
+                    continue
+                whiteish = sum(1 for value in samples if value >= 245)
+                score = whiteish / len(samples)
+                if score >= threshold:
+                    candidates.append({"page_no": page_index + 1, "score": round(score, 4)})
+        return candidates
 
     @staticmethod
     def calculate_sha256(path: Path) -> str:
