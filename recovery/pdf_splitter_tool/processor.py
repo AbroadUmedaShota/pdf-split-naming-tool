@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .domain import (
+    DEFAULT_SEQ_DIGITS,
     METADATA_REQUIRED_KEYS,
     YOSHIDA_FILENAME_TEMPLATE,
     build_yoshida_filename_preview,
@@ -22,8 +23,10 @@ class PdfProcessor:
         return sanitize_filename_with_warnings(filename)
 
     @staticmethod
-    def build_yoshida_filename(metadata: dict[str, str], affix_defs: object = ()) -> FilenameBuildResult:
-        return build_yoshida_filename_preview(metadata, affix_defs)
+    def build_yoshida_filename(
+        metadata: dict[str, str], affix_defs: object = (), seq_digits: object = DEFAULT_SEQ_DIGITS
+    ) -> FilenameBuildResult:
+        return build_yoshida_filename_preview(metadata, affix_defs, seq_digits)
 
     @staticmethod
     def ensure_unique_path(path: Path) -> Path:

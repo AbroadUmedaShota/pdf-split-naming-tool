@@ -43,6 +43,20 @@ def test_preview_and_preflight_use_same_name_with_affixes(tmp_path: Path) -> Non
     assert check.filename == "A商事_01_02_003_基本契約.pdf"
 
 
+def test_preview_and_preflight_use_same_name_with_seq_digits(tmp_path: Path) -> None:
+    metadata = {"box_no": "1", "binder_no": "2", "seq": "3"}
+    preview = build_yoshida_filename_preview(metadata, (), 4)
+    segment = Segment(tmp_path / "source.pdf", 1, 1, metadata)
+
+    [check] = check_segment_outputs(
+        [segment], tmp_path, processor=PageCountProcessor(page_count=1), seq_digits=4
+    )
+
+    assert preview.normalized_filename == "01_02_0003.pdf"
+    assert check.requested_filename == preview.normalized_filename
+    assert check.filename == "01_02_0003.pdf"
+
+
 def test_preview_and_preflight_use_same_normalized_output_name_for_invalid_chars(tmp_path: Path) -> None:
     metadata = {"box_no": "1/2", "binder_no": "3:4", "seq": "5*6"}
     preview = build_yoshida_filename_preview(metadata)
@@ -154,8 +168,8 @@ class PageCountProcessor:
         self._page_count = page_count
 
     @staticmethod
-    def build_yoshida_filename(metadata: dict[str, str], affix_defs: object = ()):
-        return PdfProcessor.build_yoshida_filename(metadata, affix_defs)
+    def build_yoshida_filename(metadata: dict[str, str], affix_defs: object = (), seq_digits: object = 3):
+        return PdfProcessor.build_yoshida_filename(metadata, affix_defs, seq_digits)
 
     def page_count(self, _pdf_path: Path) -> int:
         return self._page_count

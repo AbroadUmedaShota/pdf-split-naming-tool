@@ -57,3 +57,13 @@ assert.equal(
 );
 // 追加項目は必須判定に影響しない（固定3項目が欠ければ未入力）
 assert.equal(previewFilename({ box_no: "1", binder_no: "", seq: "3", company: "A商事" }, [companyPrefix]), "未入力");
+
+// --- 連番(seq)桁数の可変。domain.py の seq_digits と論理同型であること ---
+assert.equal(previewFilename({ box_no: "1", binder_no: "2", seq: "3" }), "01_02_003.pdf"); // 既定3
+assert.equal(previewFilename({ box_no: "1", binder_no: "2", seq: "3" }, [], 4), "01_02_0003.pdf");
+assert.equal(previewFilename({ box_no: "1", binder_no: "2", seq: "3" }, [], 2), "01_02_03.pdf");
+assert.equal(previewFilename({ box_no: "1", binder_no: "2", seq: "3" }, [], 0), "01_02_3.pdf"); // 下限1
+assert.equal(
+  previewFilename({ box_no: "1", binder_no: "2", seq: "3", company: "A商事" }, [companyPrefix], 4),
+  "A商事_01_02_0003.pdf"
+);

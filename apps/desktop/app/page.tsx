@@ -46,14 +46,23 @@ import {
   type SidecarSegment
 } from "../lib/sidecar";
 import { resolveMissingSavedPdfRestore, restorableInputPaths } from "../lib/restore-state";
-import { AFFIX_POSITIONS, type AffixDef, MAX_AFFIX_COUNT, missingMetadata, previewFilename } from "../lib/filename-policy";
+import {
+  AFFIX_POSITIONS,
+  type AffixDef,
+  DEFAULT_SEQ_DIGITS,
+  MAX_AFFIX_COUNT,
+  MAX_SEQ_DIGITS,
+  MIN_SEQ_DIGITS,
+  coerceSeqDigits,
+  missingMetadata,
+  previewFilename
+} from "../lib/filename-policy";
 import { isOutputCheckOk, outputDetailStateText, outputIssueCount, outputListStateText } from "../lib/output-state";
 import { loadPagePreview } from "../lib/preview-flow";
 import { createPreviewRequestGate, previewCache } from "../lib/preview-cache";
 import {
   buildSegments,
   reconcileSegmentMetadataForPdf,
-  resequenceSegmentMetadata,
   splitPointsFor,
   type PdfFile,
   type SegmentMetadata,
@@ -438,6 +447,8 @@ export default function Page() {
   const [splitPointsByPdf, setSplitPointsByPdf] = useState<Record<string, number[]>>({});
   const [segmentMetadata, setSegmentMetadata] = useState<SegmentMetadata>({});
   const [affixDefs, setAffixDefs] = useState<AffixDef[]>([]);
+  const [seqStart, setSeqStart] = useState(1);
+  const [seqDigits, setSeqDigits] = useState(DEFAULT_SEQ_DIGITS);
   const [transcribeTargetKey, setTranscribeTargetKey] = useState("");
   const [selectedSegmentKey, setSelectedSegmentKey] = useState("");
   const [preflightChecks, setPreflightChecks] = useState<SidecarOutputCheck[]>([]);
@@ -477,12 +488,22 @@ export default function Page() {
   const pageTextRequestGateRef = useRef(createPreviewRequestGate());
   const pdfAuxiliaryRequestGateRef = useRef(createPreviewRequestGate());
   const zoomReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 連番を手動で上書きしたセグメントキー（再採番で保護。state に保存・復元される）。
+  const manualSeqKeysRef = useRef<Set<string>>(new Set());
+  // 取得済みサムネイルのキー（`${pdfPath}#${pageNo}`）。PDF再選択時の再取得を防ぐ。
+  const loadedThumbnailKeysRef = useRef<Set<string>>(new Set());
+  // キーボードハンドラは ref 経由で最新を呼び、リスナー登録はマウント時1回に固定する
+  // （毎レンダーの addEventListener/removeEventListener 再登録を避ける）。
+  const step2KeyHandlerRef = useRef<(event: KeyboardEvent) => void>(() => {});
+  const step3KeyHandlerRef = useRef<(event: KeyboardEvent) => void>(() => {});
 
   const currentFile = pdfFiles.find((file) => file.path === currentPdf);
   const allSegments = useMemo(
     () => buildSegments(pdfFiles, splitPointsByPdf, segmentMetadata, commonMetadata),
     [pdfFiles, splitPointsByPdf, segmentMetadata, commonMetadata]
   );
+  // セグメント構成（キーと順序）の変化を検知するための安定したシグネチャ。
+  const segmentKeysSignature = useMemo(() => allSegments.map((segment) => segment.key).join("|"), [allSegments]);
   const currentVisibleSegment = useMemo(
     () =>
       allSegments.find(
@@ -544,6 +565,7 @@ export default function Page() {
     setIndexCandidates([]);
     setBlankCandidates([]);
     setPageThumbnails({});
+    loadedThumbnailKeysRef.current.clear();
     setSelectedSplitPoint(null);
     setSplitHistory({ future: [], past: [] });
   }
@@ -611,6 +633,7 @@ export default function Page() {
     setIndexCandidates(devPreviewIndexCandidates);
     setBlankCandidates(devPreviewBlankCandidates);
     setPageThumbnails({});
+    loadedThumbnailKeysRef.current.clear();
     setStatus("DEVプレビュー: サンプルPDFを読み込んだ本番想定画面です。");
   }
 
@@ -813,42 +836,62 @@ export default function Page() {
     }
     const requestId = pdfAuxiliaryRequestGateRef.current.next();
 
-    async function loadCurrentPdfAuxiliaryData(): Promise<void> {
-      try {
-        const blankResponse = await invokeSidecar({ command: "blank_candidates", pdf_path: currentFile!.path });
-        if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
-          return;
-        }
-        if (blankResponse.ok && blankResponse.command === "blank_candidates") {
-          setBlankCandidates(blankResponse.candidates);
-        }
-      } catch {
-        if (pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
-          setBlankCandidates([]);
-        }
-      }
+    const pdfPath = currentFile.path;
+    const pageCount = currentFile.pageCount;
+    // サイドカーは1リクエスト1プロセス起動のため、並列度は控えめ(4)に抑える（根治は #81 常駐化）。
+    const THUMBNAIL_CONCURRENCY = 4;
+    const MAX_THUMBNAILS = 60;
 
-      const thumbnailPages = Array.from({ length: Math.min(currentFile!.pageCount, 60) }, (_value, index) => index + 1);
-      for (const pageNo of thumbnailPages) {
-        try {
-          const response = await invokeSidecar({
-            command: "page_thumbnail",
-            pdf_path: currentFile!.path,
-            page_no: pageNo
-          });
+    async function loadCurrentPdfAuxiliaryData(): Promise<void> {
+      // blank_candidates はサムネイルと独立。並行で投げ、サムネイル取得をブロックしない。
+      const blankPromise = invokeSidecar({ command: "blank_candidates", pdf_path: pdfPath })
+        .then((blankResponse) => {
           if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
             return;
           }
-          if (response.ok && response.command === "page_thumbnail") {
-            setPageThumbnails((current) => ({
-              ...current,
-              [`${response.pdf_path}#${response.page_no}`]: response.image_data_url
-            }));
+          if (blankResponse.ok && blankResponse.command === "blank_candidates") {
+            setBlankCandidates(blankResponse.candidates);
           }
-        } catch {
-          // Missing thumbnails should not block split work.
+        })
+        .catch(() => {
+          if (pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
+            setBlankCandidates([]);
+          }
+        });
+
+      // 未取得サムネイルだけを、並列度を絞ってチャンク取得し、チャンクごとに1回だけまとめてsetStateする。
+      const pendingPages = Array.from({ length: Math.min(pageCount, MAX_THUMBNAILS) }, (_value, index) => index + 1).filter(
+        (pageNo) => !loadedThumbnailKeysRef.current.has(`${pdfPath}#${pageNo}`)
+      );
+      for (let offset = 0; offset < pendingPages.length; offset += THUMBNAIL_CONCURRENCY) {
+        if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
+          return;
+        }
+        const chunk = pendingPages.slice(offset, offset + THUMBNAIL_CONCURRENCY);
+        const responses = await Promise.all(
+          chunk.map((pageNo) =>
+            invokeSidecar({ command: "page_thumbnail", pdf_path: pdfPath, page_no: pageNo })
+              .then((response) => (response.ok && response.command === "page_thumbnail" ? response : null))
+              .catch(() => null)
+          )
+        );
+        if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
+          return;
+        }
+        const batch: Record<string, string> = {};
+        for (const response of responses) {
+          if (response) {
+            const key = `${response.pdf_path}#${response.page_no}`;
+            batch[key] = response.image_data_url;
+            loadedThumbnailKeysRef.current.add(key);
+          }
+        }
+        if (Object.keys(batch).length) {
+          setPageThumbnails((current) => ({ ...current, ...batch }));
         }
       }
+
+      await blankPromise;
     }
 
     void loadCurrentPdfAuxiliaryData();
@@ -979,6 +1022,16 @@ export default function Page() {
     workspaceRequestGateRef.current.invalidate();
   }
 
+  // 指定PDFのサムネイルキャッシュ鍵を破棄し、次回選択時に再取得させる。
+  function purgeThumbnailKeysForPath(path: string): void {
+    const prefix = `${path}#`;
+    for (const key of [...loadedThumbnailKeysRef.current]) {
+      if (key.startsWith(prefix)) {
+        loadedThumbnailKeysRef.current.delete(key);
+      }
+    }
+  }
+
   function invalidateWorkspaceAndPreviewRequests(): void {
     invalidateWorkspaceRequests();
     invalidatePreviewRequests();
@@ -1016,6 +1069,7 @@ export default function Page() {
       invalidatePreviewRequests();
       for (const path of paths) {
         previewCache.clearPdf(path);
+        purgeThumbnailKeysForPath(path);
       }
       const loaded = await Promise.all(paths.map((path) => loadPdfInfo(path)));
       if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
@@ -1081,6 +1135,7 @@ export default function Page() {
     const remaining = pdfFiles.filter((file) => file.path !== path);
     invalidateWorkspaceAndPreviewRequests();
     previewCache.clearPdf(path);
+    purgeThumbnailKeysForPath(path);
     setPdfFiles(remaining);
     setSplitPointsByPdf((current) => {
       const next = { ...current };
@@ -1430,11 +1485,10 @@ export default function Page() {
     }, 180);
   }
 
-  useEffect(() => {
-    function handleStep2KeyDown(event: KeyboardEvent): void {
-      if (activeStep !== "split" || isEditableKeyboardTarget(event.target)) {
-        return;
-      }
+  step2KeyHandlerRef.current = (event: KeyboardEvent): void => {
+    if (activeStep !== "split" || isEditableKeyboardTarget(event.target)) {
+      return;
+    }
 
       if (event.key === "ArrowLeft" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
         event.preventDefault();
@@ -1490,19 +1544,12 @@ export default function Page() {
         event.preventDefault();
         clearCurrentPdfSplits();
       }
+  };
+
+  step3KeyHandlerRef.current = (event: KeyboardEvent): void => {
+    if (activeStep !== "input") {
+      return;
     }
-
-    window.addEventListener("keydown", handleStep2KeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleStep2KeyDown);
-    };
-  });
-
-  useEffect(() => {
-    function handleStep3KeyDown(event: KeyboardEvent): void {
-      if (activeStep !== "input") {
-        return;
-      }
       // Ctrl+D（前の行コピー）と F7（未解決ジャンプ）は入力中でも安全なので先に処理する。
       if ((event.key === "d" || event.key === "D") && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
         event.preventDefault();
@@ -1526,13 +1573,30 @@ export default function Page() {
         event.preventDefault();
         moveSegmentSelection(-1);
       }
-    }
+  };
 
-    window.addEventListener("keydown", handleStep3KeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleStep3KeyDown);
+  // キーボードショートカットはマウント時に1回だけ登録し、ハンドラは ref 経由で常に最新を呼ぶ。
+  useEffect(() => {
+    const listener = (event: KeyboardEvent): void => {
+      step2KeyHandlerRef.current(event);
+      step3KeyHandlerRef.current(event);
     };
-  });
+    window.addEventListener("keydown", listener);
+    return () => {
+      window.removeEventListener("keydown", listener);
+    };
+  }, []);
+
+  // セグメント構成が変わったら、空の連番を表示順(PDF単位)で自動補完する。
+  // 既存値(手動・採番済み)は変更しないので、保存状態の復元値も保持される。
+  useEffect(() => {
+    if (allSegments.length) {
+      fillEmptySeqByRule();
+    }
+    // 構成変化時のみ空連番を補完する。fillEmptySeqByRule は意図的に依存から除外（毎レンダー再実行を避ける）。
+    // 開始番号の変更は updateSeqStart 側で即時再採番するため、ここで seqStart を追わなくてよい。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segmentKeysSignature]);
 
   function moveSegmentSelection(offset: number): void {
     if (!allSegments.length) {
@@ -1631,11 +1695,57 @@ export default function Page() {
     }));
   }
 
+  // 連番ルール(開始番号 seqStart)に従い、PDF単位で表示順に採番する。
+  // onlyEmpty=true なら空のseqだけ補完、false なら手動上書き(manualSeqKeysRef)以外を再採番する。
+  function numberSegmentsPerPdf(current: SegmentMetadata, onlyEmpty: boolean, start: number = seqStart): SegmentMetadata {
+    const next = { ...current };
+    const positionByPdf = new Map<string, number>();
+    let changed = false;
+    for (const segment of allSegments) {
+      const position = positionByPdf.get(segment.pdfPath) ?? 0;
+      positionByPdf.set(segment.pdfPath, position + 1);
+      const storedSeq = next[segment.key]?.seq ?? "";
+      if (onlyEmpty && storedSeq.trim()) {
+        continue;
+      }
+      if (!onlyEmpty && manualSeqKeysRef.current.has(segment.key)) {
+        continue;
+      }
+      const value = String(start + position);
+      if (storedSeq === value) {
+        continue;
+      }
+      next[segment.key] = { ...(next[segment.key] ?? {}), seq: value };
+      changed = true;
+    }
+    return changed ? next : current;
+  }
+
   function resequence(): void {
     invalidateWorkspaceRequests();
     clearOutputState();
-    setSegmentMetadata((current) => resequenceSegmentMetadata(allSegments, current));
-    setStatus("連番を再採番しました。");
+    setSegmentMetadata((current) => numberSegmentsPerPdf(current, false));
+    setStatus("連番を再採番しました（PDF単位・手動入力は保持）。");
+  }
+
+  function fillEmptySeqByRule(): void {
+    setSegmentMetadata((current) => numberSegmentsPerPdf(current, true));
+  }
+
+  function updateSeqStart(value: string): void {
+    const parsed = Number(value);
+    const nextStart = Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
+    setSeqStart(nextStart);
+    invalidateWorkspaceRequests();
+    clearOutputState();
+    // 開始番号を変えたら即座に再採番（手動上書きは保持）。新しい値を直接渡す。
+    setSegmentMetadata((current) => numberSegmentsPerPdf(current, false, nextStart));
+  }
+
+  function updateSeqDigits(value: string): void {
+    setSeqDigits(coerceSeqDigits(value));
+    invalidateWorkspaceRequests();
+    clearOutputState();
   }
 
   function addAffixDef(): void {
@@ -1703,7 +1813,8 @@ export default function Page() {
         command: "preflight",
         output_dir: outputDir,
         segments: requestSegments(),
-        affix_defs: affixDefs
+        affix_defs: affixDefs,
+        seq_digits: seqDigits
       });
       if (response.command !== "preflight") {
         throw new Error(response.ok ? "出力前チェックに失敗しました。" : sidecarError(response));
@@ -1724,7 +1835,8 @@ export default function Page() {
         command: "export",
         output_dir: outputDir,
         segments: requestSegments(),
-        affix_defs: affixDefs
+        affix_defs: affixDefs,
+        seq_digits: seqDigits
       });
       if (response.command !== "export") {
         throw new Error(response.ok ? "出力に失敗しました。" : sidecarError(response));
@@ -1747,6 +1859,9 @@ export default function Page() {
       segment_metadata: segmentMetadata,
       common_metadata: commonMetadata,
       affix_defs: affixDefs,
+      seq_start: seqStart,
+      seq_digits: seqDigits,
+      manual_seq_keys: [...manualSeqKeysRef.current],
       current_pdf: currentPdf,
       current_page: currentPage
     };
@@ -1787,12 +1902,16 @@ export default function Page() {
         savedInputPaths: state.input_paths
       });
       previewCache.clear();
+      loadedThumbnailKeysRef.current.clear();
       setPdfFiles(loaded);
       setOutputDir(state.output_dir || outputDir);
       setSplitPointsByPdf(state.split_points_by_pdf ?? {});
       setSegmentMetadata(state.segment_metadata ?? {});
       setCommonMetadata({ ...defaultCommonMetadata, ...(state.common_metadata ?? {}) });
       setAffixDefs(Array.isArray(state.affix_defs) ? state.affix_defs : []);
+      setSeqStart(typeof state.seq_start === "number" ? Math.max(0, Math.trunc(state.seq_start)) : 1);
+      setSeqDigits(coerceSeqDigits(state.seq_digits));
+      manualSeqKeysRef.current = new Set(Array.isArray(state.manual_seq_keys) ? state.manual_seq_keys : []);
       setCurrentPdf(restoreDecision.currentPdf);
       setCurrentPage(restoreDecision.currentPage);
       if (!restoreDecision.shouldLoadPreview) {
@@ -2444,7 +2563,7 @@ export default function Page() {
         />
         <div className="filename-preview">
           <span>出力名プレビュー</span>
-          <strong>{selectedSegment ? previewFilename(selectedSegment.metadata, affixDefs) : "-"}</strong>
+          <strong>{selectedSegment ? previewFilename(selectedSegment.metadata, affixDefs, seqDigits) : "-"}</strong>
         </div>
         {selectedSegment ? (
           <div className="legacy-panel-section">
@@ -2468,9 +2587,37 @@ export default function Page() {
                 連番
                 <input
                   value={selectedSegment.metadata.seq}
-                  onChange={(event) => updateMetadata(selectedSegment, "seq", event.target.value)}
+                  onChange={(event) => {
+                    manualSeqKeysRef.current.add(selectedSegment.key);
+                    updateMetadata(selectedSegment, "seq", event.target.value);
+                  }}
                 />
               </label>
+            </div>
+            <div className="seq-rule" aria-label="連番ルール">
+              <span className="control-label">連番ルール</span>
+              <div className="seq-rule-fields">
+                <label>
+                  開始番号
+                  <input
+                    min={0}
+                    type="number"
+                    value={seqStart}
+                    onChange={(event) => updateSeqStart(event.target.value)}
+                  />
+                </label>
+                <label>
+                  桁数
+                  <input
+                    max={MAX_SEQ_DIGITS}
+                    min={MIN_SEQ_DIGITS}
+                    type="number"
+                    value={seqDigits}
+                    onChange={(event) => updateSeqDigits(event.target.value)}
+                  />
+                </label>
+              </div>
+              <small className="muted-line">PDFごとに開始番号から自動採番（{seqDigits}桁ゼロ埋め）。手動入力は再採番でも保持。</small>
             </div>
             <div className="action-row">
               <button className="primary" disabled={!allSegments.length} onClick={resequence} type="button">

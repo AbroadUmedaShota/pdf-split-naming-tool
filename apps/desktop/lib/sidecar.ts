@@ -35,6 +35,9 @@ export type AppPersistedState = {
   segment_metadata: Record<string, Record<string, string>>;
   common_metadata: Record<string, string>;
   affix_defs: AppAffixDef[];
+  seq_start: number;
+  seq_digits: number;
+  manual_seq_keys: string[];
   current_pdf: string;
   current_page: number;
 };
@@ -58,6 +61,7 @@ export type SidecarPreflightRequest = {
   output_dir: string;
   segments: SidecarSegment[];
   affix_defs?: AppAffixDef[];
+  seq_digits?: number;
 };
 
 export type SidecarExportRequest = {
@@ -65,6 +69,7 @@ export type SidecarExportRequest = {
   output_dir: string;
   segments: SidecarSegment[];
   affix_defs?: AppAffixDef[];
+  seq_digits?: number;
 };
 
 export type SidecarResponse =

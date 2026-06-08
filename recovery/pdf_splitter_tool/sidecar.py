@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .domain import DEFAULT_SEQ_DIGITS
 from .models import Segment
 from .processor import PdfProcessor, YOSHIDA_TEMPLATE
 from .runtime import work_dir_from_request
@@ -321,7 +322,12 @@ def state_save(request: dict[str, Any]) -> dict[str, Any]:
 
 def _build_checks(request: dict[str, Any], output_dir: Path) -> list[SegmentOutputCheck]:
     segments = [Segment.from_dict(item) for item in request.get("segments", []) if isinstance(item, dict)]
-    return check_segment_outputs(segments, output_dir, affix_defs=request.get("affix_defs", ()))
+    return check_segment_outputs(
+        segments,
+        output_dir,
+        affix_defs=request.get("affix_defs", ()),
+        seq_digits=request.get("seq_digits", DEFAULT_SEQ_DIGITS),
+    )
 
 
 def _check_to_dict(check: SegmentOutputCheck) -> dict[str, Any]:

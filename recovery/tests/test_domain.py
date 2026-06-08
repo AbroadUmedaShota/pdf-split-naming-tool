@@ -109,3 +109,23 @@ def test_affix_does_not_affect_required_validation() -> None:
 
     assert not result.ok
     assert "missing_required:box_no" in result.errors
+
+
+# --- 連番(seq)の桁数(seq_digits)可変 ---
+
+
+def test_seq_digits_controls_zero_padding() -> None:
+    metadata = {"box_no": "1", "binder_no": "2", "seq": "3"}
+
+    assert build_yoshida_filename_preview(metadata).raw_filename == "01_02_003.pdf"  # 既定3桁
+    assert build_yoshida_filename_preview(metadata, (), 4).raw_filename == "01_02_0003.pdf"
+    assert build_yoshida_filename_preview(metadata, (), 2).raw_filename == "01_02_03.pdf"
+
+
+def test_seq_digits_invalid_or_out_of_range_is_clamped() -> None:
+    metadata = {"box_no": "1", "binder_no": "2", "seq": "3"}
+
+    assert build_yoshida_filename_preview(metadata, (), "bad").raw_filename == "01_02_003.pdf"  # 不正→既定3
+    assert build_yoshida_filename_preview(metadata, (), 0).raw_filename == "01_02_3.pdf"  # 下限1
+    # box/binderの桁数(2)はseq_digitsの影響を受けない
+    assert build_yoshida_filename_preview({"box_no": "1", "binder_no": "2", "seq": "3"}, (), 5).raw_filename == "01_02_00003.pdf"

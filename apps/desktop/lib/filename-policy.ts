@@ -1,12 +1,27 @@
 const requiredMetadata = ["box_no", "binder_no", "seq"] as const;
 const invalidFilenameChars = /[<>:"/\\|?*]/g;
 
-// 固定3項目とゼロ埋め桁数。命名はこのトークン列を `_` で連結して生成する。
+// 箱No・バインダーNoのゼロ埋め桁数（固定）。seqの桁数は seqDigits で可変。
 const fixedTokenPads: ReadonlyArray<readonly [string, number]> = [
   ["box_no", 2],
-  ["binder_no", 2],
-  ["seq", 3]
+  ["binder_no", 2]
 ];
+
+export const DEFAULT_SEQ_DIGITS = 3;
+export const MIN_SEQ_DIGITS = 1;
+export const MAX_SEQ_DIGITS = 9;
+
+export function coerceSeqDigits(value: unknown, fallback = DEFAULT_SEQ_DIGITS): number {
+  const digits = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(digits)) {
+    return fallback;
+  }
+  const rounded = Math.trunc(digits);
+  if (rounded < MIN_SEQ_DIGITS) {
+    return MIN_SEQ_DIGITS;
+  }
+  return Math.min(rounded, MAX_SEQ_DIGITS);
+}
 
 export type AffixPosition = "prefix" | "suffix";
 
@@ -43,11 +58,17 @@ function affixTokens(
     .filter((value) => value.length > 0);
 }
 
-export function previewFilename(metadata: Record<string, string>, affixDefs: ReadonlyArray<AffixDef> = []): string {
+export function previewFilename(
+  metadata: Record<string, string>,
+  affixDefs: ReadonlyArray<AffixDef> = [],
+  seqDigits: number = DEFAULT_SEQ_DIGITS
+): string {
   if (missingMetadata(metadata).length) {
     return "未入力";
   }
+  const digits = coerceSeqDigits(seqDigits);
   const fixedTokens = fixedTokenPads.map(([key, width]) => padMetadata(String(metadata[key] ?? ""), width));
+  fixedTokens.push(padMetadata(String(metadata.seq ?? ""), digits));
   const prefixes = affixTokens(metadata, affixDefs, "prefix");
   const suffixes = affixTokens(metadata, affixDefs, "suffix");
   const tokens = [...prefixes, ...fixedTokens, ...suffixes];
