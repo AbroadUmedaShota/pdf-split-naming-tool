@@ -765,23 +765,101 @@ button.primary:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  overflow: hidden;
+  /* 補助情報(連番ルール/追加項目)を格納し、OCRを固定高さにしたため、
+     残りがあふれる場合はパネル全体をスクロールさせる（完了CTAはsticky）。 */
+  overflow-y: auto;
 }
 
-/* OCRパネルは右パネルの残り縦幅を埋め、ウィンドウの高さ変化に追従する */
+/* OCRパネルは縦を埋め尽くさず固定高さに収める（情報過多の主因対策） */
 .input-controls .ocr-text-panel {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
 .input-controls .ocr-text-scroll {
-  flex: 1 1 auto;
-  min-height: 104px;
-  max-height: none;
+  flex: 0 0 auto;
+  min-height: 96px;
+  max-height: 160px;
   height: auto;
+}
+
+/* STEP3 右カラムのアコーディオン（連番ルール=details / 追加項目=button） */
+.accordion-summary,
+.accordion-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  border: 0;
+  background: none;
+  padding: 2px 0;
+  color: inherit;
+  text-align: left;
+}
+
+.accordion-summary {
+  width: 100%;
+  list-style: none;
+}
+
+.accordion-summary::-webkit-details-marker {
+  display: none;
+}
+
+.affix-defs-head .accordion-trigger {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.accordion-chevron {
+  flex: 0 0 auto;
+  color: var(--muted);
+  transition: transform var(--transition-fast, 140ms ease);
+}
+
+.seq-rule-accordion[open] .accordion-chevron,
+.accordion-chevron[data-open="true"] {
+  transform: rotate(90deg);
+}
+
+.accordion-summary-value,
+.accordion-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+}
+
+/* アコーディオンのトリガーは枠線変化の補助がないため、フォーカスリングは
+   不透明のアクセント色でコントラスト(WCAG 1.4.11)を確保する。 */
+.accordion-summary:focus-visible,
+.accordion-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.seq-rule-accordion {
+  border-top: 1px solid rgba(212, 224, 229, 0.8);
+  padding-top: 8px;
+}
+
+.seq-rule-accordion .seq-rule {
+  border-top: 0;
+  padding-top: 8px;
+}
+
+.affix-defs-body {
+  display: grid;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+/* hidden 属性で折りたたむため、display:grid を確実に上書きする */
+.affix-defs-body[hidden] {
+  display: none;
 }
 
 /* STEP3 追加項目(affix)の定義UI */
