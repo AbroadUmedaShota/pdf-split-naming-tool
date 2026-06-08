@@ -449,6 +449,9 @@ export default function Page() {
   const [affixDefs, setAffixDefs] = useState<AffixDef[]>([]);
   const [seqStart, setSeqStart] = useState(1);
   const [seqDigits, setSeqDigits] = useState(DEFAULT_SEQ_DIGITS);
+  // STEP3 右カラム「追加項目」アコーディオンの開閉。null=既定(項目があれば開く)に従い、
+  // ユーザーが操作したら明示値を保持する（セッション内・セグメント切替では保持）。
+  const [affixExpandedOverride, setAffixExpandedOverride] = useState<boolean | null>(null);
   const [transcribeTargetKey, setTranscribeTargetKey] = useState("");
   const [selectedSegmentKey, setSelectedSegmentKey] = useState("");
   const [preflightChecks, setPreflightChecks] = useState<SidecarOutputCheck[]>([]);
@@ -2495,57 +2498,74 @@ export default function Page() {
   }
 
   function renderAffixDefsSection() {
+    const affixExpanded = affixExpandedOverride ?? affixDefs.length > 0;
+    const handleAddAffix = () => {
+      setAffixExpandedOverride(true);
+      addAffixDef();
+    };
     return (
       <div className="legacy-panel-section affix-defs-section">
         <div className="affix-defs-head">
-          <span className="group-label">追加項目</span>
+          <button
+            className="accordion-trigger"
+            aria-controls="affix-defs-body"
+            aria-expanded={affixExpanded}
+            onClick={() => setAffixExpandedOverride(!affixExpanded)}
+            type="button"
+          >
+            <ChevronRight aria-hidden="true" className="accordion-chevron" data-open={affixExpanded} size={14} />
+            <span className="group-label">追加項目</span>
+            <span className="accordion-count">{affixDefs.length}件</span>
+          </button>
           <button
             className="ghost"
             disabled={affixDefs.length >= MAX_AFFIX_COUNT}
-            onClick={addAffixDef}
+            onClick={handleAddAffix}
             type="button"
           >
             <IconLabel icon={Plus}>追加</IconLabel>
           </button>
         </div>
-        {affixDefs.length ? (
-          <div className="affix-def-list">
-            {affixDefs.map((def, index) => (
-              <div className="affix-def-row" key={def.key}>
-                <input
-                  aria-label={`追加項目${index + 1}の値`}
-                  className={transcribeTargetKey === def.key ? "affix-value-input transcribe-armed" : "affix-value-input"}
-                  disabled={!selectedSegment}
-                  placeholder={selectedSegment ? "値（例: ヨシダ商事）" : "セグメントを選択"}
-                  value={selectedSegment?.metadata[def.key] ?? ""}
-                  onChange={(event) => selectedSegment && updateMetadata(selectedSegment, def.key, event.target.value)}
-                  onFocus={() => armTranscribeTarget(def.key)}
-                />
-                <select
-                  aria-label={`追加項目${index + 1}の挿入位置`}
-                  value={def.position}
-                  onChange={(event) => updateAffixDef(def.key, { position: event.target.value as AffixDef["position"] })}
-                >
-                  {AFFIX_POSITIONS.map((position) => (
-                    <option key={position} value={position}>
-                      {position === "prefix" ? "先頭" : "末尾"}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  aria-label={`追加項目${index + 1}を削除`}
-                  className="ghost danger"
-                  onClick={() => removeAffixDef(def.key)}
-                  type="button"
-                >
-                  <Trash2 aria-hidden="true" size={16} />
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <small className="muted-line">会社名・契約書名など、先頭/末尾に挿入する項目を追加できます。</small>
-        )}
+        <div id="affix-defs-body" className="affix-defs-body" hidden={!affixExpanded}>
+          {affixDefs.length ? (
+            <div className="affix-def-list">
+              {affixDefs.map((def, index) => (
+                <div className="affix-def-row" key={def.key}>
+                  <input
+                    aria-label={`追加項目${index + 1}の値`}
+                    className={transcribeTargetKey === def.key ? "affix-value-input transcribe-armed" : "affix-value-input"}
+                    disabled={!selectedSegment}
+                    placeholder={selectedSegment ? "値（例: ヨシダ商事）" : "セグメントを選択"}
+                    value={selectedSegment?.metadata[def.key] ?? ""}
+                    onChange={(event) => selectedSegment && updateMetadata(selectedSegment, def.key, event.target.value)}
+                    onFocus={() => armTranscribeTarget(def.key)}
+                  />
+                  <select
+                    aria-label={`追加項目${index + 1}の挿入位置`}
+                    value={def.position}
+                    onChange={(event) => updateAffixDef(def.key, { position: event.target.value as AffixDef["position"] })}
+                  >
+                    {AFFIX_POSITIONS.map((position) => (
+                      <option key={position} value={position}>
+                        {position === "prefix" ? "先頭" : "末尾"}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    aria-label={`追加項目${index + 1}を削除`}
+                    className="ghost danger"
+                    onClick={() => removeAffixDef(def.key)}
+                    type="button"
+                  >
+                    <Trash2 aria-hidden="true" size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <small className="muted-line">会社名・契約書名など、先頭/末尾に挿入する項目を追加できます。</small>
+          )}
+        </div>
       </div>
     );
   }
@@ -2594,31 +2614,37 @@ export default function Page() {
                 />
               </label>
             </div>
-            <div className="seq-rule" aria-label="連番ルール">
-              <span className="control-label">連番ルール</span>
-              <div className="seq-rule-fields">
-                <label>
-                  開始番号
-                  <input
-                    min={0}
-                    type="number"
-                    value={seqStart}
-                    onChange={(event) => updateSeqStart(event.target.value)}
-                  />
-                </label>
-                <label>
-                  桁数
-                  <input
-                    max={MAX_SEQ_DIGITS}
-                    min={MIN_SEQ_DIGITS}
-                    type="number"
-                    value={seqDigits}
-                    onChange={(event) => updateSeqDigits(event.target.value)}
-                  />
-                </label>
+            <details className="seq-rule-accordion">
+              <summary className="accordion-summary">
+                <ChevronRight aria-hidden="true" className="accordion-chevron" size={14} />
+                <span className="control-label">連番ルール</span>
+                <span className="accordion-summary-value">開始 {seqStart} / {seqDigits}桁</span>
+              </summary>
+              <div className="seq-rule">
+                <div className="seq-rule-fields">
+                  <label>
+                    開始番号
+                    <input
+                      min={0}
+                      type="number"
+                      value={seqStart}
+                      onChange={(event) => updateSeqStart(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    桁数
+                    <input
+                      max={MAX_SEQ_DIGITS}
+                      min={MIN_SEQ_DIGITS}
+                      type="number"
+                      value={seqDigits}
+                      onChange={(event) => updateSeqDigits(event.target.value)}
+                    />
+                  </label>
+                </div>
+                <small className="muted-line">PDFごとに開始番号から自動採番（{seqDigits}桁ゼロ埋め）。手動入力は再採番でも保持。</small>
               </div>
-              <small className="muted-line">PDFごとに開始番号から自動採番（{seqDigits}桁ゼロ埋め）。手動入力は再採番でも保持。</small>
-            </div>
+            </details>
             <div className="action-row">
               <button className="primary" disabled={!allSegments.length} onClick={resequence} type="button">
                 <IconLabel icon={ClipboardCheck}>連番を再採番</IconLabel>
