@@ -7,7 +7,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(join(__dirname, "..", "app", "page.tsx"), "utf8");
 const cssSource = readFileSync(join(__dirname, "..", "app", "globals.css"), "utf8");
 
+assert.match(appSource, /activeStep === "input"\s*\?\s*"task-layout split-focused-layout input-focused-layout"/);
 assert.match(appSource, /activeStep === "split"\s*\?\s*"task-layout split-focused-layout"/);
+assert.match(cssSource, /\.task-layout\.input-focused-layout/);
 assert.doesNotMatch(appSource, /if \(activeStep === "split"\) \{\s*return \(\s*<aside className="right-panel/s);
 assert.match(appSource, /<section className="work-card split-work stack" aria-label="分割">/);
 assert.match(appSource, /<IconLabel icon=\{ChevronRight\}>入力へ進む<\/IconLabel>/);
@@ -79,7 +81,7 @@ assert.match(appSource, /page_text/);
 assert.match(appSource, /search_text/);
 assert.match(appSource, /blank_candidates/);
 assert.match(appSource, /page_thumbnail/);
-assert.match(appSource, /activeStep === "split"\s*\?\s*"app-shell split-screen-shell"\s*:\s*"app-shell"/);
+assert.match(appSource, /activeStep === "split" \|\| activeStep === "input"\s*\?\s*"app-shell split-screen-shell"\s*:\s*"app-shell"/);
 assert.match(appSource, /type DevPreviewStep = StepId/);
 assert.match(appSource, /function isDevBrowserPreview\(\)/);
 assert.match(appSource, /function devStepFromUrl\(\)/);

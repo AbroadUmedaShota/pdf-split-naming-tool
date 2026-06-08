@@ -9,11 +9,13 @@ import {
   CheckCircle2,
   ChevronRight,
   ClipboardCheck,
+  Copy,
   Download,
   FileText,
   FolderOpen,
   ListChecks,
   PencilLine,
+  Plus,
   RefreshCw,
   RotateCcw,
   Save,
@@ -44,7 +46,7 @@ import {
   type SidecarSegment
 } from "../lib/sidecar";
 import { resolveMissingSavedPdfRestore, restorableInputPaths } from "../lib/restore-state";
-import { missingMetadata, previewFilename } from "../lib/filename-policy";
+import { AFFIX_POSITIONS, type AffixDef, MAX_AFFIX_COUNT, missingMetadata, previewFilename } from "../lib/filename-policy";
 import { isOutputCheckOk, outputDetailStateText, outputIssueCount, outputListStateText } from "../lib/output-state";
 import { loadPagePreview } from "../lib/preview-flow";
 import { createPreviewRequestGate, previewCache } from "../lib/preview-cache";
@@ -435,6 +437,8 @@ export default function Page() {
   const [commonMetadata, setCommonMetadata] = useState<Record<string, string>>(defaultCommonMetadata);
   const [splitPointsByPdf, setSplitPointsByPdf] = useState<Record<string, number[]>>({});
   const [segmentMetadata, setSegmentMetadata] = useState<SegmentMetadata>({});
+  const [affixDefs, setAffixDefs] = useState<AffixDef[]>([]);
+  const [transcribeTargetKey, setTranscribeTargetKey] = useState("");
   const [selectedSegmentKey, setSelectedSegmentKey] = useState("");
   const [preflightChecks, setPreflightChecks] = useState<SidecarOutputCheck[]>([]);
   const [exportResult, setExportResult] = useState<SidecarExportResponse | null>(null);
@@ -472,6 +476,7 @@ export default function Page() {
   const workspaceRequestGateRef = useRef(createPreviewRequestGate());
   const pageTextRequestGateRef = useRef(createPreviewRequestGate());
   const pdfAuxiliaryRequestGateRef = useRef(createPreviewRequestGate());
+  const zoomReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const currentFile = pdfFiles.find((file) => file.path === currentPdf);
   const allSegments = useMemo(
@@ -1402,17 +1407,27 @@ export default function Page() {
     setPreviewFitMode(nextMode);
   }
 
-  async function changePreviewZoom(nextZoom: number): Promise<void> {
+  function changePreviewZoom(nextZoom: number): void {
     const normalizedZoom = Math.max(0.4, Math.min(2.4, nextZoom));
     setPreviewZoom(normalizedZoom);
-    if (currentFile) {
-      previewCache.clearPdf(currentFile.path);
-      try {
-        await loadPreview(currentFile.path, currentPage, normalizedZoom);
-      } catch (error) {
-        setStatus(`プレビュー倍率変更エラー: ${String(error)}`);
-      }
+    const file = currentFile;
+    if (!file) {
+      return;
     }
+    // スライダーのドラッグ中は sidecar への再レンダリング要求が連続発火して重くなるため、
+    // 指を止めてから一度だけ再描画する（デバウンス）。
+    if (zoomReloadTimerRef.current) {
+      clearTimeout(zoomReloadTimerRef.current);
+    }
+    const pdfPath = file.path;
+    const pageNo = currentPage;
+    zoomReloadTimerRef.current = setTimeout(() => {
+      zoomReloadTimerRef.current = null;
+      previewCache.clearPdf(pdfPath);
+      loadPreview(pdfPath, pageNo, normalizedZoom).catch((error) => {
+        setStatus(`プレビュー倍率変更エラー: ${String(error)}`);
+      });
+    }, 180);
   }
 
   useEffect(() => {
@@ -1483,6 +1498,121 @@ export default function Page() {
     };
   });
 
+  useEffect(() => {
+    function handleStep3KeyDown(event: KeyboardEvent): void {
+      if (activeStep !== "input") {
+        return;
+      }
+      // Ctrl+D（前の行コピー）と F7（未解決ジャンプ）は入力中でも安全なので先に処理する。
+      if ((event.key === "d" || event.key === "D") && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+        event.preventDefault();
+        copyPreviousSegment();
+        return;
+      }
+      if (event.key === "F7" && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        jumpToUnresolvedSegment(event.shiftKey ? -1 : 1);
+        return;
+      }
+      // ↑/↓のセグメント移動は、入力欄・セレクト操作中は通常のカーソル動作を優先する。
+      if (isEditableKeyboardTarget(event.target)) {
+        return;
+      }
+      const isPlain = !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey;
+      if (event.key === "ArrowDown" && isPlain) {
+        event.preventDefault();
+        moveSegmentSelection(1);
+      } else if (event.key === "ArrowUp" && isPlain) {
+        event.preventDefault();
+        moveSegmentSelection(-1);
+      }
+    }
+
+    window.addEventListener("keydown", handleStep3KeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleStep3KeyDown);
+    };
+  });
+
+  function moveSegmentSelection(offset: number): void {
+    if (!allSegments.length) {
+      return;
+    }
+    const currentIndex = allSegments.findIndex((segment) => segment.key === selectedSegmentKey);
+    const baseIndex = currentIndex < 0 ? 0 : currentIndex;
+    const nextIndex = Math.max(0, Math.min(allSegments.length - 1, baseIndex + offset));
+    const next = allSegments[nextIndex];
+    if (next && (next.key !== selectedSegmentKey || currentIndex < 0)) {
+      void selectSegmentForPreview(next);
+    }
+  }
+
+  // 連番(seq)以外（箱No・バインダーNo・追加項目の値）を対象にしたコピー用パッチを作る。
+  function copyableMetadataPatch(source: Record<string, string>): Record<string, string> {
+    const patch: Record<string, string> = {
+      box_no: source.box_no ?? "",
+      binder_no: source.binder_no ?? ""
+    };
+    for (const def of affixDefs) {
+      patch[def.key] = source[def.key] ?? "";
+    }
+    return patch;
+  }
+
+  function copyPreviousSegment(): void {
+    if (!selectedSegment) {
+      return;
+    }
+    const index = allSegments.findIndex((segment) => segment.key === selectedSegment.key);
+    if (index <= 0) {
+      setStatus("前の行がありません。");
+      return;
+    }
+    const patch = copyableMetadataPatch(allSegments[index - 1].metadata);
+    invalidateWorkspaceRequests();
+    clearOutputState();
+    setSegmentMetadata((current) => ({
+      ...current,
+      [selectedSegment.key]: { ...(current[selectedSegment.key] ?? {}), ...patch }
+    }));
+    setStatus("前の行をコピーしました（連番は維持）。");
+  }
+
+  function applyMetadataToAllSegments(): void {
+    if (!selectedSegment || allSegments.length <= 1) {
+      return;
+    }
+    const patch = copyableMetadataPatch(selectedSegment.metadata);
+    invalidateWorkspaceRequests();
+    clearOutputState();
+    setSegmentMetadata((current) => {
+      const next = { ...current };
+      for (const segment of allSegments) {
+        next[segment.key] = { ...(next[segment.key] ?? {}), ...patch };
+      }
+      return next;
+    });
+    setStatus("全セグメントへ適用しました（連番は各行を維持）。");
+  }
+
+  function jumpToUnresolvedSegment(direction: number): void {
+    const total = allSegments.length;
+    if (!total) {
+      return;
+    }
+    const currentIndex = allSegments.findIndex((segment) => segment.key === selectedSegmentKey);
+    const start = currentIndex < 0 ? (direction > 0 ? -1 : total) : currentIndex;
+    for (let step = 1; step <= total; step++) {
+      const index = (((start + direction * step) % total) + total) % total;
+      const segment = allSegments[index];
+      if (missingMetadata(segment.metadata).length > 0) {
+        void selectSegmentForPreview(segment);
+        return;
+      }
+    }
+    setStatus("未入力のセグメントはありません。");
+  }
+
   function updateCommonMetadata(key: "box_no" | "binder_no", value: string): void {
     invalidateWorkspaceRequests();
     clearOutputState();
@@ -1508,6 +1638,56 @@ export default function Page() {
     setStatus("連番を再採番しました。");
   }
 
+  function addAffixDef(): void {
+    invalidateWorkspaceRequests();
+    clearOutputState();
+    setAffixDefs((current) => {
+      if (current.length >= MAX_AFFIX_COUNT) {
+        return current;
+      }
+      const used = new Set(current.map((def) => def.key));
+      const key = ["affix1", "affix2"].find((candidate) => !used.has(candidate)) ?? `affix_${current.length + 1}`;
+      return [...current, { key, label: "", position: "suffix" }];
+    });
+  }
+
+  function updateAffixDef(key: string, patch: Partial<AffixDef>): void {
+    invalidateWorkspaceRequests();
+    clearOutputState();
+    setAffixDefs((current) => current.map((def) => (def.key === key ? { ...def, ...patch } : def)));
+  }
+
+  function removeAffixDef(key: string): void {
+    invalidateWorkspaceRequests();
+    clearOutputState();
+    setAffixDefs((current) => current.filter((def) => def.key !== key));
+  }
+
+  // 追加項目の値はセグメント個別（box_no等と同じ二層）。選択中セグメントの metadata へ書き込む。
+  // OCR本文から「フォーカス先行・クリック転記」する際の転記先となる追加項目キー。
+  function armTranscribeTarget(key: string): void {
+    setTranscribeTargetKey(key);
+  }
+
+  function clearTranscribeTarget(): void {
+    setTranscribeTargetKey("");
+  }
+
+  function transcribeSelectionToTarget(): void {
+    if (!selectedSegment || !transcribeTargetKey) {
+      return;
+    }
+    const selected = typeof window !== "undefined" ? window.getSelection()?.toString() ?? "" : "";
+    // OCR選択には改行・全角空白が混じりやすい。連続空白を1つに畳み、前後を除去してから転記する。
+    const cleaned = selected.replace(/[\s　]+/g, " ").trim();
+    if (!cleaned) {
+      setStatus("OCR本文を選択してから転記してください。");
+      return;
+    }
+    updateMetadata(selectedSegment, transcribeTargetKey, cleaned);
+    setStatus("追加項目へ転記しました。");
+  }
+
   function requestSegments(): SidecarSegment[] {
     return allSegments.map((segment) => ({
       pdf_path: segment.pdfPath,
@@ -1519,7 +1699,12 @@ export default function Page() {
 
   async function runPreflight(): Promise<void> {
     try {
-      const response = await invokeSidecar({ command: "preflight", output_dir: outputDir, segments: requestSegments() });
+      const response = await invokeSidecar({
+        command: "preflight",
+        output_dir: outputDir,
+        segments: requestSegments(),
+        affix_defs: affixDefs
+      });
       if (response.command !== "preflight") {
         throw new Error(response.ok ? "出力前チェックに失敗しました。" : sidecarError(response));
       }
@@ -1535,7 +1720,12 @@ export default function Page() {
 
   async function runExport(): Promise<void> {
     try {
-      const response = await invokeSidecar({ command: "export", output_dir: outputDir, segments: requestSegments() });
+      const response = await invokeSidecar({
+        command: "export",
+        output_dir: outputDir,
+        segments: requestSegments(),
+        affix_defs: affixDefs
+      });
       if (response.command !== "export") {
         throw new Error(response.ok ? "出力に失敗しました。" : sidecarError(response));
       }
@@ -1556,6 +1746,7 @@ export default function Page() {
       split_points_by_pdf: splitPointsByPdf,
       segment_metadata: segmentMetadata,
       common_metadata: commonMetadata,
+      affix_defs: affixDefs,
       current_pdf: currentPdf,
       current_page: currentPage
     };
@@ -1601,6 +1792,7 @@ export default function Page() {
       setSplitPointsByPdf(state.split_points_by_pdf ?? {});
       setSegmentMetadata(state.segment_metadata ?? {});
       setCommonMetadata({ ...defaultCommonMetadata, ...(state.common_metadata ?? {}) });
+      setAffixDefs(Array.isArray(state.affix_defs) ? state.affix_defs : []);
       setCurrentPdf(restoreDecision.currentPdf);
       setCurrentPage(restoreDecision.currentPage);
       if (!restoreDecision.shouldLoadPreview) {
@@ -1801,21 +1993,35 @@ export default function Page() {
   function renderInputList() {
     return (
       <div className="pane stack">
-        <PaneHeader title="セグメント一覧" description={`${readySegments}件 OK / ${incompleteSegments}件 未入力`} />
+        <PaneHeader
+          title="セグメント一覧"
+          description={`${readySegments}件 OK / ${incompleteSegments}件 未入力　（↑↓で移動）`}
+        />
         {allSegments.length ? (
-          <div className="mini-table">
-            <div className="mini-head">
-              <span>範囲</span>
-              <span>命名</span>
-              <span>状態</span>
+          <>
+            <div className="action-row">
+              <button
+                disabled={!incompleteSegments}
+                onClick={() => jumpToUnresolvedSegment(1)}
+                title="次の未入力セグメントへ (F7 / Shift+F7で前へ)"
+                type="button"
+              >
+                <IconLabel icon={ArrowRight}>次の未解決 (F7)</IconLabel>
+              </button>
             </div>
+            <div className="mini-table">
+              <div className="mini-head">
+                <span>範囲</span>
+                <span>命名</span>
+                <span>状態</span>
+              </div>
             {allSegments.map((segment) => {
               const missing = missingMetadata(segment.metadata);
               return (
                 <button
                   className={segment.key === selectedSegment?.key ? "mini-row selected" : "mini-row"}
                   key={segment.key}
-                  onClick={() => setSelectedSegmentKey(segment.key)}
+                  onClick={() => void selectSegmentForPreview(segment)}
                   type="button"
                 >
                   <span>
@@ -1831,7 +2037,8 @@ export default function Page() {
                 </button>
               );
             })}
-          </div>
+            </div>
+          </>
         ) : (
           <EmptyState icon={PencilLine} title="入力対象がありません">
             PDFを取込み、分割を確認してから入力します。
@@ -1977,12 +2184,10 @@ export default function Page() {
     );
   }
 
-  function renderSplitWork() {
-    const previewClassName = `preview-frame ${previewFitMode}`;
+  function renderPreviewToolbar() {
     return (
-      <section className="work-card split-work stack" aria-label="分割">
-        <div className="preview-toolbar" aria-label="プレビュー操作">
-          <div className="split-control-group page-jump">
+      <div className="preview-toolbar" aria-label="プレビュー操作">
+        <div className="split-control-group page-jump">
             <span className="control-label">ページ番号</span>
             <div className="action-row">
               <input
@@ -2039,12 +2244,24 @@ export default function Page() {
               >
                 全体表示
               </button>
+              <button
+                className={previewFitMode === "free" ? "selected" : ""}
+                disabled={!currentFile}
+                onClick={() => changePreviewFitMode("free")}
+                title="手動ズーム（実寸）"
+                type="button"
+              >
+                実寸
+              </button>
               <input
                 aria-label="ズーム倍率"
                 disabled={!currentFile}
                 max={2.4}
                 min={0.4}
-                onChange={(event) => void changePreviewZoom(Number(event.target.value))}
+                onChange={(event) => {
+                  changePreviewFitMode("free");
+                  void changePreviewZoom(Number(event.target.value));
+                }}
                 step={0.1}
                 type="range"
                 value={previewZoom}
@@ -2053,8 +2270,14 @@ export default function Page() {
             </div>
           </div>
         </div>
-        <div className={previewClassName}>
-          {previewDataUrl ? (
+    );
+  }
+
+  function renderPreviewFrame() {
+    const previewClassName = `preview-frame ${previewFitMode}`;
+    return (
+      <div className={previewClassName}>
+        {previewDataUrl ? (
             <div className="preview-page-layer">
               <img alt="PDFページプレビュー" src={previewDataUrl} />
               {searchHighlights.length ? (
@@ -2082,13 +2305,135 @@ export default function Page() {
             </EmptyState>
           )}
         </div>
+    );
+  }
+
+  function renderOcrTextPanel() {
+    const targetIndex = affixDefs.findIndex((def) => def.key === transcribeTargetKey);
+    const targetDef = targetIndex >= 0 ? affixDefs[targetIndex] : null;
+    const transcribeArmed = Boolean(targetDef && selectedSegment);
+    return (
+      <div className="legacy-panel-section assist-section ocr-text-panel">
+        <span className="group-label">OCRテキスト</span>
+        <small>{pageTextStatus}</small>
+        {transcribeArmed && targetDef ? (
+          <div className="ocr-transcribe-bar" role="status">
+            <span>
+              選択を「追加項目{targetIndex + 1}（{targetDef.position === "prefix" ? "先頭" : "末尾"}）」へ
+            </span>
+            <button
+              className="primary"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={transcribeSelectionToTarget}
+              type="button"
+            >
+              転記
+            </button>
+            <button className="ghost" onClick={clearTranscribeTarget} type="button">
+              解除
+            </button>
+          </div>
+        ) : null}
+        <div
+          className="ocr-text-scroll"
+          aria-label="OCRテキスト"
+          tabIndex={transcribeArmed ? 0 : -1}
+          onKeyDown={(event) => {
+            if (!transcribeArmed) {
+              return;
+            }
+            if (event.key === "Enter") {
+              event.preventDefault();
+              transcribeSelectionToTarget();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              clearTranscribeTarget();
+            }
+          }}
+        >
+          {renderHighlightedOcrText()}
+        </div>
+      </div>
+    );
+  }
+
+  function renderSplitWork() {
+    return (
+      <section className="work-card split-work stack" aria-label="分割">
+        {renderPreviewToolbar()}
+        {renderPreviewFrame()}
       </section>
     );
   }
 
   function renderInputWork() {
     return (
-      <section className="work-card stack" aria-label="入力">
+      <section className="work-card split-work input-work stack" aria-label="入力プレビュー">
+        {renderPreviewToolbar()}
+        {renderPreviewFrame()}
+      </section>
+    );
+  }
+
+  function renderAffixDefsSection() {
+    return (
+      <div className="legacy-panel-section affix-defs-section">
+        <div className="affix-defs-head">
+          <span className="group-label">追加項目</span>
+          <button
+            className="ghost"
+            disabled={affixDefs.length >= MAX_AFFIX_COUNT}
+            onClick={addAffixDef}
+            type="button"
+          >
+            <IconLabel icon={Plus}>追加</IconLabel>
+          </button>
+        </div>
+        {affixDefs.length ? (
+          <div className="affix-def-list">
+            {affixDefs.map((def, index) => (
+              <div className="affix-def-row" key={def.key}>
+                <input
+                  aria-label={`追加項目${index + 1}の値`}
+                  className={transcribeTargetKey === def.key ? "affix-value-input transcribe-armed" : "affix-value-input"}
+                  disabled={!selectedSegment}
+                  placeholder={selectedSegment ? "値（例: ヨシダ商事）" : "セグメントを選択"}
+                  value={selectedSegment?.metadata[def.key] ?? ""}
+                  onChange={(event) => selectedSegment && updateMetadata(selectedSegment, def.key, event.target.value)}
+                  onFocus={() => armTranscribeTarget(def.key)}
+                />
+                <select
+                  aria-label={`追加項目${index + 1}の挿入位置`}
+                  value={def.position}
+                  onChange={(event) => updateAffixDef(def.key, { position: event.target.value as AffixDef["position"] })}
+                >
+                  {AFFIX_POSITIONS.map((position) => (
+                    <option key={position} value={position}>
+                      {position === "prefix" ? "先頭" : "末尾"}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  aria-label={`追加項目${index + 1}を削除`}
+                  className="ghost danger"
+                  onClick={() => removeAffixDef(def.key)}
+                  type="button"
+                >
+                  <Trash2 aria-hidden="true" size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <small className="muted-line">会社名・契約書名など、先頭/末尾に挿入する項目を追加できます。</small>
+        )}
+      </div>
+    );
+  }
+
+  function renderInputControls() {
+    return (
+      <aside className="right-panel legacy-split-right input-controls stack" aria-label="STEP3命名入力">
         <PaneHeader
           title="命名入力"
           description={
@@ -2099,43 +2444,64 @@ export default function Page() {
         />
         <div className="filename-preview">
           <span>出力名プレビュー</span>
-          <strong>{selectedSegment ? previewFilename(selectedSegment.metadata) : "-"}</strong>
-        </div>
-        <div className="action-row">
-          <button className="primary" disabled={!allSegments.length} onClick={resequence} type="button">
-            <IconLabel icon={ClipboardCheck}>連番を再採番</IconLabel>
-          </button>
+          <strong>{selectedSegment ? previewFilename(selectedSegment.metadata, affixDefs) : "-"}</strong>
         </div>
         {selectedSegment ? (
-          <div className="field-grid three">
-            <label>
-              箱No
-              <input
-                value={selectedSegment.metadata.box_no}
-                onChange={(event) => updateMetadata(selectedSegment, "box_no", event.target.value)}
-              />
-            </label>
-            <label>
-              バインダーNo
-              <input
-                value={selectedSegment.metadata.binder_no}
-                onChange={(event) => updateMetadata(selectedSegment, "binder_no", event.target.value)}
-              />
-            </label>
-            <label>
-              連番
-              <input
-                value={selectedSegment.metadata.seq}
-                onChange={(event) => updateMetadata(selectedSegment, "seq", event.target.value)}
-              />
-            </label>
+          <div className="legacy-panel-section">
+            <span className="group-label">命名項目</span>
+            <div className="field-grid three">
+              <label>
+                箱No
+                <input
+                  value={selectedSegment.metadata.box_no}
+                  onChange={(event) => updateMetadata(selectedSegment, "box_no", event.target.value)}
+                />
+              </label>
+              <label>
+                バインダーNo
+                <input
+                  value={selectedSegment.metadata.binder_no}
+                  onChange={(event) => updateMetadata(selectedSegment, "binder_no", event.target.value)}
+                />
+              </label>
+              <label>
+                連番
+                <input
+                  value={selectedSegment.metadata.seq}
+                  onChange={(event) => updateMetadata(selectedSegment, "seq", event.target.value)}
+                />
+              </label>
+            </div>
+            <div className="action-row">
+              <button className="primary" disabled={!allSegments.length} onClick={resequence} type="button">
+                <IconLabel icon={ClipboardCheck}>連番を再採番</IconLabel>
+              </button>
+              <button
+                disabled={allSegments.findIndex((segment) => segment.key === selectedSegment.key) <= 0}
+                onClick={copyPreviousSegment}
+                title="前の行をコピー (Ctrl+D)・連番は維持"
+                type="button"
+              >
+                <IconLabel icon={Copy}>前の行をコピー</IconLabel>
+              </button>
+              <button
+                disabled={allSegments.length <= 1}
+                onClick={applyMetadataToAllSegments}
+                title="この内容を全セグメントへ適用（連番は各行を維持）"
+                type="button"
+              >
+                <IconLabel icon={ListChecks}>一括適用</IconLabel>
+              </button>
+            </div>
           </div>
         ) : (
           <EmptyState icon={PencilLine} title="入力対象がありません">
             分割セグメントを作成してから入力します。
           </EmptyState>
         )}
-        <div className="workbench-footer">
+        {renderAffixDefsSection()}
+        {renderOcrTextPanel()}
+        <div className="legacy-panel-section completion-section">
           <div className="workbench-checks compact" aria-label="入力完了条件">
             <StatusCheck ok={allSegments.length > 0} label="入力対象" detail={`${allSegments.length}件`} />
             <StatusCheck ok={!incompleteSegments && allSegments.length > 0} label="未入力" detail={`${incompleteSegments}件`} />
@@ -2145,7 +2511,7 @@ export default function Page() {
             <IconLabel icon={ChevronRight}>出力前チェック</IconLabel>
           </button>
         </div>
-      </section>
+      </aside>
     );
   }
 
@@ -2392,6 +2758,9 @@ export default function Page() {
   }
 
   function renderRightPanel() {
+    if (activeStep === "input") {
+      return renderInputControls();
+    }
     if (activeStep !== "split") {
       return null;
     }
@@ -2549,13 +2918,7 @@ export default function Page() {
             )}
           </div>
         </div>
-        <div className="legacy-panel-section assist-section ocr-text-panel">
-          <span className="group-label">OCRテキスト</span>
-          <small>{pageTextStatus}</small>
-          <div className="ocr-text-scroll" aria-label="OCRテキスト">
-            {renderHighlightedOcrText()}
-          </div>
-        </div>
+        {renderOcrTextPanel()}
         <div className="legacy-panel-section completion-section">
           <span className="group-label">完了操作</span>
           <div className="split-footer split-settings-continue">
@@ -2569,7 +2932,7 @@ export default function Page() {
   }
 
   return (
-    <main className={activeStep === "split" ? "app-shell split-screen-shell" : "app-shell"}>
+    <main className={activeStep === "split" || activeStep === "input" ? "app-shell split-screen-shell" : "app-shell"}>
       <header className="app-header">
         <div className="brand-row compact-brand">
           <span className="brand-mark">PDF</span>
@@ -2668,9 +3031,11 @@ export default function Page() {
         className={
           activeStep === "import"
             ? "task-layout import-single-layout"
-            : activeStep === "split"
-              ? "task-layout split-focused-layout"
-              : "task-layout"
+            : activeStep === "input"
+              ? "task-layout split-focused-layout input-focused-layout"
+              : activeStep === "split"
+                ? "task-layout split-focused-layout"
+                : "task-layout"
         }
         aria-label="PDF整理ワークスペース"
       >

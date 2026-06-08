@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .domain import AFFIX_POSITIONS, METADATA_REQUIRED_KEYS
+
 
 CURRENT_SCHEMA_VERSION = 1
 _KNOWN_STRING_FIELDS = {"current_pdf", "output_dir"}
@@ -38,6 +40,8 @@ def normalize_state_payload(payload: object, *, allow_invalid_input_paths: bool 
         normalized["segment_metadata"] = _normalize_segment_metadata(normalized["segment_metadata"])
     if "common_metadata" in normalized:
         normalized["common_metadata"] = _normalize_common_metadata(normalized["common_metadata"])
+    if "affix_defs" in normalized:
+        normalized["affix_defs"] = _normalize_affix_defs(normalized["affix_defs"])
 
     return normalized
 
@@ -115,6 +119,33 @@ def _normalize_metadata_values(field: str, value: dict[object, object]) -> dict[
         if not isinstance(raw_value, str):
             raise TypeError(f"{field} values must be strings.")
         normalized[raw_key] = raw_value
+    return normalized
+
+
+def _normalize_affix_defs(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        raise TypeError("affix_defs must be a list of definitions.")
+    normalized: list[dict[str, str]] = []
+    seen_keys: set[str] = set()
+    for index, raw in enumerate(value):
+        if not isinstance(raw, dict):
+            raise TypeError(f"affix_defs[{index}] must be a JSON object.")
+        key = raw.get("key")
+        if not isinstance(key, str) or not key.strip():
+            raise TypeError(f"affix_defs[{index}].key must be a non-empty string.")
+        key = key.strip()
+        if key in METADATA_REQUIRED_KEYS:
+            raise TypeError(f"affix_defs[{index}].key must not collide with a required field.")
+        if key in seen_keys:
+            raise TypeError(f"affix_defs[{index}].key must be unique.")
+        position = raw.get("position")
+        if position not in AFFIX_POSITIONS:
+            raise TypeError(f"affix_defs[{index}].position must be one of {AFFIX_POSITIONS}.")
+        label = raw.get("label", "")
+        if not isinstance(label, str):
+            raise TypeError(f"affix_defs[{index}].label must be a string.")
+        normalized.append({"key": key, "label": label, "position": position})
+        seen_keys.add(key)
     return normalized
 
 

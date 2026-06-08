@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .domain import normalize_affix_defs
 from .export_policy import ExportPathPolicy
 from .export_policy import unique_output_path as policy_unique_output_path
 from .models import Segment
@@ -65,12 +66,14 @@ def check_segment_outputs(
     segments: list[Segment],
     output_dir: Path,
     processor: PdfProcessor | None = None,
+    affix_defs: object = (),
 ) -> list[SegmentOutputCheck]:
     processor = processor or PdfProcessor()
+    affix_defs = normalize_affix_defs(affix_defs)
     checks: list[SegmentOutputCheck] = []
     export_policy = ExportPathPolicy()
     for segment in segments:
-        result = processor.build_yoshida_filename(segment.metadata)
+        result = processor.build_yoshida_filename(segment.metadata, affix_defs)
         messages = [*error_messages(result.errors), *segment_page_errors(segment, processor)]
         if result.ok and not messages:
             requested_path = output_dir / result.normalized_filename

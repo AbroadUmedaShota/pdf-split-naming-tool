@@ -24,6 +24,25 @@ def test_preview_and_preflight_use_same_normal_output_name(tmp_path: Path) -> No
     assert check.output_path == tmp_path / "01_02_003.pdf"
 
 
+def test_preview_and_preflight_use_same_name_with_affixes(tmp_path: Path) -> None:
+    affix_defs = (
+        {"key": "company", "label": "会社名", "position": "prefix"},
+        {"key": "doc", "label": "契約書名", "position": "suffix"},
+    )
+    metadata = {"box_no": "1", "binder_no": "2", "seq": "3", "company": "A商事", "doc": "基本契約"}
+    preview = build_yoshida_filename_preview(metadata, affix_defs)
+    segment = Segment(tmp_path / "source.pdf", 1, 1, metadata)
+
+    [check] = check_segment_outputs(
+        [segment], tmp_path, processor=PageCountProcessor(page_count=1), affix_defs=affix_defs
+    )
+
+    assert preview.ok
+    assert preview.normalized_filename == "A商事_01_02_003_基本契約.pdf"
+    assert check.requested_filename == preview.normalized_filename
+    assert check.filename == "A商事_01_02_003_基本契約.pdf"
+
+
 def test_preview_and_preflight_use_same_normalized_output_name_for_invalid_chars(tmp_path: Path) -> None:
     metadata = {"box_no": "1/2", "binder_no": "3:4", "seq": "5*6"}
     preview = build_yoshida_filename_preview(metadata)
@@ -135,8 +154,8 @@ class PageCountProcessor:
         self._page_count = page_count
 
     @staticmethod
-    def build_yoshida_filename(metadata: dict[str, str]):
-        return PdfProcessor.build_yoshida_filename(metadata)
+    def build_yoshida_filename(metadata: dict[str, str], affix_defs: object = ()):
+        return PdfProcessor.build_yoshida_filename(metadata, affix_defs)
 
     def page_count(self, _pdf_path: Path) -> int:
         return self._page_count
