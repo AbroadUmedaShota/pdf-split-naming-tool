@@ -24,8 +24,15 @@ const HEAVY_COMMANDS: &[&str] = &[
 const HEAVY_TIMEOUT_MULTIPLIER: u32 = 4;
 
 /// Holds the long-lived Python sidecar daemon. Tauri-managed, shared across all
-/// `run_sidecar` invocations; the `Mutex` serializes requests onto the single
-/// JSON Lines pipe.
+/// `run_sidecar` invocations.
+///
+/// The `Mutex` serializes every request onto the daemon's single JSON Lines pipe.
+/// Deliberate trade-off: this makes the front-end's parallel thumbnail fan-out
+/// (#79, concurrency 4) effectively serial. Correctness is unaffected, but the
+/// parallelism stops buying anything — acceptable because the win comes from
+/// dropping the per-request process spawn (~500ms), not from parallelism. A
+/// future worker pool (Phase C) would replace `Option<_>` with a pool type, so
+/// avoid baking single-daemon assumptions into callers.
 #[derive(Default)]
 struct SidecarState(Mutex<Option<SidecarDaemon>>);
 
@@ -52,7 +59,11 @@ pub fn run() {
 /// Python side exiting on stdin EOF).
 fn shutdown_sidecar_daemon(app_handle: &tauri::AppHandle) {
     if let Some(state) = app_handle.try_state::<SidecarState>() {
-        if let Ok(mut guard) = state.0.lock() {
+        // try_lock, never block app exit behind an in-flight (possibly heavy)
+        // request. If the lock is held the OS reaps the child on process exit,
+        // and the Python serve loop also exits on stdin EOF, so the daemon does
+        // not orphan even when this net is skipped.
+        if let Ok(mut guard) = state.0.try_lock() {
             *guard = None; // Drop for SidecarDaemon kills the child.
         }
     }
@@ -76,63 +87,15 @@ fn run_sidecar(
     request_line.push('\n');
     let timeout = sidecar_timeout_for(&command);
 
-    let mut guard = state
-        .0
-        .lock()
-        .map_err(|_| "sidecar daemon state is poisoned".to_string())?;
+    // Recover from a poisoned mutex rather than failing forever: reset the slot
+    // to None so the next exchange simply respawns a fresh daemon.
+    let mut guard = state.0.lock().unwrap_or_else(|poisoned| {
+        let mut guard = poisoned.into_inner();
+        *guard = None;
+        guard
+    });
 
-    // At most one respawn retry: a daemon can die between requests (broken pipe
-    // on write) or immediately after spawn (e.g. a Python import error on first
-    // use). Either way we tear it down and try a fresh one once.
-    for attempt in 0..2 {
-        ensure_daemon(&mut guard)?;
-
-        let send_failed = {
-            let daemon = guard.as_mut().expect("daemon ensured above");
-            daemon.send_request(&request_line).is_err()
-        };
-        if send_failed {
-            *guard = None;
-            continue;
-        }
-
-        let received = {
-            let daemon = guard.as_mut().expect("daemon ensured above");
-            daemon.recv_response(timeout)
-        };
-        match received {
-            Ok(line) => {
-                return serde_json::from_str(&line)
-                    .map_err(|error| format!("failed to parse Python sidecar JSON: {error}"));
-            }
-            Err(RecvTimeoutError::Timeout) => {
-                // Kill the stuck daemon outright so a late response can never be
-                // mis-matched to the next request; the next call respawns.
-                *guard = None;
-                return Err(format!(
-                    "Python sidecar timed out after {} ms",
-                    timeout.as_millis()
-                ));
-            }
-            Err(RecvTimeoutError::Disconnected) => {
-                let tail = {
-                    let daemon = guard.as_mut().expect("daemon ensured above");
-                    daemon.stderr_snippet()
-                };
-                *guard = None;
-                if attempt == 0 {
-                    continue; // died on first use; respawn once and retry.
-                }
-                return Err(if tail.is_empty() {
-                    "Python sidecar daemon exited unexpectedly".to_string()
-                } else {
-                    format!("Python sidecar daemon exited: {tail}")
-                });
-            }
-        }
-    }
-
-    Err("failed to communicate with the Python sidecar daemon".to_string())
+    run_sidecar_exchange(&mut guard, &request_line, timeout, &spawn_daemon)
 }
 
 /// Escape hatch: `PDF_ORGANIZER_SIDECAR_ONESHOT=1` forces the legacy
@@ -144,16 +107,82 @@ fn oneshot_mode_enabled() -> bool {
     )
 }
 
-/// Ensure a live daemon occupies the slot, spawning a fresh one if it is empty
-/// or the previous process has exited.
-fn ensure_daemon(guard: &mut Option<SidecarDaemon>) -> Result<(), String> {
+/// Send one request to the daemon and wait for its response, (re)spawning as
+/// needed. Generic over the spawn function so the retry/respawn logic is unit
+/// testable against a stub daemon.
+fn run_sidecar_exchange<F>(
+    guard: &mut Option<SidecarDaemon>,
+    request_line: &str,
+    timeout: Duration,
+    spawn: &F,
+) -> Result<serde_json::Value, String>
+where
+    F: Fn() -> Result<SidecarDaemon, String>,
+{
+    // Only the broken-pipe case is retried: a failed write means the request
+    // never reached a live process, so resending to a fresh daemon is safe. A
+    // response-phase failure (timeout / disconnect) is NOT retried, because the
+    // request may already have had side effects (e.g. a half-written export) and
+    // resending could double-process it.
+    for _ in 0..2 {
+        ensure_daemon_with(guard, spawn)?;
+
+        let send_failed = {
+            let daemon = guard.as_mut().expect("daemon ensured above");
+            daemon.send_request(request_line).is_err()
+        };
+        if send_failed {
+            *guard = None;
+            continue;
+        }
+
+        let received = {
+            let daemon = guard.as_mut().expect("daemon ensured above");
+            daemon.recv_response(timeout)
+        };
+        return match received {
+            Ok(line) => serde_json::from_str(&line)
+                .map_err(|error| format!("failed to parse Python sidecar JSON: {error}")),
+            Err(RecvTimeoutError::Timeout) => {
+                // Kill the stuck daemon so a late response can never be mismatched
+                // to the next request; the next call respawns.
+                *guard = None;
+                Err(format!(
+                    "Python sidecar timed out after {} ms",
+                    timeout.as_millis()
+                ))
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                let tail = {
+                    let daemon = guard.as_mut().expect("daemon ensured above");
+                    daemon.stderr_snippet()
+                };
+                *guard = None;
+                Err(if tail.is_empty() {
+                    "Python sidecar daemon exited unexpectedly".to_string()
+                } else {
+                    format!("Python sidecar daemon exited: {tail}")
+                })
+            }
+        };
+    }
+
+    Err("failed to deliver request to the Python sidecar daemon".to_string())
+}
+
+/// Ensure a live daemon occupies the slot, spawning a fresh one (via `spawn`) if
+/// it is empty or the previous process has exited.
+fn ensure_daemon_with<F>(guard: &mut Option<SidecarDaemon>, spawn: &F) -> Result<(), String>
+where
+    F: Fn() -> Result<SidecarDaemon, String>,
+{
     let alive = match guard.as_mut() {
         Some(daemon) => daemon.is_alive(),
         None => false,
     };
     if !alive {
         *guard = None; // drop (kill/reap) any dead daemon before respawning.
-        *guard = Some(spawn_daemon()?);
+        *guard = Some(spawn()?);
     }
     Ok(())
 }
@@ -161,6 +190,10 @@ fn ensure_daemon(guard: &mut Option<SidecarDaemon>) -> Result<(), String> {
 /// Per-request timeout: interactive commands use the base timeout; heavy
 /// commands (export etc.) get a multiple so a legitimately long export is not
 /// killed and respawned mid-run.
+///
+/// Note: `PDF_ORGANIZER_SIDECAR_TIMEOUT_MS` scales the base, so it moves both
+/// tiers together — lowering it to fail a hung preview faster also shortens the
+/// heavy ceiling. A finer fast/normal/heavy split is left for a follow-up.
 fn sidecar_timeout_for(command: &str) -> Duration {
     let base = sidecar_timeout_from(
         std::env::var("PDF_ORGANIZER_SIDECAR_TIMEOUT_MS")
@@ -234,8 +267,11 @@ impl SidecarDaemon {
                 match reader.read_line(&mut line) {
                     Ok(0) => break, // EOF: child closed stdout / exited.
                     Ok(_) => {
-                        let trimmed = line.trim_end_matches(['\n', '\r']).to_string();
-                        if sender.send(trimmed).is_err() {
+                        // Trim the trailing newline in place to avoid a second
+                        // copy of a possibly multi-MB line (e.g. a base64 preview).
+                        let trimmed_len = line.trim_end_matches(['\n', '\r']).len();
+                        line.truncate(trimmed_len);
+                        if sender.send(line).is_err() {
                             break; // receiver dropped: daemon is being torn down.
                         }
                     }
@@ -301,8 +337,10 @@ impl Drop for SidecarDaemon {
     }
 }
 
-/// Legacy one-process-per-request path. Retained verbatim for the
-/// `PDF_ORGANIZER_SIDECAR_ONESHOT` escape hatch.
+/// Legacy one-process-per-request path. Retained for the
+/// `PDF_ORGANIZER_SIDECAR_ONESHOT` escape hatch. Intentionally uses the flat base
+/// timeout (no heavy-command multiplier) — it is an emergency fallback, not the
+/// tuned daemon path.
 fn run_sidecar_oneshot(request: serde_json::Value) -> Result<serde_json::Value, String> {
     let recovery_dir = find_recovery_dir()?;
     let request_text = serde_json::to_string(&request).map_err(|error| error.to_string())?;
@@ -724,5 +762,102 @@ sys.stdin.readline()
             assert_eq!(value["ok"], serde_json::Value::Bool(false));
             assert_eq!(value["command"], "pdf_info");
         }
+    }
+
+    fn stub_spawner(
+        name: &'static str,
+        body: &'static str,
+    ) -> impl Fn() -> Result<SidecarDaemon, String> {
+        move || SidecarDaemon::spawn_with(stub_command(name, body))
+    }
+
+    #[test]
+    fn exchange_returns_parsed_response_on_success() {
+        let mut slot: Option<SidecarDaemon> = None;
+        let spawn = stub_spawner("ex_echo", ECHO_STUB);
+
+        let value = run_sidecar_exchange(
+            &mut slot,
+            "{\"command\":\"pdf_info\"}\n",
+            Duration::from_secs(10),
+            &spawn,
+        )
+        .unwrap();
+
+        assert_eq!(value["ok"], serde_json::Value::Bool(true));
+        assert!(slot.is_some()); // daemon kept alive for reuse
+    }
+
+    #[test]
+    fn exchange_times_out_and_drops_the_daemon() {
+        let mut slot: Option<SidecarDaemon> = None;
+        let spawn = stub_spawner("ex_silent", SILENT_STUB);
+
+        let result = run_sidecar_exchange(
+            &mut slot,
+            "{\"command\":\"x\"}\n",
+            Duration::from_millis(300),
+            &spawn,
+        );
+
+        assert!(result.unwrap_err().contains("timed out"));
+        assert!(slot.is_none()); // the stuck daemon was killed
+    }
+
+    #[test]
+    fn exchange_does_not_resend_request_after_disconnect() {
+        // Regression guard for the double-execution fix: when the daemon dies
+        // after a request was sent, the request must NOT be resent to a fresh
+        // daemon (a non-idempotent export would otherwise run twice).
+        let dir = std::env::temp_dir().join(format!(
+            "pdf_organizer_daemon_counter_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let counter = dir.join("count.txt");
+        let _ = std::fs::remove_file(&counter);
+        let counter_arg = counter.to_string_lossy().to_string();
+
+        // Stub records each request it receives, then exits (forcing a disconnect).
+        let body = r#"import sys
+counter = sys.argv[1]
+line = sys.stdin.readline()
+if line.strip():
+    with open(counter, "a", encoding="utf-8") as handle:
+        handle.write("x")
+"#;
+        let spawn = move || {
+            let dir = std::env::temp_dir().join(format!(
+                "pdf_organizer_daemon_count_stub_{}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("stub.py");
+            std::fs::write(&path, body).unwrap();
+            let mut command = Command::new(python_program());
+            command.arg(path).arg(&counter_arg);
+            SidecarDaemon::spawn_with(command)
+        };
+
+        let mut slot: Option<SidecarDaemon> = None;
+        let result = run_sidecar_exchange(
+            &mut slot,
+            "{\"command\":\"export\"}\n",
+            Duration::from_secs(10),
+            &spawn,
+        );
+
+        assert!(result.is_err()); // disconnect surfaces as an error, not success
+        assert!(slot.is_none());
+
+        let mut seen = String::new();
+        for _ in 0..50 {
+            seen = std::fs::read_to_string(&counter).unwrap_or_default();
+            if !seen.is_empty() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(seen, "x", "request must be delivered exactly once (no resend)");
     }
 }
