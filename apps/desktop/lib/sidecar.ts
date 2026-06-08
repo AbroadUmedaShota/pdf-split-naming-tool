@@ -21,6 +21,12 @@ export async function invokeSidecar(request: SidecarRequest): Promise<SidecarRes
   return invoke<SidecarResponse>("run_sidecar", { request });
 }
 
+export type AppAffixDef = {
+  key: string;
+  label: string;
+  position: "prefix" | "suffix";
+};
+
 export type AppPersistedState = {
   version: 1;
   input_paths: string[];
@@ -28,6 +34,7 @@ export type AppPersistedState = {
   split_points_by_pdf: Record<string, number[]>;
   segment_metadata: Record<string, Record<string, string>>;
   common_metadata: Record<string, string>;
+  affix_defs: AppAffixDef[];
   current_pdf: string;
   current_page: number;
 };
@@ -50,12 +57,14 @@ export type SidecarPreflightRequest = {
   command: "preflight";
   output_dir: string;
   segments: SidecarSegment[];
+  affix_defs?: AppAffixDef[];
 };
 
 export type SidecarExportRequest = {
   command: "export";
   output_dir: string;
   segments: SidecarSegment[];
+  affix_defs?: AppAffixDef[];
 };
 
 export type SidecarResponse =

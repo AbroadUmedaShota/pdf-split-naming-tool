@@ -151,3 +151,40 @@ def test_normalize_state_payload_rejects_non_object(payload: object) -> None:
 def test_normalize_state_payload_rejects_invalid_known_key_types(payload: dict[str, object], message: str) -> None:
     with pytest.raises(TypeError, match=message):
         normalize_state_payload(payload)
+
+
+def test_normalize_state_payload_accepts_affix_defs() -> None:
+    payload = {
+        "affix_defs": [
+            {"key": "company", "label": "会社名", "position": "prefix"},
+            {"key": "doc", "label": "契約書名", "position": "suffix"},
+        ]
+    }
+
+    normalized = normalize_state_payload(payload)
+
+    assert normalized["affix_defs"] == [
+        {"key": "company", "label": "会社名", "position": "prefix"},
+        {"key": "doc", "label": "契約書名", "position": "suffix"},
+    ]
+
+
+def test_normalize_state_payload_without_affix_defs_is_unchanged() -> None:
+    payload = {"input_paths": ["a.pdf"]}
+
+    assert normalize_state_payload(payload) == payload
+
+
+@pytest.mark.parametrize(
+    "affix_defs, message",
+    [
+        ("nope", "affix_defs must be a list"),
+        ([{"label": "x", "position": "prefix"}], "key must be a non-empty string"),
+        ([{"key": "box_no", "position": "prefix"}], "must not collide"),
+        ([{"key": "a", "position": "prefix"}, {"key": "a", "position": "suffix"}], "must be unique"),
+        ([{"key": "a", "position": "middle"}], "position must be one of"),
+    ],
+)
+def test_normalize_state_payload_rejects_invalid_affix_defs(affix_defs: object, message: str) -> None:
+    with pytest.raises(TypeError, match=message):
+        normalize_state_payload({"affix_defs": affix_defs})

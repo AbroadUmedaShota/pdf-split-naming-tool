@@ -321,7 +321,7 @@ def state_save(request: dict[str, Any]) -> dict[str, Any]:
 
 def _build_checks(request: dict[str, Any], output_dir: Path) -> list[SegmentOutputCheck]:
     segments = [Segment.from_dict(item) for item in request.get("segments", []) if isinstance(item, dict)]
-    return check_segment_outputs(segments, output_dir)
+    return check_segment_outputs(segments, output_dir, affix_defs=request.get("affix_defs", ()))
 
 
 def _check_to_dict(check: SegmentOutputCheck) -> dict[str, Any]:

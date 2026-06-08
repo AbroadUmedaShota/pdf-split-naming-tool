@@ -22,8 +22,8 @@ class PdfProcessor:
         return sanitize_filename_with_warnings(filename)
 
     @staticmethod
-    def build_yoshida_filename(metadata: dict[str, str]) -> FilenameBuildResult:
-        return build_yoshida_filename_preview(metadata)
+    def build_yoshida_filename(metadata: dict[str, str], affix_defs: object = ()) -> FilenameBuildResult:
+        return build_yoshida_filename_preview(metadata, affix_defs)
 
     @staticmethod
     def ensure_unique_path(path: Path) -> Path:

@@ -95,10 +95,10 @@ class PageCountProcessor:
         self._page_count = page_count
 
     @staticmethod
-    def build_yoshida_filename(metadata: dict[str, str]):
+    def build_yoshida_filename(metadata: dict[str, str], affix_defs: object = ()):
         from pdf_splitter_tool.processor import PdfProcessor
 
-        return PdfProcessor.build_yoshida_filename(metadata)
+        return PdfProcessor.build_yoshida_filename(metadata, affix_defs)
 
     def page_count(self, _pdf_path: Path) -> int:
         return self._page_count

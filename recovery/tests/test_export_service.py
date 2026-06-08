@@ -79,8 +79,8 @@ class PageCountProcessor:
         self._page_count = page_count
 
     @staticmethod
-    def build_yoshida_filename(metadata: dict[str, str]):
-        return PdfProcessor.build_yoshida_filename(metadata)
+    def build_yoshida_filename(metadata: dict[str, str], affix_defs: object = ()):
+        return PdfProcessor.build_yoshida_filename(metadata, affix_defs)
 
     def page_count(self, _pdf_path: Path) -> int:
         return self._page_count
