@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pdf_splitter_tool.app_metadata import APP_ID, APP_NAME, __version__
 from pdf_splitter_tool.runtime import default_work_dir
-from pdf_splitter_tool.sidecar import handle_request
+from pdf_splitter_tool.sidecar import handle_request, serve
 from pdf_splitter_tool.state import STATE_BAK_FILENAME, STATE_FILENAME, STATE_TMP_FILENAME
 
 
@@ -30,7 +30,16 @@ def main() -> None:
     parser.add_argument("--smoke-output", help="Write --smoke JSON to this file.")
     parser.add_argument("--sidecar-request", help="Read a sidecar JSON request from this file, or '-' for stdin.")
     parser.add_argument("--sidecar-output", help="Write sidecar JSON response to this file instead of stdout.")
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="Run as a long-lived JSONL sidecar daemon: read one JSON request per line from stdin "
+        "and write one compact JSON response per line to stdout.",
+    )
     args = parser.parse_args()
+    if args.serve:
+        serve(sys.stdin, sys.stdout)
+        return
     if args.sidecar_request:
         try:
             request_text = (
