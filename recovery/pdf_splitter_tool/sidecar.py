@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from .domain import DEFAULT_SEQ_DIGITS
 from .models import Segment
@@ -54,6 +56,45 @@ def _error_response(command: str, exc: Exception) -> dict[str, Any]:
         "error": str(exc),
         "error_type": type(exc).__name__,
     }
+
+
+def compact_response(response: dict[str, Any]) -> str:
+    """Serialize a sidecar response as a single compact JSON line.
+
+    Unlike the one-shot path (which pretty-prints with ``indent=2``), the serve
+    loop must keep one response on exactly one line, so no embedded newlines are
+    allowed. ``ensure_ascii=False`` keeps Japanese text intact under UTF-8.
+    """
+    return json.dumps(response, ensure_ascii=False, separators=(",", ":"))
+
+
+def serve(in_stream: TextIO, out_stream: TextIO) -> None:
+    """Run as a long-lived JSONL sidecar (one request per input line).
+
+    Reads one JSON request per line from ``in_stream`` and writes one compact
+    JSON response per line to ``out_stream``, flushing after each so the caller
+    never blocks on a buffered pipe. A malformed line or a failing request
+    produces an error response and the loop continues; a single bad request must
+    never terminate the daemon. The one-shot ``--sidecar-request`` path is left
+    untouched and remains byte-for-byte identical.
+    """
+    response_stream = out_stream
+    # Protect the protocol stream: redirect stray stdout writes (e.g. native
+    # library warnings) to stderr so they cannot corrupt the JSONL framing.
+    if out_stream is sys.stdout:
+        sys.stdout = sys.stderr
+
+    for raw_line in in_stream:
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            response = handle_request(json.loads(line))
+        except Exception as exc:  # per-request isolation: never kill the loop
+            response = _error_response("", exc)
+        response_stream.write(compact_response(response))
+        response_stream.write("\n")
+        response_stream.flush()
 
 
 def pdf_info(request: dict[str, Any]) -> dict[str, Any]:
