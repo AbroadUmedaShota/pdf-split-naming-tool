@@ -26,7 +26,7 @@
 
 ## 運用文書
 
-- `../apps/desktop/RELEASE.md`: Tauri updater、GitHub Releases、`latest.json`、署名鍵、v0.1.1以降の配布手順。既存テストが参照するため `docs/` へ移動しない。
+- `../apps/desktop/RELEASE.md`: Tauri updater、GitHub Releases、`latest.json`、署名鍵、v0.1.2以降の配布手順。既存テストが参照するため `docs/` へ移動しない。
 
 ## 参考・履歴
 

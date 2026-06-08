@@ -66,7 +66,7 @@ npm run release:manifest
 
 ```powershell
 $repo = "AbroadUmedaShota/pdf-split-naming-tool"
-$version = "0.1.1"
+$version = "0.1.2"
 $tag = "v$version"
 
 gh release upload $tag `
@@ -82,7 +82,7 @@ asset 名だけを `latest.json` に戻します。これにより GitHub Releas
 
 ```powershell
 $repo = "AbroadUmedaShota/pdf-split-naming-tool"
-$version = "0.1.1"
+$version = "0.1.2"
 $tag = "v$version"
 $tempDir = Join-Path $env:TEMP "pdf-updater-release"
 $tempAsset = Join-Path $tempDir "latest-json"
@@ -109,7 +109,7 @@ https://github.com/AbroadUmedaShota/pdf-split-naming-tool/releases/latest/downlo
 
 ```powershell
 $repo = "AbroadUmedaShota/pdf-split-naming-tool"
-$version = "0.1.1"
+$version = "0.1.2"
 $tag = "v$version"
 
 curl.exe -sS -L "https://github.com/AbroadUmedaShota/pdf-split-naming-tool/releases/latest/download/latest.json"
