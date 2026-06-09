@@ -245,6 +245,19 @@ function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
+function outputCheckName(check: SidecarOutputCheck): string {
+  return check.filename || check.requested_filename || "";
+}
+
+// 出力フォルダでの並び（ファイル名順）を再現する。固定トークンはゼロ埋め済みのため、
+// 先頭に追加項目がない限り 箱No→バインダーNo→連番 の順になる。先頭項目があると
+// その値が第一キーになり、値ごとにまとまった並びをここで可視化できる。
+function sortChecksByOutputName(checks: SidecarOutputCheck[]): SidecarOutputCheck[] {
+  return [...checks].sort((a, b) =>
+    outputCheckName(a).localeCompare(outputCheckName(b), undefined, { numeric: true, sensitivity: "base" })
+  );
+}
+
 function sidecarError(response: SidecarResponse): string {
   return "error" in response ? response.error : "Sidecar response is not usable for this operation.";
 }
@@ -2178,22 +2191,29 @@ export default function Page() {
           description={preflightChecks.length ? `${preflightChecks.length}件` : "出力前チェック待ち"}
         />
         {preflightChecks.length ? (
-          <div className="output-list">
-            {preflightChecks.map((check, index) => (
-              <div
-                className={isOutputCheckOk(check) ? "output-row" : "output-row error"}
-                key={`${check.pdf_path}-${check.pages}-${index}`}
-              >
-                <span>
-                  <strong>{check.filename || check.requested_filename || "-"}</strong>
-                  <small>{basename(check.pdf_path)} / {check.pages}ページ</small>
-                </span>
-                <span className={isOutputCheckOk(check) ? "state-text ok" : "state-text warning"}>
-                  {outputListStateText(check)}
-                </span>
-              </div>
-            ))}
-          </div>
+          <>
+            {affixDefs.some((def) => def.position === "prefix") ? (
+              <p className="sort-note" role="note">
+                先頭の追加項目により、項目の値ごとにまとまって並びます（箱No順ではありません）。一覧は実際のファイル名順です。
+              </p>
+            ) : null}
+            <div className="output-list">
+              {sortChecksByOutputName(preflightChecks).map((check, index) => (
+                <div
+                  className={isOutputCheckOk(check) ? "output-row" : "output-row error"}
+                  key={`${check.pdf_path}-${check.pages}-${index}`}
+                >
+                  <span>
+                    <strong>{check.filename || check.requested_filename || "-"}</strong>
+                    <small>{basename(check.pdf_path)} / {check.pages}ページ</small>
+                  </span>
+                  <span className={isOutputCheckOk(check) ? "state-text ok" : "state-text warning"}>
+                    {outputListStateText(check)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </>
         ) : (
           <EmptyState
             action={
@@ -2528,40 +2548,45 @@ export default function Page() {
         </div>
         <div id="affix-defs-body" className="affix-defs-body" hidden={!affixExpanded}>
           {affixDefs.length ? (
-            <div className="affix-def-list">
-              {affixDefs.map((def, index) => (
-                <div className="affix-def-row" key={def.key}>
-                  <input
-                    aria-label={`追加項目${index + 1}の値`}
-                    className={transcribeTargetKey === def.key ? "affix-value-input transcribe-armed" : "affix-value-input"}
-                    disabled={!selectedSegment}
-                    placeholder={selectedSegment ? "値（例: ヨシダ商事）" : "セグメントを選択"}
-                    value={selectedSegment?.metadata[def.key] ?? ""}
-                    onChange={(event) => selectedSegment && updateMetadata(selectedSegment, def.key, event.target.value)}
-                    onFocus={() => armTranscribeTarget(def.key)}
-                  />
-                  <select
-                    aria-label={`追加項目${index + 1}の挿入位置`}
-                    value={def.position}
-                    onChange={(event) => updateAffixDef(def.key, { position: event.target.value as AffixDef["position"] })}
-                  >
-                    {AFFIX_POSITIONS.map((position) => (
-                      <option key={position} value={position}>
-                        {position === "prefix" ? "先頭" : "末尾"}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    aria-label={`追加項目${index + 1}を削除`}
-                    className="ghost danger"
-                    onClick={() => removeAffixDef(def.key)}
-                    type="button"
-                  >
-                    <Trash2 aria-hidden="true" size={16} />
-                  </button>
-                </div>
-              ))}
-            </div>
+            <>
+              <small className="affix-position-hint muted-line">
+                先頭＝ファイル名の左端（並び順が変わります）／末尾＝右端（並び順そのまま）。
+              </small>
+              <div className="affix-def-list">
+                {affixDefs.map((def, index) => (
+                  <div className="affix-def-row" key={def.key}>
+                    <input
+                      aria-label={`追加項目${index + 1}の値`}
+                      className={transcribeTargetKey === def.key ? "affix-value-input transcribe-armed" : "affix-value-input"}
+                      disabled={!selectedSegment}
+                      placeholder={selectedSegment ? "値（例: ヨシダ商事）" : "セグメントを選択"}
+                      value={selectedSegment?.metadata[def.key] ?? ""}
+                      onChange={(event) => selectedSegment && updateMetadata(selectedSegment, def.key, event.target.value)}
+                      onFocus={() => armTranscribeTarget(def.key)}
+                    />
+                    <select
+                      aria-label={`追加項目${index + 1}の挿入位置`}
+                      value={def.position}
+                      onChange={(event) => updateAffixDef(def.key, { position: event.target.value as AffixDef["position"] })}
+                    >
+                      {AFFIX_POSITIONS.map((position) => (
+                        <option key={position} value={position}>
+                          {position === "prefix" ? "先頭（左・並び変わる）" : "末尾（右・並び維持）"}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      aria-label={`追加項目${index + 1}を削除`}
+                      className="ghost danger"
+                      onClick={() => removeAffixDef(def.key)}
+                      type="button"
+                    >
+                      <Trash2 aria-hidden="true" size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
           ) : (
             <small className="muted-line">会社名・契約書名など、先頭/末尾に挿入する項目を追加できます。</small>
           )}
@@ -2707,25 +2732,32 @@ export default function Page() {
           </div>
         ) : null}
         {preflightChecks.length ? (
-          <div className="check-table">
-            <div className="check-head">
-              <span>ページ</span>
-              <span>予定ファイル名</span>
-              <span>既存</span>
-              <span>状態</span>
-            </div>
-            {preflightChecks.map((check, index) => (
-              <div
-                className={isOutputCheckOk(check) ? "check-row" : "check-row error"}
-                key={`${check.pdf_path}-${check.pages}-${index}`}
-              >
-                <span>{check.pages}</span>
-                <span>{check.filename || check.requested_filename || "-"}</span>
-                <span>{check.has_existing_output ? "あり" : "なし"}</span>
-                <span>{outputDetailStateText(check)}</span>
+          <>
+            {affixDefs.some((def) => def.position === "prefix") ? (
+              <p className="sort-note" role="note">
+                先頭の追加項目があるため、フォルダではその項目の値ごとにまとまって並びます（箱No順ではありません）。下の一覧は実際のファイル名順です。
+              </p>
+            ) : null}
+            <div className="check-table">
+              <div className="check-head">
+                <span>ページ</span>
+                <span>予定ファイル名</span>
+                <span>既存</span>
+                <span>状態</span>
               </div>
-            ))}
-          </div>
+              {sortChecksByOutputName(preflightChecks).map((check, index) => (
+                <div
+                  className={isOutputCheckOk(check) ? "check-row" : "check-row error"}
+                  key={`${check.pdf_path}-${check.pages}-${index}`}
+                >
+                  <span>{check.pages}</span>
+                  <span>{check.filename || check.requested_filename || "-"}</span>
+                  <span>{check.has_existing_output ? "あり" : "なし"}</span>
+                  <span>{outputDetailStateText(check)}</span>
+                </div>
+              ))}
+            </div>
+          </>
         ) : (
           <EmptyState icon={Download} title="出力前チェック待ちです">
             入力内容が揃ったら、ここで出力可否を確認します。

@@ -862,6 +862,18 @@ button.primary:hover:not(:disabled) {
   display: none;
 }
 
+/* 先頭の追加項目で並び順が変わる旨の注記（出力一覧の上に表示） */
+.sort-note {
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(8, 127, 115, 0.2);
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: var(--font-size-caption);
+  line-height: 1.5;
+}
+
 /* STEP3 追加項目(affix)の定義UI */
 .affix-defs-head {
   display: flex;
