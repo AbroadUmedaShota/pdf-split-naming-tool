@@ -42,6 +42,18 @@ def normalize_state_payload(payload: object, *, allow_invalid_input_paths: bool 
         normalized["common_metadata"] = _normalize_common_metadata(normalized["common_metadata"])
     if "affix_defs" in normalized:
         normalized["affix_defs"] = _normalize_affix_defs(normalized["affix_defs"])
+    if "seq_start" in normalized:
+        seq_start = _require_int("seq_start", normalized["seq_start"])
+        if seq_start < 1:
+            raise TypeError("seq_start must be an integer greater than or equal to 1.")
+        normalized["seq_start"] = seq_start
+    if "seq_digits" in normalized:
+        digits = _require_int("seq_digits", normalized["seq_digits"])
+        if digits < 1:
+            raise TypeError("seq_digits must be an integer greater than or equal to 1.")
+        normalized["seq_digits"] = digits
+    if "manual_seq_keys" in normalized:
+        normalized["manual_seq_keys"] = _normalize_manual_seq_keys(normalized["manual_seq_keys"])
 
     return normalized
 
@@ -146,6 +158,20 @@ def _normalize_affix_defs(value: object) -> list[dict[str, str]]:
             raise TypeError(f"affix_defs[{index}].label must be a string.")
         normalized.append({"key": key, "label": label, "position": position})
         seen_keys.add(key)
+    return normalized
+
+
+def _normalize_manual_seq_keys(value: object) -> list[str]:
+    if not isinstance(value, list):
+        raise TypeError("manual_seq_keys must be a list of strings.")
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(value):
+        if not isinstance(raw, str) or raw == "":
+            raise TypeError(f"manual_seq_keys[{index}] must be a non-empty string.")
+        if raw not in seen:
+            normalized.append(raw)
+            seen.add(raw)
     return normalized
 
 

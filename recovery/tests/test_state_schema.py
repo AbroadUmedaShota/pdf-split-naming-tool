@@ -188,3 +188,46 @@ def test_normalize_state_payload_without_affix_defs_is_unchanged() -> None:
 def test_normalize_state_payload_rejects_invalid_affix_defs(affix_defs: object, message: str) -> None:
     with pytest.raises(TypeError, match=message):
         normalize_state_payload({"affix_defs": affix_defs})
+
+
+def test_normalize_state_payload_accepts_seq_rule() -> None:
+    payload = {"seq_start": 5, "seq_digits": 4}
+    assert normalize_state_payload(payload) == {"seq_start": 5, "seq_digits": 4}
+
+
+def test_normalize_state_payload_accepts_seq_start_1() -> None:
+    payload = {"seq_start": 1}
+    assert normalize_state_payload(payload) == {"seq_start": 1}
+
+
+@pytest.mark.parametrize(
+    "payload, message",
+    [
+        ({"seq_start": "1"}, "seq_start must be an integer"),
+        ({"seq_start": 0}, "seq_start must be an integer greater than or equal to 1"),
+        ({"seq_start": -1}, "seq_start must be an integer greater than or equal to 1"),
+        ({"seq_digits": "3"}, "seq_digits must be an integer"),
+        ({"seq_digits": 0}, "seq_digits must be an integer greater than or equal to 1"),
+    ],
+)
+def test_normalize_state_payload_rejects_invalid_seq_rule(payload: dict[str, object], message: str) -> None:
+    with pytest.raises(TypeError, match=message):
+        normalize_state_payload(payload)
+
+
+def test_normalize_state_payload_accepts_manual_seq_keys() -> None:
+    payload = {"manual_seq_keys": ["a.pdf#1-2", "a.pdf#3-3", "a.pdf#1-2"]}
+    assert normalize_state_payload(payload) == {"manual_seq_keys": ["a.pdf#1-2", "a.pdf#3-3"]}
+
+
+@pytest.mark.parametrize(
+    "payload, message",
+    [
+        ({"manual_seq_keys": "nope"}, "manual_seq_keys must be a list"),
+        ({"manual_seq_keys": [""]}, "must be a non-empty string"),
+        ({"manual_seq_keys": [1]}, "must be a non-empty string"),
+    ],
+)
+def test_normalize_state_payload_rejects_invalid_manual_seq_keys(payload: dict[str, object], message: str) -> None:
+    with pytest.raises(TypeError, match=message):
+        normalize_state_payload(payload)

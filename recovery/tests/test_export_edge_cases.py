@@ -153,7 +153,8 @@ def test_sidecar_export_duplicate_requested_filenames_do_not_collide(tmp_path: P
     assert "Page 2" in pdf_text(output_paths[1])
 
 
-def test_sidecar_preflight_and_export_number_duplicates_after_existing_output(tmp_path: Path) -> None:
+def test_sidecar_preflight_and_export_block_when_existing_output_present(tmp_path: Path) -> None:
+    # New behaviour: disk-level conflict => preflight can_run=False, export blocked.
     source = tmp_path / "source.pdf"
     output_dir = tmp_path / "output"
     output_dir.mkdir()
@@ -171,18 +172,15 @@ def test_sidecar_preflight_and_export_number_duplicates_after_existing_output(tm
     preflight_response = handle_request({"command": "preflight", **request})
     export_response = handle_request({"command": "export", **request})
 
-    output_paths = [Path(item["output_path"]) for item in export_response["items"]]
     assert preflight_response["ok"] is True
-    assert [Path(item["output_path"]).name for item in preflight_response["checks"]] == [
-        "01_02_003_2.pdf",
-        "01_02_003_3.pdf",
-    ]
-    assert export_response["ok"] is True
-    assert export_response["summary"] == {"created": 2, "failed": 0}
-    assert [path.name for path in output_paths] == ["01_02_003_2.pdf", "01_02_003_3.pdf"]
+    assert preflight_response["can_run"] is False
+    assert any("output_exists" in check["messages"] for check in preflight_response["checks"])
+    assert export_response["ok"] is False
+    assert export_response["messages"] == ["preflight_failed"]
+    assert export_response["summary"] == {"created": 0, "failed": 2}
+    # Existing file must not be touched.
     assert existing_path.read_bytes() == b"existing"
-    assert "Page 1" in pdf_text(output_paths[0])
-    assert "Page 2" in pdf_text(output_paths[1])
+    assert_no_pdfs(output_dir / "01_02_003_2.pdf")
 
 
 def test_pdf_service_publish_file_exclusive_does_not_overwrite_existing_path(tmp_path: Path) -> None:
@@ -195,3 +193,90 @@ def test_pdf_service_publish_file_exclusive_does_not_overwrite_existing_path(tmp
         PdfService.publish_file_exclusive(source, output)
 
     assert output.read_bytes() == b"existing"
+
+
+def test_sidecar_export_partial_failure_includes_export_incomplete_in_messages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2セグメント中1つだけ split_pdf が失敗したとき、messages に export_incomplete が含まれること。"""
+    from pdf_splitter_tool.processor import PdfProcessor
+
+    source = tmp_path / "source.pdf"
+    output_dir = tmp_path / "output"
+    make_pdf(source, 2)
+
+    call_count = 0
+    original_split_pdf = PdfProcessor.split_pdf
+
+    def split_pdf_fail_on_second(seg: object, dest: object) -> object:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise RuntimeError("simulated write failure")
+        return original_split_pdf(seg, dest)
+
+    monkeypatch.setattr(PdfProcessor, "split_pdf", staticmethod(split_pdf_fail_on_second))
+
+    response = handle_request(
+        {
+            "command": "export",
+            "output_dir": str(output_dir),
+            "segments": [
+                segment(source, 1, 1, "1"),
+                segment(source, 2, 2, "2"),
+            ],
+        }
+    )
+
+    assert response["ok"] is False
+    assert response["summary"]["created"] == 1
+    assert response["summary"]["failed"] == 1
+    assert "export_incomplete" in response["messages"]
+
+
+def test_sidecar_export_all_success_has_empty_messages(tmp_path: Path) -> None:
+    """全セグメント成功時は messages が空リストであること。"""
+    source = tmp_path / "source.pdf"
+    output_dir = tmp_path / "output"
+    make_pdf(source, 1)
+
+    response = handle_request(
+        {
+            "command": "export",
+            "output_dir": str(output_dir),
+            "segments": [segment(source, 1, 1)],
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["summary"] == {"created": 1, "failed": 0}
+    assert response["messages"] == []
+
+
+def test_sidecar_export_all_failure_does_not_include_export_incomplete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """全セグメント失敗（created=0）のときは export_incomplete を出さないこと。"""
+    from pdf_splitter_tool.processor import PdfProcessor
+
+    source = tmp_path / "source.pdf"
+    output_dir = tmp_path / "output"
+    make_pdf(source, 1)
+
+    def split_pdf_always_fail(seg: object, dest: object) -> object:
+        raise RuntimeError("simulated total failure")
+
+    monkeypatch.setattr(PdfProcessor, "split_pdf", staticmethod(split_pdf_always_fail))
+
+    response = handle_request(
+        {
+            "command": "export",
+            "output_dir": str(output_dir),
+            "segments": [segment(source, 1, 1)],
+        }
+    )
+
+    assert response["ok"] is False
+    assert response["summary"]["created"] == 0
+    assert response["summary"]["failed"] == 1
+    assert "export_incomplete" not in response["messages"]

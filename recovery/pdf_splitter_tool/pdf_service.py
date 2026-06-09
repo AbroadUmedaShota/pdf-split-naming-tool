@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 import os
@@ -26,6 +26,24 @@ class PdfService:
         if fitz is None:
             raise RuntimeError("PyMuPDF is required for PDF operations.")
         return fitz
+
+    @staticmethod
+    def _open_doc(pdf_path, fitz_module=None):
+        """Open a PDF document and raise ValueError for password-protected files.
+
+        Returns the fitz.Document. Callers are responsible for closing it
+        (use as a context manager or call .close() explicitly).
+        """
+        if fitz_module is None:
+            fitz_module = PdfService._require_fitz()
+        doc = fitz_module.open(pdf_path)
+        if doc.needs_pass:
+            doc.close()
+            raise ValueError(
+                "パスワード付きPDFには対応していません。"
+                f" ({Path(pdf_path).name})"
+            )
+        return doc
 
     @staticmethod
     def one_based_page_to_fitz_index(page_no: int) -> int:
@@ -61,7 +79,7 @@ class PdfService:
     @staticmethod
     def page_count(pdf_path: Path) -> int:
         fitz_module = PdfService._require_fitz()
-        with fitz_module.open(pdf_path) as doc:
+        with PdfService._open_doc(pdf_path, fitz_module) as doc:
             return doc.page_count
 
     @staticmethod
@@ -77,7 +95,7 @@ class PdfService:
     @staticmethod
     def page_preview_data_url(pdf_path: Path, page_no: int, zoom: float = 1.2) -> str:
         fitz_module = PdfService._require_fitz()
-        with fitz_module.open(pdf_path) as doc:
+        with PdfService._open_doc(pdf_path, fitz_module) as doc:
             page_index = PdfService.one_based_page_to_fitz_index(page_no)
             if page_index >= doc.page_count:
                 raise ValueError("PDF page number exceeds document page count.")
@@ -94,7 +112,7 @@ class PdfService:
     @staticmethod
     def page_text(pdf_path: Path, page_no: int) -> str:
         fitz_module = PdfService._require_fitz()
-        with fitz_module.open(pdf_path) as doc:
+        with PdfService._open_doc(pdf_path, fitz_module) as doc:
             page_index = PdfService.one_based_page_to_fitz_index(page_no)
             if page_index >= doc.page_count:
                 raise ValueError("PDF page number exceeds document page count.")
@@ -110,7 +128,7 @@ class PdfService:
         query_lower = query.lower()
         results: list[dict[str, object]] = []
         for pdf_path in pdf_paths:
-            with fitz_module.open(pdf_path) as doc:
+            with PdfService._open_doc(pdf_path, fitz_module) as doc:
                 for page_index in range(doc.page_count):
                     text = doc.load_page(page_index).get_text("text")
                     text_lower = text.lower()
@@ -141,7 +159,7 @@ class PdfService:
             return []
 
         fitz_module = PdfService._require_fitz()
-        with fitz_module.open(pdf_path) as doc:
+        with PdfService._open_doc(pdf_path, fitz_module) as doc:
             page_index = PdfService.one_based_page_to_fitz_index(page_no)
             if page_index >= doc.page_count:
                 raise ValueError("PDF page number exceeds document page count.")
@@ -170,7 +188,7 @@ class PdfService:
         fitz_module = PdfService._require_fitz()
         results: list[dict[str, object]] = []
         for pdf_path in pdf_paths:
-            with fitz_module.open(pdf_path) as doc:
+            with PdfService._open_doc(pdf_path, fitz_module) as doc:
                 for page_index in range(doc.page_count):
                     text = doc.load_page(page_index).get_text("text")
                     if not text.strip():
@@ -195,7 +213,7 @@ class PdfService:
     def blank_candidates(pdf_path: Path, threshold: float = 0.985) -> list[dict[str, object]]:
         fitz_module = PdfService._require_fitz()
         candidates: list[dict[str, object]] = []
-        with fitz_module.open(pdf_path) as doc:
+        with PdfService._open_doc(pdf_path, fitz_module) as doc:
             for page_index in range(doc.page_count):
                 page = doc.load_page(page_index)
                 text = page.get_text("text").strip()
@@ -224,7 +242,7 @@ class PdfService:
         fitz_module = PdfService._require_fitz()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = output_path.with_name(f".{output_path.name}.{uuid4().hex}.tmp")
-        with fitz_module.open(segment.pdf_path) as src:
+        with PdfService._open_doc(segment.pdf_path, fitz_module) as src:
             start_index, end_index = PdfService.one_based_range_to_fitz_indexes(
                 src.page_count,
                 segment.start_page,

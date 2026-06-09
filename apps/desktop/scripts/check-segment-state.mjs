@@ -222,8 +222,8 @@ assert.deepEqual(splitPointsFor(5, [5, 2, 5, 1, 0, 6]), [2, 5]);
     },
   });
 
-  assert.deepEqual(reconciled[firstSplitKey], { box_no: "09", binder_no: "12", seq: "" });
-  assert.deepEqual(reconciled[secondSplitKey], { box_no: "09", binder_no: "12", seq: "" });
+  assert.deepEqual(reconciled[firstSplitKey], { box_no: "09", binder_no: "12", seq: "", custom: "old" });
+  assert.deepEqual(reconciled[secondSplitKey], { box_no: "09", binder_no: "12", seq: "", custom: "old" });
   assert.deepEqual(reconciled[otherPdfKey], { box_no: "77", binder_no: "88", seq: "999" });
   assert.deepEqual(reconciled[otherPdfFirstSplitKey], { box_no: "55", binder_no: "66", seq: "111" });
   assert.deepEqual(splitPointsByPdf, {
@@ -246,8 +246,8 @@ assert.deepEqual(splitPointsFor(5, [5, 2, 5, 1, 0, 6]), [2, 5]);
   assert.deepEqual(
     segments.map((segment) => segment.metadata),
     [
-      { box_no: "09", binder_no: "12", seq: "" },
-      { box_no: "09", binder_no: "12", seq: "" },
+      { box_no: "09", binder_no: "12", seq: "", custom: "old" },
+      { box_no: "09", binder_no: "12", seq: "", custom: "old" },
       { box_no: "55", binder_no: "66", seq: "111" },
       { box_no: "", binder_no: "", seq: "" },
     ],
@@ -325,4 +325,33 @@ assert.deepEqual(splitPointsFor(5, [5, 2, 5, 1, 0, 6]), [2, 5]);
   });
 
   assert.equal(reconciled[wholeKey], undefined);
+}
+
+// regression: affix fields (affix1, affix2, ...) must be carried over when split points change
+{
+  const reconciled = reconcileSegmentMetadataForPdf({
+    pageCount: 10,
+    pdfPath,
+    previousSplitPoints: [],
+    nextSplitPoints: [6],
+    segmentMetadata: {
+      [wholeKey]: { box_no: "10", binder_no: "20", seq: "001", affix1: "prefix-A", affix2: "suffix-B" },
+    },
+  });
+
+  // seq is reset; box_no/binder_no and affix fields are inherited from the containing segment
+  assert.deepEqual(reconciled[firstSplitKey], {
+    box_no: "10",
+    binder_no: "20",
+    seq: "",
+    affix1: "prefix-A",
+    affix2: "suffix-B",
+  });
+  assert.deepEqual(reconciled[secondSplitKey], {
+    box_no: "10",
+    binder_no: "20",
+    seq: "",
+    affix1: "prefix-A",
+    affix2: "suffix-B",
+  });
 }
