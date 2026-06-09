@@ -113,9 +113,11 @@ export function reconcileSegmentMetadataForPdf({
     const previousMetadata = containingPreviousSegment ? segmentMetadata[containingPreviousSegment.key] : undefined;
 
     if (previousMetadata) {
+      const { seq: _seq, ...rest } = previousMetadata;
       nextMetadata[nextSegment.key] = {
         box_no: previousMetadata.box_no ?? "",
         binder_no: previousMetadata.binder_no ?? "",
+        ...rest,
         seq: ""
       };
     }

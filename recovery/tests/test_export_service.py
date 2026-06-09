@@ -37,7 +37,8 @@ def test_check_segment_outputs_reserves_duplicate_output_names_in_same_preflight
     ]
 
 
-def test_check_segment_outputs_marks_existing_file_and_uses_unique_output_path(tmp_path: Path) -> None:
+def test_check_segment_outputs_blocks_when_existing_file_present(tmp_path: Path) -> None:
+    # New behaviour: disk-level conflict => ok=False, no output path allocated.
     source = tmp_path / "source.pdf"
     existing = tmp_path / "01_02_003.pdf"
     existing.write_bytes(b"existing")
@@ -45,12 +46,13 @@ def test_check_segment_outputs_marks_existing_file_and_uses_unique_output_path(t
 
     [check] = check_segment_outputs([segment], tmp_path, processor=PageCountProcessor(page_count=1))
 
-    assert check.ok
+    assert not check.ok
     assert check.has_existing_output
     assert check.existing_path == existing
     assert check.requested_path == existing
-    assert check.output_path == tmp_path / "01_02_003_2.pdf"
-    assert check.filename == "01_02_003_2.pdf"
+    assert check.output_path is None
+    assert "output_exists" in check.messages
+    assert check.filename == "01_02_003.pdf"
 
 
 def test_check_segment_outputs_blocks_page_range_beyond_pdf_page_count(tmp_path: Path) -> None:

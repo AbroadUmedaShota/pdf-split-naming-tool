@@ -153,7 +153,8 @@ def test_sidecar_export_duplicate_requested_filenames_do_not_collide(tmp_path: P
     assert "Page 2" in pdf_text(output_paths[1])
 
 
-def test_sidecar_preflight_and_export_number_duplicates_after_existing_output(tmp_path: Path) -> None:
+def test_sidecar_preflight_and_export_block_when_existing_output_present(tmp_path: Path) -> None:
+    # New behaviour: disk-level conflict => preflight can_run=False, export blocked.
     source = tmp_path / "source.pdf"
     output_dir = tmp_path / "output"
     output_dir.mkdir()
@@ -171,18 +172,15 @@ def test_sidecar_preflight_and_export_number_duplicates_after_existing_output(tm
     preflight_response = handle_request({"command": "preflight", **request})
     export_response = handle_request({"command": "export", **request})
 
-    output_paths = [Path(item["output_path"]) for item in export_response["items"]]
     assert preflight_response["ok"] is True
-    assert [Path(item["output_path"]).name for item in preflight_response["checks"]] == [
-        "01_02_003_2.pdf",
-        "01_02_003_3.pdf",
-    ]
-    assert export_response["ok"] is True
-    assert export_response["summary"] == {"created": 2, "failed": 0}
-    assert [path.name for path in output_paths] == ["01_02_003_2.pdf", "01_02_003_3.pdf"]
+    assert preflight_response["can_run"] is False
+    assert any("output_exists" in check["messages"] for check in preflight_response["checks"])
+    assert export_response["ok"] is False
+    assert export_response["messages"] == ["preflight_failed"]
+    assert export_response["summary"] == {"created": 0, "failed": 2}
+    # Existing file must not be touched.
     assert existing_path.read_bytes() == b"existing"
-    assert "Page 1" in pdf_text(output_paths[0])
-    assert "Page 2" in pdf_text(output_paths[1])
+    assert_no_pdfs(output_dir / "01_02_003_2.pdf")
 
 
 def test_pdf_service_publish_file_exclusive_does_not_overwrite_existing_path(tmp_path: Path) -> None:

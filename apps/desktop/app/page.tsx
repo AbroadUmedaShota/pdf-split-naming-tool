@@ -171,12 +171,12 @@ const devPreviewChecks: SidecarOutputCheck[] = [
   },
   {
     existing_path: `${devPreviewOutputDir}\\01_01_002.pdf`,
-    filename: "01_01_002_2.pdf",
+    filename: "01_01_002.pdf",
     has_existing_output: true,
-    messages: ["既存ファイルを避けるため一意名で出力します。"],
+    messages: ["output_exists"],
     metadata: devPreviewMetadata[`${step2ReviewPdfPath}#4-7`],
-    ok: true,
-    output_path: `${devPreviewOutputDir}\\01_01_002_2.pdf`,
+    ok: false,
+    output_path: "",
     pages: "4-7",
     pdf_path: step2ReviewPdfPath,
     requested_filename: "01_01_002.pdf",
@@ -557,7 +557,7 @@ export default function Page() {
   const existingOutputs = preflightChecks.filter((check) => check.has_existing_output).length;
   const canContinueFromImport = pdfFiles.length > 0 && Boolean(outputDir);
   const canRunPreflight = allSegments.length > 0 && Boolean(outputDir);
-  const canExport = preflightChecks.length > 0 && outputIssues === 0;
+  const canExport = preflightChecks.length > 0 && outputIssues === 0 && existingOutputs === 0;
 
   function clearOutputState(): void {
     setPreflightChecks([]);

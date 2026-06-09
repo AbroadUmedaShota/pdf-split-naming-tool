@@ -80,20 +80,39 @@ def check_segment_outputs(
         if result.ok and not messages:
             requested_path = output_dir / result.normalized_filename
             has_existing_output = requested_path.exists()
-            output_path = export_policy.reserve_output_path(requested_path)
-            checks.append(
-                SegmentOutputCheck(
-                    segment=segment,
-                    ok=True,
-                    filename=output_path.name,
-                    output_path=output_path,
-                    messages=tuple(messages),
-                    requested_filename=result.normalized_filename,
-                    requested_path=requested_path,
-                    existing_path=requested_path if has_existing_output else None,
-                    has_existing_output=has_existing_output,
+            if has_existing_output:
+                # Disk-level conflict: block with ok=False. No path is reserved so
+                # sibling segments are not affected by this slot.
+                checks.append(
+                    SegmentOutputCheck(
+                        segment=segment,
+                        ok=False,
+                        filename=result.normalized_filename,
+                        output_path=None,
+                        messages=("output_exists",),
+                        requested_filename=result.normalized_filename,
+                        requested_path=requested_path,
+                        existing_path=requested_path,
+                        has_existing_output=True,
+                    )
                 )
-            )
+            else:
+                # No disk conflict. Reserve within the current batch to avoid
+                # intra-batch duplicate names (reserved set, not disk-level).
+                output_path = export_policy.reserve_output_path(requested_path)
+                checks.append(
+                    SegmentOutputCheck(
+                        segment=segment,
+                        ok=True,
+                        filename=output_path.name,
+                        output_path=output_path,
+                        messages=tuple(messages),
+                        requested_filename=result.normalized_filename,
+                        requested_path=requested_path,
+                        existing_path=None,
+                        has_existing_output=False,
+                    )
+                )
         else:
             checks.append(
                 SegmentOutputCheck(

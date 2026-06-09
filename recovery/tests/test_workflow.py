@@ -45,7 +45,8 @@ def test_check_segment_outputs_simulates_duplicate_names(tmp_path: Path) -> None
     assert [check.filename for check in checks] == ["01_02_003.pdf", "01_02_003_2.pdf"]
 
 
-def test_check_segment_outputs_detects_existing_and_defaults_to_unique(tmp_path: Path) -> None:
+def test_check_segment_outputs_blocks_when_existing_output_present(tmp_path: Path) -> None:
+    # New behaviour: disk-level conflict => ok=False, output_exists message, no output path.
     source = tmp_path / "source.pdf"
     existing = tmp_path / "01_02_003.pdf"
     existing.write_text("existing", encoding="utf-8")
@@ -53,14 +54,16 @@ def test_check_segment_outputs_detects_existing_and_defaults_to_unique(tmp_path:
 
     checks = check_segment_outputs([segment], tmp_path, processor=PageCountProcessor(page_count=1))
 
-    assert checks[0].ok
+    assert not checks[0].ok
     assert checks[0].has_existing_output
     assert checks[0].existing_path == existing
-    assert checks[0].filename == "01_02_003_2.pdf"
-    assert checks[0].output_path == tmp_path / "01_02_003_2.pdf"
+    assert "output_exists" in checks[0].messages
+    assert checks[0].output_path is None
+    assert checks[0].filename == "01_02_003.pdf"
 
 
-def test_check_segment_outputs_keeps_requested_name_when_existing_and_batch_collide(tmp_path: Path) -> None:
+def test_check_segment_outputs_blocks_all_when_existing_and_batch_collide(tmp_path: Path) -> None:
+    # Both segments collide with pre-existing disk files => both blocked.
     source = tmp_path / "source.pdf"
     (tmp_path / "01_02_003.pdf").write_text("existing", encoding="utf-8")
     (tmp_path / "01_02_003_2.pdf").write_text("existing", encoding="utf-8")
@@ -71,13 +74,28 @@ def test_check_segment_outputs_keeps_requested_name_when_existing_and_batch_coll
 
     checks = check_segment_outputs(segments, tmp_path, processor=PageCountProcessor(page_count=2))
 
-    assert [check.ok for check in checks] == [True, True]
+    # Both requested_path targets exist on disk => both blocked.
+    assert [check.ok for check in checks] == [False, False]
     assert [check.requested_filename for check in checks] == ["01_02_003.pdf", "01_02_003.pdf"]
-    assert [check.requested_path for check in checks] == [tmp_path / "01_02_003.pdf", tmp_path / "01_02_003.pdf"]
-    assert [check.filename for check in checks] == ["01_02_003_3.pdf", "01_02_003_4.pdf"]
-    assert [check.output_path for check in checks] == [tmp_path / "01_02_003_3.pdf", tmp_path / "01_02_003_4.pdf"]
-    assert [check.existing_path for check in checks] == [tmp_path / "01_02_003.pdf", tmp_path / "01_02_003.pdf"]
     assert [check.has_existing_output for check in checks] == [True, True]
+    assert all("output_exists" in check.messages for check in checks)
+    assert [check.output_path for check in checks] == [None, None]
+
+
+def test_check_segment_outputs_intra_batch_duplicate_without_disk_conflict_still_ok(tmp_path: Path) -> None:
+    # Intra-batch duplicates (no existing disk files) remain ok=True, resolved by reservation.
+    source = tmp_path / "source.pdf"
+    segments = [
+        Segment(source, 1, 1, {"box_no": "1", "binder_no": "2", "seq": "3"}),
+        Segment(source, 2, 2, {"box_no": "1", "binder_no": "2", "seq": "3"}),
+    ]
+
+    checks = check_segment_outputs(segments, tmp_path, processor=PageCountProcessor(page_count=2))
+
+    assert [check.ok for check in checks] == [True, True]
+    assert checks[0].filename == "01_02_003.pdf"
+    assert checks[1].filename == "01_02_003_2.pdf"
+    assert [check.has_existing_output for check in checks] == [False, False]
 
 
 def test_check_segment_outputs_detects_invalid_page_range(tmp_path: Path) -> None:
