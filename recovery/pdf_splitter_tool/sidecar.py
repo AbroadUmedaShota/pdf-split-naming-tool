@@ -278,12 +278,16 @@ def export(request: dict[str, Any]) -> dict[str, Any]:
                 item["error_type"] = type(exc).__name__
                 summary["failed"] += 1
         items.append(item)
+    messages: list[str] = []
+    if summary["failed"] > 0 and summary["created"] > 0:
+        messages.append("export_incomplete")
     return {
         "ok": summary["failed"] == 0,
         "command": "export",
         "output_dir": str(output_dir),
         "summary": summary,
         "items": items,
+        "messages": messages,
     }
 
 

@@ -43,7 +43,10 @@ def normalize_state_payload(payload: object, *, allow_invalid_input_paths: bool 
     if "affix_defs" in normalized:
         normalized["affix_defs"] = _normalize_affix_defs(normalized["affix_defs"])
     if "seq_start" in normalized:
-        normalized["seq_start"] = _require_int("seq_start", normalized["seq_start"])
+        seq_start = _require_int("seq_start", normalized["seq_start"])
+        if seq_start < 1:
+            raise TypeError("seq_start must be an integer greater than or equal to 1.")
+        normalized["seq_start"] = seq_start
     if "seq_digits" in normalized:
         digits = _require_int("seq_digits", normalized["seq_digits"])
         if digits < 1:

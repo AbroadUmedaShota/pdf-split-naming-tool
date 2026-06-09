@@ -1,4 +1,4 @@
-import base64
+﻿import base64
 from pathlib import Path
 
 import fitz
@@ -14,6 +14,20 @@ def make_pdf(path: Path, pages: int, width: float = 595, height: float = 842) ->
         page = doc.new_page(width=width, height=height)
         page.insert_text((72, 72), f"Page {index + 1}")
     doc.save(path)
+    doc.close()
+
+
+def make_encrypted_pdf(path: Path, pages: int = 1, user_pw: str = "secret") -> None:
+    doc = fitz.open()
+    for index in range(pages):
+        page = doc.new_page()
+        page.insert_text((72, 72), f"Page {index + 1}")
+    doc.save(
+        path,
+        encryption=fitz.PDF_ENCRYPT_AES_256,
+        user_pw=user_pw,
+        owner_pw=user_pw,
+    )
     doc.close()
 
 
@@ -147,3 +161,83 @@ def test_page_preview_rejects_zero_page_number(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="1-based"):
         PdfService.page_preview_data_url(source, 0)
+
+
+# ---------------------------------------------------------------------------
+# Encrypted / password-protected PDF tests (issue #98)
+# ---------------------------------------------------------------------------
+
+
+def test_page_count_rejects_encrypted_pdf(tmp_path: Path) -> None:
+    source = tmp_path / "encrypted.pdf"
+    make_encrypted_pdf(source)
+
+    with pytest.raises(ValueError, match="パスワード付きPDF"):
+        PdfService.page_count(source)
+
+
+def test_split_pdf_rejects_encrypted_pdf(tmp_path: Path) -> None:
+    source = tmp_path / "encrypted.pdf"
+    make_encrypted_pdf(source, pages=2)
+
+    with pytest.raises(ValueError, match="パスワード付きPDF"):
+        PdfService.split_pdf(Segment(source, start_page=1, end_page=1), tmp_path / "out.pdf")
+
+
+def test_split_pdf_encrypted_does_not_produce_output_file(tmp_path: Path) -> None:
+    source = tmp_path / "encrypted.pdf"
+    make_encrypted_pdf(source)
+    out = tmp_path / "out.pdf"
+
+    with pytest.raises(ValueError):
+        PdfService.split_pdf(Segment(source, start_page=1, end_page=1), out)
+
+    assert not out.exists(), "split_pdf must not create any output file for encrypted PDFs"
+
+
+def test_page_text_rejects_encrypted_pdf(tmp_path: Path) -> None:
+    source = tmp_path / "encrypted.pdf"
+    make_encrypted_pdf(source)
+
+    with pytest.raises(ValueError, match="パスワード付きPDF"):
+        PdfService.page_text(source, 1)
+
+
+def test_page_preview_rejects_encrypted_pdf(tmp_path: Path) -> None:
+    source = tmp_path / "encrypted.pdf"
+    make_encrypted_pdf(source)
+
+    with pytest.raises(ValueError, match="パスワード付きPDF"):
+        PdfService.page_preview_data_url(source, 1)
+
+
+def test_search_text_rejects_encrypted_pdf(tmp_path: Path) -> None:
+    source = tmp_path / "encrypted.pdf"
+    make_encrypted_pdf(source)
+
+    with pytest.raises(ValueError, match="パスワード付きPDF"):
+        PdfService.search_text([source], "Page")
+
+
+def test_search_highlights_rejects_encrypted_pdf(tmp_path: Path) -> None:
+    source = tmp_path / "encrypted.pdf"
+    make_encrypted_pdf(source)
+
+    with pytest.raises(ValueError, match="パスワード付きPDF"):
+        PdfService.search_highlights(source, 1, "Page")
+
+
+def test_index_candidates_rejects_encrypted_pdf(tmp_path: Path) -> None:
+    source = tmp_path / "encrypted.pdf"
+    make_encrypted_pdf(source)
+
+    with pytest.raises(ValueError, match="パスワード付きPDF"):
+        PdfService.index_candidates([source])
+
+
+def test_blank_candidates_rejects_encrypted_pdf(tmp_path: Path) -> None:
+    source = tmp_path / "encrypted.pdf"
+    make_encrypted_pdf(source)
+
+    with pytest.raises(ValueError, match="パスワード付きPDF"):
+        PdfService.blank_candidates(source)

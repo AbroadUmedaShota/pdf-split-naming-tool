@@ -57,7 +57,7 @@ import {
   missingMetadata,
   previewFilename
 } from "../lib/filename-policy";
-import { isOutputCheckOk, outputDetailStateText, outputIssueCount, outputListStateText } from "../lib/output-state";
+import { formatTopLevelMessage, isOutputCheckOk, outputDetailStateText, outputIssueCount, outputListStateText } from "../lib/output-state";
 import { loadPagePreview } from "../lib/preview-flow";
 import { createPreviewRequestGate, previewCache } from "../lib/preview-cache";
 import {
@@ -1749,7 +1749,7 @@ export default function Page() {
 
   function updateSeqStart(value: string): void {
     const parsed = Number(value);
-    const nextStart = Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
+    const nextStart = Number.isFinite(parsed) ? Math.max(1, Math.trunc(parsed)) : 1;
     setSeqStart(nextStart);
     invalidateWorkspaceRequests();
     clearOutputState();
@@ -1940,7 +1940,7 @@ export default function Page() {
       setSegmentMetadata(state.segment_metadata ?? {});
       setCommonMetadata({ ...defaultCommonMetadata, ...(state.common_metadata ?? {}) });
       setAffixDefs(Array.isArray(state.affix_defs) ? state.affix_defs : []);
-      setSeqStart(typeof state.seq_start === "number" ? Math.max(0, Math.trunc(state.seq_start)) : 1);
+      setSeqStart(typeof state.seq_start === "number" ? Math.max(1, Math.trunc(state.seq_start)) : 1);
       setSeqDigits(coerceSeqDigits(state.seq_digits));
       manualSeqKeysRef.current = new Set(Array.isArray(state.manual_seq_keys) ? state.manual_seq_keys : []);
       setCurrentPdf(restoreDecision.currentPdf);
@@ -2653,7 +2653,7 @@ export default function Page() {
                   <label>
                     開始番号
                     <input
-                      min={0}
+                      min={1}
                       type="number"
                       value={seqStart}
                       onChange={(event) => updateSeqStart(event.target.value)}
@@ -2732,6 +2732,13 @@ export default function Page() {
           <div className="log-box">
             <strong>出力結果</strong>
             <p>{`作成 ${exportResult.summary.created}件 / 失敗 ${exportResult.summary.failed}件`}</p>
+            {exportResult.messages && exportResult.messages.length > 0 ? (
+              <ul className="export-messages">
+                {exportResult.messages.map((msg) => (
+                  <li key={msg}>{formatTopLevelMessage(msg)}</li>
+                ))}
+              </ul>
+            ) : null}
           </div>
         ) : null}
         {preflightChecks.length ? (

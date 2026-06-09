@@ -14,6 +14,13 @@ export function outputIssueCount(checks: OutputCheckLike[]): number {
   return checks.filter((check) => !isOutputCheckOk(check)).length;
 }
 
+export function formatTopLevelMessage(msg: string): string {
+  if (msg === "export_incomplete") {
+    return "一部のファイルが出力できませんでした。出力フォルダの内容が不完全な可能性があります";
+  }
+  return msg;
+}
+
 function formatMessage(msg: string): string {
   if (msg === "output_exists") {
     return "同名ファイルが既存です。出力先を変更するか既存ファイルを削除してください";

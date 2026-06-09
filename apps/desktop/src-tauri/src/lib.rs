@@ -132,10 +132,18 @@ fn wait_for_sidecar_output(
             });
         }
         if started_at.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = join_child_pipe_reader(stdout_reader, "stdout");
-            let _ = join_child_pipe_reader(stderr_reader, "stderr");
+            let killed = child.kill().is_ok();
+            if killed {
+                // kill 成功時のみ wait/join で後始末（プロセスが終了しているので EOF が来る）
+                let _ = child.wait();
+                let _ = join_child_pipe_reader(stdout_reader, "stdout");
+                let _ = join_child_pipe_reader(stderr_reader, "stderr");
+            } else {
+                // kill 失敗時はプロセスが生きたまま wait/join するとブロックするためデタッチ
+                // JoinHandle を drop してもスレッドは動き続け、プロセス終了時に自然回収される
+                drop(stdout_reader);
+                drop(stderr_reader);
+            }
             return Err(format!(
                 "Python sidecar timed out after {} ms",
                 timeout.as_millis()
