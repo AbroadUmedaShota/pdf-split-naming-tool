@@ -456,6 +456,8 @@ export default function Page() {
   const [selectedSegmentKey, setSelectedSegmentKey] = useState("");
   const [preflightChecks, setPreflightChecks] = useState<SidecarOutputCheck[]>([]);
   const [exportResult, setExportResult] = useState<SidecarExportResponse | null>(null);
+  const [isPreflighting, setIsPreflighting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [status, setStatus] = useState("PDFを選択してください。");
   const [currentVersion, setCurrentVersion] = useState("0.1.0");
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
@@ -491,6 +493,9 @@ export default function Page() {
   const pageTextRequestGateRef = useRef(createPreviewRequestGate());
   const pdfAuxiliaryRequestGateRef = useRef(createPreviewRequestGate());
   const zoomReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 出力前チェック/出力実行の二重起動を同期的に防ぐ（連打対策。state は表示用 disable）。
+  const preflightInFlightRef = useRef(false);
+  const exportInFlightRef = useRef(false);
   // 連番を手動で上書きしたセグメントキー（再採番で保護。state に保存・復元される）。
   const manualSeqKeysRef = useRef<Set<string>>(new Set());
   // 取得済みサムネイルのキー（`${pdfPath}#${pageNo}`）。PDF再選択時の再取得を防ぐ。
@@ -1615,13 +1620,20 @@ export default function Page() {
   }
 
   // 連番(seq)以外（箱No・バインダーNo・追加項目の値）を対象にしたコピー用パッチを作る。
+  // 空欄は適用先の入力済み値を黙って消さないようパッチに含めない（誤消去の防止）。
   function copyableMetadataPatch(source: Record<string, string>): Record<string, string> {
-    const patch: Record<string, string> = {
-      box_no: source.box_no ?? "",
-      binder_no: source.binder_no ?? ""
-    };
+    const patch: Record<string, string> = {};
+    if (source.box_no) {
+      patch.box_no = source.box_no;
+    }
+    if (source.binder_no) {
+      patch.binder_no = source.binder_no;
+    }
     for (const def of affixDefs) {
-      patch[def.key] = source[def.key] ?? "";
+      const value = source[def.key];
+      if (value) {
+        patch[def.key] = value;
+      }
     }
     return patch;
   }
@@ -1811,6 +1823,11 @@ export default function Page() {
   }
 
   async function runPreflight(): Promise<void> {
+    if (preflightInFlightRef.current) {
+      return;
+    }
+    preflightInFlightRef.current = true;
+    setIsPreflighting(true);
     try {
       const response = await invokeSidecar({
         command: "preflight",
@@ -1829,10 +1846,18 @@ export default function Page() {
       setActiveStep("output");
     } catch (error) {
       setStatus(`出力前チェックエラー: ${String(error)}`);
+    } finally {
+      preflightInFlightRef.current = false;
+      setIsPreflighting(false);
     }
   }
 
   async function runExport(): Promise<void> {
+    if (exportInFlightRef.current) {
+      return;
+    }
+    exportInFlightRef.current = true;
+    setIsExporting(true);
     try {
       const response = await invokeSidecar({
         command: "export",
@@ -1850,6 +1875,9 @@ export default function Page() {
       setStatus(result.ok ? "出力が完了しました。" : "出力結果を確認してください。");
     } catch (error) {
       setStatus(`出力エラー: ${String(error)}`);
+    } finally {
+      exportInFlightRef.current = false;
+      setIsExporting(false);
     }
   }
 
@@ -2197,7 +2225,7 @@ export default function Page() {
         ) : (
           <EmptyState
             action={
-              <button disabled={!canRunPreflight} onClick={runPreflight} type="button">
+              <button disabled={!canRunPreflight || isPreflighting} onClick={runPreflight} type="button">
                 <IconLabel icon={ClipboardCheck}>出力前チェック</IconLabel>
               </button>
             }
@@ -2680,7 +2708,7 @@ export default function Page() {
             <StatusCheck ok={!incompleteSegments && allSegments.length > 0} label="未入力" detail={`${incompleteSegments}件`} />
             <StatusCheck ok={Boolean(outputDir)} label="出力先" detail={outputDir || "未設定"} />
           </div>
-          <button className="primary wide" disabled={!canRunPreflight} onClick={runPreflight} type="button">
+          <button className="primary wide" disabled={!canRunPreflight || isPreflighting} onClick={runPreflight} type="button">
             <IconLabel icon={ChevronRight}>出力前チェック</IconLabel>
           </button>
         </div>
@@ -2732,10 +2760,10 @@ export default function Page() {
           </EmptyState>
         )}
         <div className="workbench-footer">
-          <button disabled={!canRunPreflight} onClick={runPreflight} type="button">
+          <button disabled={!canRunPreflight || isPreflighting} onClick={runPreflight} type="button">
             <IconLabel icon={ClipboardCheck}>再チェック</IconLabel>
           </button>
-          <button className="primary wide" disabled={!canExport} onClick={runExport} type="button">
+          <button className="primary wide" disabled={!canExport || isExporting} onClick={runExport} type="button">
             <IconLabel icon={Download}>出力実行</IconLabel>
           </button>
         </div>
