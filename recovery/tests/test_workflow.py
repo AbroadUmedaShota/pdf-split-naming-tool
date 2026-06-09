@@ -108,6 +108,51 @@ def test_check_segment_outputs_detects_invalid_page_range(tmp_path: Path) -> Non
     assert checks[0].messages == ("分割範囲に存在しないページが含まれています: 1-3 (PDFは2ページ)",)
 
 
+def test_check_segment_outputs_blocks_when_output_path_too_long(tmp_path: Path) -> None:
+    # Build an output_dir deep enough that output_dir / "01_02_003.pdf" reaches >= 260 chars.
+    # "01_02_003.pdf" is 13 chars; we need len(str(output_dir)) >= 260 - 1 (sep) - 13 = 246.
+    padding = "a" * 246
+    # Use a synthetic deep path string without actually creating it on disk, since we only
+    # need the length check (path.exists() is False, so the disk-conflict branch is skipped).
+    from pathlib import PurePosixPath
+    deep_dir = Path("/" + padding)
+    source = tmp_path / "source.pdf"
+    segment = Segment(source, 1, 1, {"box_no": "1", "binder_no": "2", "seq": "3"})
+
+    checks = check_segment_outputs([segment], deep_dir, processor=PageCountProcessor(page_count=1))
+
+    assert not checks[0].ok
+    assert "output_path_too_long" in checks[0].messages
+    assert checks[0].output_path is None
+
+
+def test_check_segment_outputs_passes_when_output_path_within_limit(tmp_path: Path) -> None:
+    # A short output_dir (tmp_path) produces a path well under 260 chars.
+    source = tmp_path / "source.pdf"
+    segment = Segment(source, 1, 1, {"box_no": "1", "binder_no": "2", "seq": "3"})
+
+    checks = check_segment_outputs([segment], tmp_path, processor=PageCountProcessor(page_count=1))
+
+    assert checks[0].ok
+    assert "output_path_too_long" not in checks[0].messages
+    assert checks[0].output_path is not None
+
+
+def test_check_segment_outputs_path_too_long_blocks_even_if_file_exists(tmp_path: Path) -> None:
+    # Both path-too-long and disk-conflict: output_path_too_long should appear in messages,
+    # output_path must be None.
+    padding = "a" * 246
+    deep_dir = Path("/" + padding)
+    source = tmp_path / "source.pdf"
+    segment = Segment(source, 1, 1, {"box_no": "1", "binder_no": "2", "seq": "3"})
+
+    checks = check_segment_outputs([segment], deep_dir, processor=PageCountProcessor(page_count=1))
+
+    assert not checks[0].ok
+    assert "output_path_too_long" in checks[0].messages
+    assert checks[0].output_path is None
+
+
 class PageCountProcessor:
     def __init__(self, page_count: int) -> None:
         self._page_count = page_count

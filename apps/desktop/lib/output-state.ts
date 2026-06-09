@@ -25,6 +25,9 @@ function formatMessage(msg: string): string {
   if (msg === "output_exists") {
     return "同名ファイルが既存です。出力先を変更するか既存ファイルを削除してください";
   }
+  if (msg === "output_path_too_long") {
+    return "出力パスが長すぎます（260文字以内に収まるよう出力先を浅くするか項目を短くしてください）";
+  }
   return msg;
 }
 

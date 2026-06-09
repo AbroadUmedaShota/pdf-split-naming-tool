@@ -1945,8 +1945,14 @@ export default function Page() {
       manualSeqKeysRef.current = new Set(Array.isArray(state.manual_seq_keys) ? state.manual_seq_keys : []);
       setCurrentPdf(restoreDecision.currentPdf);
       setCurrentPage(restoreDecision.currentPage);
+      const restoredSegmentKeys = new Set(
+        buildSegments(loaded, state.split_points_by_pdf ?? {}, state.segment_metadata ?? {}, {
+          ...defaultCommonMetadata,
+          ...(state.common_metadata ?? {})
+        }).map((s) => s.key)
+      );
+      setSelectedSegmentKey((current) => (restoredSegmentKeys.has(current) ? current : ""));
       if (!restoreDecision.shouldLoadPreview) {
-        setSelectedSegmentKey("");
         setPreviewDataUrl("");
       }
       clearOutputState();

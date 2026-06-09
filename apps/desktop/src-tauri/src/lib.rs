@@ -51,9 +51,27 @@ fn run_sidecar(request: serde_json::Value) -> Result<serde_json::Value, String> 
 }
 
 fn find_recovery_dir() -> Result<std::path::PathBuf, String> {
-    let current_dir = std::env::current_dir().map_err(|error| error.to_string())?;
     let explicit_dir = std::env::var_os("PDF_ORGANIZER_RECOVERY_DIR").map(std::path::PathBuf::from);
-    find_recovery_dir_from(&current_dir, explicit_dir.as_deref())
+
+    // Try current_dir first (works during development when launched from project root).
+    if let Ok(current_dir) = std::env::current_dir() {
+        if let Ok(dir) = find_recovery_dir_from(&current_dir, explicit_dir.as_deref()) {
+            return Ok(dir);
+        }
+    }
+
+    // Fallback: try the directory containing the executable.
+    // In a distributed installation the recovery/ folder is expected to live next to
+    // the installed binary, so current_exe().parent() is the correct search root.
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            if let Ok(dir) = find_recovery_dir_from(exe_dir, explicit_dir.as_deref()) {
+                return Ok(dir);
+            }
+        }
+    }
+
+    Err("failed to locate recovery/pdf_splitter_tool sidecar".to_string())
 }
 
 fn find_recovery_dir_from(
@@ -262,6 +280,32 @@ mod tests {
     fn sidecar_timeout_ignores_invalid_or_zero_values() {
         assert_eq!(sidecar_timeout_from(Some("0")), std::time::Duration::from_secs(30));
         assert_eq!(sidecar_timeout_from(Some("abc")), std::time::Duration::from_secs(30));
+    }
+
+    // Verify that find_recovery_dir_from succeeds when the sidecar marker exists
+    // under the exe-adjacent directory structure.  Because current_exe() cannot be
+    // redirected in a unit test, we exercise the underlying find_recovery_dir_from
+    // helper directly using a controlled temp directory that mimics the layout
+    // expected in a distributed installation (recovery/ next to the binary).
+    #[test]
+    fn recovery_dir_found_from_exe_adjacent_layout() {
+        // Simulate: <install_root>/recovery/pdf_splitter_tool/__main__.py
+        //           <install_root>/app.exe   <- exe_dir = <install_root>
+        let install_root = unique_test_dir("exe-adjacent");
+        let recovery_dir = install_root.join("recovery");
+        write_sidecar_marker(&recovery_dir);
+
+        // exe_dir == install_root: ancestors traversal finds install_root/recovery.
+        let resolved = find_recovery_dir_from(&install_root, None).unwrap();
+        assert_eq!(resolved, recovery_dir);
+    }
+
+    #[test]
+    fn recovery_dir_not_found_returns_error() {
+        let empty_root = unique_test_dir("missing");
+
+        let result = find_recovery_dir_from(&empty_root, None);
+        assert!(result.is_err());
     }
 
     #[test]

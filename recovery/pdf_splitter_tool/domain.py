@@ -21,6 +21,8 @@ MAX_AFFIX_COUNT = 2
 YOSHIDA_FILENAME_TEMPLATE = "{box_no:0>2}_{binder_no:0>2}_{seq:0>3}.pdf"
 INVALID_FILENAME_CHARS = r'<>:"/\|?*'
 MAX_FILENAME_LENGTH = 180
+# Windows MAX_PATH limit. Paths at or beyond this length cause OSError on open/mkdir/save.
+MAX_OUTPUT_PATH_LENGTH = 260
 
 
 def coerce_seq_digits(value: object, default: int = DEFAULT_SEQ_DIGITS) -> int:

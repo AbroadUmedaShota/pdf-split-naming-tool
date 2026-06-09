@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .domain import DEFAULT_SEQ_DIGITS, coerce_seq_digits, normalize_affix_defs
+from .domain import DEFAULT_SEQ_DIGITS, MAX_OUTPUT_PATH_LENGTH, coerce_seq_digits, normalize_affix_defs
 from .export_policy import ExportPathPolicy
 from .export_policy import unique_output_path as policy_unique_output_path
 from .models import Segment
@@ -79,8 +79,30 @@ def check_segment_outputs(
         messages = [*error_messages(result.errors), *segment_page_errors(segment, processor)]
         if result.ok and not messages:
             requested_path = output_dir / result.normalized_filename
+            path_too_long = len(str(requested_path)) >= MAX_OUTPUT_PATH_LENGTH
             has_existing_output = requested_path.exists()
-            if has_existing_output:
+            if path_too_long:
+                # Full output path reaches or exceeds Windows MAX_PATH (260). Block with
+                # ok=False so the user can shorten the output directory or field values
+                # before attempting to export. A disk-conflict on the same path is
+                # subsumed: reporting the length problem is more actionable.
+                block_messages: tuple[str, ...] = ("output_path_too_long",)
+                if has_existing_output:
+                    block_messages = ("output_path_too_long", "output_exists")
+                checks.append(
+                    SegmentOutputCheck(
+                        segment=segment,
+                        ok=False,
+                        filename=result.normalized_filename,
+                        output_path=None,
+                        messages=block_messages,
+                        requested_filename=result.normalized_filename,
+                        requested_path=requested_path,
+                        existing_path=requested_path if has_existing_output else None,
+                        has_existing_output=has_existing_output,
+                    )
+                )
+            elif has_existing_output:
                 # Disk-level conflict: block with ok=False. No path is reserved so
                 # sibling segments are not affected by this slot.
                 checks.append(
@@ -97,8 +119,9 @@ def check_segment_outputs(
                     )
                 )
             else:
-                # No disk conflict. Reserve within the current batch to avoid
-                # intra-batch duplicate names (reserved set, not disk-level).
+                # No disk conflict and path length is within limits. Reserve within the
+                # current batch to avoid intra-batch duplicate names (reserved set,
+                # not disk-level).
                 output_path = export_policy.reserve_output_path(requested_path)
                 checks.append(
                     SegmentOutputCheck(
