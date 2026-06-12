@@ -48,10 +48,12 @@ export type SidecarRequest =
   | { command: "page_preview"; pdf_path: string; page_no: number; zoom?: number }
   | { command: "page_thumbnail"; pdf_path: string; page_no: number; zoom?: number }
   | { command: "page_text"; pdf_path: string; page_no: number }
-  | { command: "search_text"; pdf_paths: string[]; query: string; scope?: SearchScope; current_pdf?: string }
+  // search_text: queries で複数用語を1リクエストにまとめる（query は旧形式との互換用）。
+  | { command: "search_text"; pdf_paths: string[]; queries: string[]; query?: string; scope?: SearchScope; current_pdf?: string }
   | { command: "search_highlights"; pdf_path: string; page_no: number; query: string }
   | { command: "index_candidates"; pdf_paths: string[]; keywords?: string[] }
-  | { command: "blank_candidates"; pdf_path: string; threshold?: number }
+  // blank_candidates: start_page から走査を再開できる（時間予算打ち切り時の継続取得用）。
+  | { command: "blank_candidates"; pdf_path: string; threshold?: number; start_page?: number }
   | SidecarPreflightRequest
   | SidecarExportRequest
   | { command: "state_load"; work_dir?: string }
@@ -134,9 +136,11 @@ export type SidecarPageTextResponse = {
 export type SidecarSearchTextResponse = {
   ok: true;
   command: "search_text";
-  query: string;
+  query?: string;
   scope?: SearchScope;
   results: SidecarSearchResult[];
+  // 結果件数の上限（200件）で打ち切られた場合 true。
+  truncated?: boolean;
 };
 
 export type SearchScope = "current_pdf" | "all_pdfs";
@@ -189,6 +193,9 @@ export type SidecarBlankCandidatesResponse = {
   pdf_path: string;
   threshold: number;
   candidates: SidecarBlankCandidate[];
+  // 時間予算（約8秒）で走査が打ち切られた場合 true。scanned_until まで走査済み。
+  partial?: boolean;
+  scanned_until?: number;
 };
 
 export type SidecarBlankCandidate = {

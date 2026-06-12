@@ -49,8 +49,13 @@ class PdfProcessor:
         return PdfService.page_text(pdf_path, page_no)
 
     @staticmethod
-    def search_text(pdf_paths: list[Path], query: str, current_pdf: Path | None = None) -> list[dict[str, object]]:
-        return PdfService.search_text(pdf_paths, query, current_pdf)
+    def search_text(
+        pdf_paths: list[Path],
+        query: str,
+        current_pdf: Path | None = None,
+        queries: list[str] | None = None,
+    ) -> tuple[list[dict[str, object]], bool]:
+        return PdfService.search_text(pdf_paths, query, current_pdf, queries)
 
     @staticmethod
     def search_highlights(pdf_path: Path, page_no: int, query: str) -> list[dict[str, float]]:
@@ -61,8 +66,12 @@ class PdfProcessor:
         return PdfService.index_candidates(pdf_paths, keywords)
 
     @staticmethod
-    def blank_candidates(pdf_path: Path, threshold: float = 0.985) -> list[dict[str, object]]:
-        return PdfService.blank_candidates(pdf_path, threshold)
+    def blank_candidates(
+        pdf_path: Path,
+        threshold: float = 0.985,
+        start_page: int = 1,
+    ) -> tuple[list[dict[str, object]], bool, int]:
+        return PdfService.blank_candidates(pdf_path, threshold, start_page=start_page)
 
     @staticmethod
     def calculate_sha256(path: Path) -> str:

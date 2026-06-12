@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .domain import AFFIX_POSITIONS, METADATA_REQUIRED_KEYS
+from .domain import AFFIX_POSITIONS, MAX_AFFIX_COUNT, METADATA_REQUIRED_KEYS
 
 
 CURRENT_SCHEMA_VERSION = 1
@@ -135,6 +135,14 @@ def _normalize_metadata_values(field: str, value: dict[object, object]) -> dict[
 
 
 def _normalize_affix_defs(value: object) -> list[dict[str, str]]:
+    """affix_defs を検証・正規化する。
+
+    検証ルール対照（domain.normalize_affix_defs / state_schema._normalize_affix_defs / フロント側）:
+      - domain.normalize_affix_defs: 無効要素は除去、上限 MAX_AFFIX_COUNT 件で切り詰め（寛容）
+      - state_schema._normalize_affix_defs: 無効要素はエラーで拒否、上限 MAX_AFFIX_COUNT 件で切り詰め
+        （domain と同じ件数上限を適用し、state 経由でプレビュー≠実出力になる三者不一致を防ぐ）
+      - フロント: MAX_AFFIX_COUNT 超の UI 追加を抑制（入力ガード）
+    """
     if not isinstance(value, list):
         raise TypeError("affix_defs must be a list of definitions.")
     normalized: list[dict[str, str]] = []
@@ -158,7 +166,8 @@ def _normalize_affix_defs(value: object) -> list[dict[str, str]]:
             raise TypeError(f"affix_defs[{index}].label must be a string.")
         normalized.append({"key": key, "label": label, "position": position})
         seen_keys.add(key)
-    return normalized
+    # domain と同じ上限で切り詰め（NF-D1: 三者の検証ルールを整合させる）
+    return normalized[:MAX_AFFIX_COUNT]
 
 
 def _normalize_manual_seq_keys(value: object) -> list[str]:

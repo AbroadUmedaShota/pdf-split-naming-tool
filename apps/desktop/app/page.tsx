@@ -253,6 +253,38 @@ function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
+// サムネイルを自動取得する最大ページ数。超過分はページ番号のみ表示し、一覧に省略注記を出す。
+const MAX_THUMBNAILS = 60;
+
+// 状態復元時の affix_defs 検証。壊れた要素（key/position 不正）を捨て、key 重複を除き、
+// 上限件数に切り詰める。state ファイル直接編集や旧データ由来の不正値で
+// プレビューと出力が食い違うのを防ぐ（Python 側 domain.py の正規化と同じ上限）。
+function sanitizeAffixDefs(value: unknown): AffixDef[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const defs: AffixDef[] = [];
+  const usedKeys = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const { key, label, position } = item as Record<string, unknown>;
+    if (typeof key !== "string" || !key || usedKeys.has(key)) {
+      continue;
+    }
+    if (position !== "prefix" && position !== "suffix") {
+      continue;
+    }
+    usedKeys.add(key);
+    defs.push({ key, label: typeof label === "string" ? label : "", position });
+    if (defs.length >= MAX_AFFIX_COUNT) {
+      break;
+    }
+  }
+  return defs;
+}
+
 // サイドカーの構造化エラー（error を持たず messages にメッセージIDのみを持つ応答）の表示文言。
 const SIDECAR_MESSAGE_TEXT: Record<string, string> = {
   missing_output_dir: "出力先が未設定です。",
@@ -517,7 +549,9 @@ export default function Page() {
     past: []
   });
   const [pageText, setPageText] = useState("");
-  const [pageTextStatus, setPageTextStatus] = useState("OCRテキスト未取得");
+  const [pageTextStatus, setPageTextStatus] = useState("PDFを選択すると文字データ（テキスト層）を表示します");
+  // 現在ページのテキスト層有無（null=未判定）。テキスト層なしPDFの案内・検索不能表示に使う。
+  const [pageHasTextLayer, setPageHasTextLayer] = useState<boolean | null>(null);
   const [customSearchTerms, setCustomSearchTerms] = useState<string[]>([]);
   const [selectedSearchTerms, setSelectedSearchTerms] = useState<SelectedSearchTerm[]>(
     selectedSearchTermsFromPreset(defaultSearchTermPreset())
@@ -530,12 +564,33 @@ export default function Page() {
   const [selectedSearchHit, setSelectedSearchHit] = useState<SelectedSearchHit | null>(null);
   const [searchHighlights, setSearchHighlights] = useState<TermSearchHighlightRect[]>([]);
   const [indexCandidates, setIndexCandidates] = useState<IndexCandidate[]>([]);
+  // 候補検索を一度でも実行したか（「未実行」と「実行したが0件」の空状態を出し分ける）。
+  const [indexCandidatesFetched, setIndexCandidatesFetched] = useState(false);
   const [blankCandidates, setBlankCandidates] = useState<SidecarBlankCandidate[]>([]);
+  // 白紙判定の進捗表示（"白紙判定中… p/N"）。空文字なら非表示。
+  const [blankScanProgress, setBlankScanProgress] = useState("");
+  // サムネイル取得の進捗（null=取得中でない）。
+  const [thumbnailProgress, setThumbnailProgress] = useState<{ loaded: number; total: number } | null>(null);
+  // 検索・候補取得の実行中表示（連打ガードは ref 側で同期的に行う）。
+  const [isSearching, setIsSearching] = useState(false);
+  const [isCandidateLoading, setIsCandidateLoading] = useState(false);
   const [pageThumbnails, setPageThumbnails] = useState<Record<string, string>>({});
   const previewRequestGateRef = useRef(createPreviewRequestGate());
   const workspaceRequestGateRef = useRef(createPreviewRequestGate());
   const pageTextRequestGateRef = useRef(createPreviewRequestGate());
   const pdfAuxiliaryRequestGateRef = useRef(createPreviewRequestGate());
+  // 検索・候補・ハイライトの古い応答を捨てる世代ゲート（preview と同型）。
+  const searchRequestGateRef = useRef(createPreviewRequestGate());
+  const candidateRequestGateRef = useRef(createPreviewRequestGate());
+  const highlightRequestGateRef = useRef(createPreviewRequestGate());
+  // 検索結果クリックの最新世代。先行クリックのページ移動後の続き処理（ハイライト再取得・移動通知）が
+  // 後着クリックの表示に被らないよう、最後に発行した世代だけが続行できる。
+  // ハイライトゲート本体は selectPageForPreview 内の clearSearchHighlights で自己無効化されるため、
+  // 続行判定はゲートの isCurrent ではなくこの ref と突き合わせる。
+  const searchResultClickIdRef = useRef(0);
+  // 検索・候補取得の二重起動を同期的に防ぐ（state は表示用）。
+  const searchInFlightRef = useRef(false);
+  const candidateInFlightRef = useRef(false);
   const zoomReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 出力前チェック/出力実行/状態保存の二重起動を同期的に防ぐ（連打対策。state は表示用 disable）。
   const preflightInFlightRef = useRef(false);
@@ -659,14 +714,27 @@ export default function Page() {
     });
   }
 
+  // ページ移動・PDF切替で検索ハイライトが別ページ・別PDFに残らないよう、
+  // 取得中の要求ごと破棄してからクリアする（誤分割の誘発を防ぐ）。
+  function clearSearchHighlights(): void {
+    highlightRequestGateRef.current.invalidate();
+    setSearchHighlights([]);
+  }
+
   function clearLegacyStep2AuxiliaryState(): void {
+    searchRequestGateRef.current.invalidate();
+    candidateRequestGateRef.current.invalidate();
     setPageText("");
-    setPageTextStatus("OCRテキスト未取得");
+    setPageTextStatus("PDFを選択すると文字データ（テキスト層）を表示します");
+    setPageHasTextLayer(null);
     setSearchResults([]);
     setSelectedSearchHit(null);
-    setSearchHighlights([]);
+    clearSearchHighlights();
     setIndexCandidates([]);
+    setIndexCandidatesFetched(false);
     setBlankCandidates([]);
+    setBlankScanProgress("");
+    setThumbnailProgress(null);
     setPageThumbnails({});
     loadedThumbnailKeysRef.current.clear();
     setSelectedSplitPoint(null);
@@ -720,8 +788,9 @@ export default function Page() {
     setPreviewZoom(1.2);
     setSelectedSplitPoint(4);
     setSplitHistory({ future: [], past: [] });
-    setPageText("000高精度ocrのテスト用ファイル_searchable.pdf の4ページ目に相当する契約書と請求書の検索可能テキストプレビューです。OCRテキスト欄、用語ハイライト、白紙候補の配置確認に使います。");
+    setPageText("000高精度ocrのテスト用ファイル_searchable.pdf の4ページ目に相当する契約書と請求書の検索可能テキストプレビューです。テキスト層欄、用語ハイライト、白紙候補の配置確認に使います。");
     setPageTextStatus("検索可能PDFのテキストレイヤーを表示中");
+    setPageHasTextLayer(true);
     setCustomSearchTerms(searchTermPreset.customTerms);
     setSelectedSearchTerms(devSelectedSearchTerms);
     setDraftSelectedSearchTerms(searchTermPreset.selectedTerms);
@@ -735,6 +804,7 @@ export default function Page() {
     );
     setSearchHighlights(devSearchHighlightsForTerms);
     setIndexCandidates(devPreviewIndexCandidates);
+    setIndexCandidatesFetched(true);
     setBlankCandidates(devPreviewBlankCandidates);
     setPageThumbnails({});
     loadedThumbnailKeysRef.current.clear();
@@ -808,6 +878,9 @@ export default function Page() {
     }
     const nextPage = Math.max(1, Math.min(file.pageCount, pageNo));
     invalidateWorkspaceRequests();
+    // 移動先ページに前ページのハイライト矩形が残らないようクリアする
+    // （検索結果クリック時は呼び出し元が移動後に再取得する）。
+    clearSearchHighlights();
     requestedPageRef.current = nextPage;
     setCurrentPdf(pdfPath);
     if (devPreviewEnabled) {
@@ -817,6 +890,7 @@ export default function Page() {
         `${basename(pdfPath)} の${nextPage}ページ目に相当する検索可能テキストのプレビューです。OCR、インデックス、書類名、会社名などの検索支援表示を確認できます。`
       );
       setPageTextStatus("検索可能PDFのテキストレイヤーを表示中");
+      setPageHasTextLayer(true);
     }
     const nextSegment = allSegments.find(
       (segment) => segment.pdfPath === pdfPath && segment.startPage <= nextPage && segment.endPage >= nextPage
@@ -924,16 +998,19 @@ export default function Page() {
         }
         if (!response.ok || response.command !== "page_text") {
           setPageText("");
-          setPageTextStatus(response.ok ? "OCRテキストを取得できませんでした。" : sidecarError(response));
+          setPageHasTextLayer(null);
+          setPageTextStatus(response.ok ? "テキスト層を取得できませんでした。" : sidecarError(response));
           return;
         }
         const pageResponse = response as SidecarPageTextResponse;
         setPageText(pageResponse.text);
-        setPageTextStatus(pageResponse.has_text ? "検索可能PDFのテキストレイヤーを表示中" : "テキストなし");
+        setPageHasTextLayer(pageResponse.has_text);
+        setPageTextStatus(pageResponse.has_text ? "検索可能PDFのテキストレイヤーを表示中" : "テキスト層なし");
       } catch (error) {
         if (pageTextRequestGateRef.current.isCurrent(requestId)) {
           setPageText("");
-          setPageTextStatus(`OCRテキスト取得エラー: ${String(error)}`);
+          setPageHasTextLayer(null);
+          setPageTextStatus(`テキスト層取得エラー: ${String(error)}`);
         }
       }
     }
@@ -949,31 +1026,63 @@ export default function Page() {
 
     const pdfPath = currentFile.path;
     const pageCount = currentFile.pageCount;
-    // サイドカーは1リクエスト1プロセス起動のため、並列度は控えめ(4)に抑える（根治は #81 常駐化）。
+    // サイドカーは常駐プロセスがリクエストを直列処理するため、ここでの「並列度」は
+    // 同時に積むキュー深さの上限を意味する。サムネイルでプレビュー・検索など他操作の
+    // 応答を待たせすぎないよう控えめ(4)に保つ。
     const THUMBNAIL_CONCURRENCY = 4;
-    const MAX_THUMBNAILS = 60;
 
-    async function loadCurrentPdfAuxiliaryData(): Promise<void> {
-      // blank_candidates はサムネイルと独立。並行で投げ、サムネイル取得をブロックしない。
-      const blankPromise = invokeSidecar({ command: "blank_candidates", pdf_path: pdfPath })
-        .then((blankResponse) => {
+    // PDF切替直後に旧PDFの白紙チップが残らないよう、即クリアしてから再取得する。
+    setBlankCandidates([]);
+    setBlankScanProgress("");
+
+    // 白紙候補の取得。時間予算で打ち切られた（partial）場合は scanned_until+1 から
+    // 自動継続する。世代ゲートでPDF切替時に中断できる。失敗は無音にせず warning を出す。
+    async function loadBlankCandidates(): Promise<void> {
+      const accumulated: SidecarBlankCandidate[] = [];
+      let startPage = 1;
+      setBlankScanProgress(`白紙判定中… 0/${pageCount}`);
+      try {
+        for (;;) {
+          const response = await invokeSidecar({ command: "blank_candidates", pdf_path: pdfPath, start_page: startPage });
           if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
             return;
           }
-          if (blankResponse.ok && blankResponse.command === "blank_candidates") {
-            setBlankCandidates(blankResponse.candidates);
+          if (!response.ok || response.command !== "blank_candidates") {
+            setBlankScanProgress("");
+            setStatus("白紙ページの判定に失敗しました", "warning");
+            return;
           }
-        })
-        .catch(() => {
-          if (pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
-            setBlankCandidates([]);
+          accumulated.push(...response.candidates);
+          setBlankCandidates([...accumulated]);
+          const scannedUntil = typeof response.scanned_until === "number" ? response.scanned_until : pageCount;
+          if (response.partial && scannedUntil < pageCount && scannedUntil >= startPage) {
+            setBlankScanProgress(`白紙判定中… ${scannedUntil}/${pageCount}`);
+            startPage = scannedUntil + 1;
+            continue;
           }
-        });
+          setBlankScanProgress("");
+          return;
+        }
+      } catch {
+        if (pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
+          setBlankScanProgress("");
+          setStatus("白紙ページの判定に失敗しました", "warning");
+        }
+      }
+    }
+
+    async function loadCurrentPdfAuxiliaryData(): Promise<void> {
+      // blank_candidates はサムネイルと独立。並行で投げ、サムネイル取得をブロックしない。
+      const blankPromise = loadBlankCandidates();
 
       // 未取得サムネイルだけを、並列度を絞ってチャンク取得し、チャンクごとに1回だけまとめてsetStateする。
       const pendingPages = Array.from({ length: Math.min(pageCount, MAX_THUMBNAILS) }, (_value, index) => index + 1).filter(
         (pageNo) => !loadedThumbnailKeysRef.current.has(`${pdfPath}#${pageNo}`)
       );
+      if (pendingPages.length) {
+        setThumbnailProgress({ loaded: 0, total: pendingPages.length });
+      }
+      let loadedCount = 0;
       for (let offset = 0; offset < pendingPages.length; offset += THUMBNAIL_CONCURRENCY) {
         if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
           return;
@@ -1000,6 +1109,11 @@ export default function Page() {
         if (Object.keys(batch).length) {
           setPageThumbnails((current) => ({ ...current, ...batch }));
         }
+        loadedCount += chunk.length;
+        setThumbnailProgress({ loaded: loadedCount, total: pendingPages.length });
+      }
+      if (pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
+        setThumbnailProgress(null);
       }
 
       await blankPromise;
@@ -1248,6 +1362,14 @@ export default function Page() {
 
   async function selectPdf(path: string): Promise<void> {
     invalidateWorkspaceRequests();
+    // PDF切替で旧PDFの検索結果・ハイライト・候補を持ち越さない（取得中の要求も破棄）。
+    searchRequestGateRef.current.invalidate();
+    candidateRequestGateRef.current.invalidate();
+    clearSearchHighlights();
+    setSearchResults([]);
+    setSelectedSearchHit(null);
+    setIndexCandidates([]);
+    setIndexCandidatesFetched(false);
     setCurrentPdf(path);
     requestedPageRef.current = 1;
     setCurrentPage(1);
@@ -1260,6 +1382,7 @@ export default function Page() {
 
   async function selectSegmentForPreview(segment: SegmentView): Promise<void> {
     invalidateWorkspaceRequests();
+    clearSearchHighlights();
     setSelectedSegmentKey(segment.key);
     setCurrentPdf(segment.pdfPath);
     requestedPageRef.current = segment.startPage;
@@ -1373,6 +1496,8 @@ export default function Page() {
     }
     requestedPageRef.current = nextPage;
     invalidateWorkspaceRequests();
+    // ページ移動でハイライトが別ページの無関係な場所をマークしないようクリアする。
+    clearSearchHighlights();
     try {
       await loadPreview(currentFile.path, nextPage);
     } catch (error) {
@@ -1481,29 +1606,32 @@ export default function Page() {
     setStatus("分割操作をやり直しました。");
   }
 
-  function mergeSearchResultsByPage(resultsByTerm: Array<{ results: SidecarSearchResult[]; term: string }>): MergedSearchResult[] {
+  // 複数用語を1リクエストで検索した応答をページ単位に統合する。
+  // matched_terms を持たない応答（互換）には検索した全用語をフォールバックで出す。
+  function mergeSearchResultsByPage(results: SidecarSearchResult[], fallbackTerms: string[]): MergedSearchResult[] {
     const byPage = new Map<string, MergedSearchResult>();
-    for (const item of resultsByTerm) {
-      for (const result of item.results) {
-        const key = `${result.pdf_path}#${result.page_no}`;
-        const existing =
-          byPage.get(key) ??
-          ({
-            matchedTerms: [],
-            pageNo: result.page_no,
-            pdfPath: result.pdf_path,
-            snippets: [],
-            totalCount: 0
-          } satisfies MergedSearchResult);
-        existing.totalCount += result.count;
-        if (!existing.matchedTerms.includes(item.term)) {
-          existing.matchedTerms.push(item.term);
+    for (const result of results) {
+      const key = `${result.pdf_path}#${result.page_no}`;
+      const existing =
+        byPage.get(key) ??
+        ({
+          matchedTerms: [],
+          pageNo: result.page_no,
+          pdfPath: result.pdf_path,
+          snippets: [],
+          totalCount: 0
+        } satisfies MergedSearchResult);
+      existing.totalCount += result.count;
+      const matchedTerms = result.matched_terms?.length ? result.matched_terms : fallbackTerms;
+      for (const term of matchedTerms) {
+        if (!existing.matchedTerms.includes(term)) {
+          existing.matchedTerms.push(term);
         }
-        if (result.snippet && !existing.snippets.includes(result.snippet)) {
-          existing.snippets.push(result.snippet);
-        }
-        byPage.set(key, existing);
       }
+      if (result.snippet && !existing.snippets.includes(result.snippet)) {
+        existing.snippets.push(result.snippet);
+      }
+      byPage.set(key, existing);
     }
     return Array.from(byPage.values()).sort((a, b) => a.pageNo - b.pageNo);
   }
@@ -1522,6 +1650,8 @@ export default function Page() {
       );
       return;
     }
+    // ページ移動・別ハイライト要求で古い応答が新しい表示を上書きしないよう世代ゲートを通す。
+    const requestId = highlightRequestGateRef.current.next();
     try {
       const responses = await Promise.all(
         targetTerms.map(async (term) => {
@@ -1538,18 +1668,35 @@ export default function Page() {
           return result.rects.map((rect) => ({ ...rect, term }));
         })
       );
+      if (!highlightRequestGateRef.current.isCurrent(requestId)) {
+        return;
+      }
       setSearchHighlights(responses.flat());
     } catch (error) {
+      if (!highlightRequestGateRef.current.isCurrent(requestId)) {
+        return;
+      }
       setSearchHighlights([]);
       setStatus(`検索ハイライト取得エラー: ${String(error)}`, "danger");
     }
   }
 
   async function selectSearchResult(result: MergedSearchResult, index: number): Promise<void> {
+    // 冒頭でハイライトゲートを進め、先行クリック分の取得中ハイライトを即座に無効化する。
+    // 発行した世代で関数全体を管理し、後着クリックが来たら先行クリックの続き処理
+    // （移動後のハイライト再取得・移動通知）を打ち切る（別ページへ矩形を描く競合を防ぐ）。
+    const requestId = highlightRequestGateRef.current.next();
+    searchResultClickIdRef.current = requestId;
     const nextHit = { index, pageNo: result.pageNo, pdfPath: result.pdfPath };
     setSelectedSearchHit(nextHit);
     await selectPageForPreview(result.pdfPath, result.pageNo);
+    if (searchResultClickIdRef.current !== requestId) {
+      return;
+    }
     await loadSearchHighlights(result.pdfPath, result.pageNo, result.matchedTerms);
+    if (searchResultClickIdRef.current !== requestId) {
+      return;
+    }
     setStatus(`${basename(result.pdfPath)} の${result.pageNo}ページへ移動しました。`);
   }
 
@@ -1561,14 +1708,14 @@ export default function Page() {
   }
 
   async function runTextSearch(): Promise<void> {
-    if (!currentPdf) {
+    if (!currentPdf || searchInFlightRef.current) {
       return;
     }
     const terms = selectedSearchTermValues;
     if (!terms.length) {
       setSearchResults([]);
       setSelectedSearchHit(null);
-      setSearchHighlights([]);
+      clearSearchHighlights();
       setStatus("用語を選択してください。", "warning");
       return;
     }
@@ -1579,56 +1726,80 @@ export default function Page() {
       setStatus("DEVプレビューの検索結果を表示しました。");
       return;
     }
+    const requestId = searchRequestGateRef.current.next();
+    searchInFlightRef.current = true;
+    setIsSearching(true);
     try {
-      const responses = await Promise.all(
-        terms.map(async (term) => {
-          const response = await invokeSidecar({
-            command: "search_text",
-            current_pdf: currentPdf,
-            pdf_paths: [currentPdf],
-            query: term,
-            scope: "current_pdf"
-          });
-          if (!response.ok || response.command !== "search_text") {
-            throw new Error(response.ok ? "検索結果を取得できませんでした。" : sidecarError(response));
-          }
-          const result = response as SidecarSearchTextResponse;
-          return { results: result.results, term };
-        })
-      );
-      const mergedResults = mergeSearchResultsByPage(responses);
+      // 全用語を1リクエストで検索する（用語数×全ページ走査の繰り返しを避ける）。
+      const response = await invokeSidecar({
+        command: "search_text",
+        current_pdf: currentPdf,
+        pdf_paths: [currentPdf],
+        queries: terms,
+        scope: "current_pdf"
+      });
+      if (!searchRequestGateRef.current.isCurrent(requestId)) {
+        return;
+      }
+      if (!response.ok || response.command !== "search_text") {
+        throw new Error(response.ok ? "検索結果を取得できませんでした。" : sidecarError(response));
+      }
+      const result = response as SidecarSearchTextResponse;
+      const mergedResults = mergeSearchResultsByPage(result.results, terms);
       setSearchResults(mergedResults);
       setSelectedSearchHit(null);
-      setSearchHighlights([]);
-      setStatus(`${mergedResults.length}ページの検索結果を取得しました。`, "ok");
+      clearSearchHighlights();
+      if (result.truncated) {
+        setStatus("結果が多いため200件で打ち切りました。用語を絞ってください。", "warning");
+      } else {
+        setStatus(`${mergedResults.length}ページの検索結果を取得しました。`, "ok");
+      }
     } catch (error) {
-      setStatus(`検索エラー: ${String(error)}`, "danger");
+      if (searchRequestGateRef.current.isCurrent(requestId)) {
+        setStatus(`検索エラー: ${String(error)}`, "danger");
+      }
+    } finally {
+      searchInFlightRef.current = false;
+      setIsSearching(false);
     }
   }
 
   async function runIndexCandidateSearch(): Promise<void> {
-    if (!currentPdf) {
+    if (!currentPdf || candidateInFlightRef.current) {
       return;
     }
     if (devPreviewEnabled) {
       setIndexCandidates(devPreviewIndexCandidates);
+      setIndexCandidatesFetched(true);
       setStatus("DEVプレビューの候補検索結果を表示しました。");
       return;
     }
+    const requestId = candidateRequestGateRef.current.next();
+    candidateInFlightRef.current = true;
+    setIsCandidateLoading(true);
     try {
       const response = await invokeSidecar({
         command: "index_candidates",
         pdf_paths: [currentPdf]
       });
+      if (!candidateRequestGateRef.current.isCurrent(requestId)) {
+        return;
+      }
       if (!response.ok || response.command !== "index_candidates") {
         throw new Error(response.ok ? "候補検索結果を取得できませんでした。" : sidecarError(response));
       }
       const result = response as SidecarIndexCandidatesResponse;
       setIndexCandidates(result.candidates);
+      setIndexCandidatesFetched(true);
       setStatus(`${result.candidates.length}件の候補を取得しました。`, "ok");
     } catch (error) {
-      setIndexCandidates([]);
-      setStatus(`候補検索エラー: ${String(error)}`, "danger");
+      if (candidateRequestGateRef.current.isCurrent(requestId)) {
+        setIndexCandidates([]);
+        setStatus(`候補検索エラー: ${String(error)}`, "danger");
+      }
+    } finally {
+      candidateInFlightRef.current = false;
+      setIsCandidateLoading(false);
     }
   }
 
@@ -1914,6 +2085,22 @@ export default function Page() {
     setSegmentMetadata((current) => numberSegmentsPerPdf(current, true));
   }
 
+  // 「手動」ピル: 手動指定を解除し、連番ルールの自動採番値へ戻す（他の手動行は保持）。
+  function releaseManualSeq(segment: SegmentView): void {
+    // 解除で値が自動採番値に置き換わるため、誤操作時に控えられるよう元値を status に残す。
+    const previousSeq = String(segment.metadata.seq ?? "").trim();
+    manualSeqKeysRef.current.delete(segment.key);
+    invalidateWorkspaceRequests();
+    clearOutputState();
+    setSegmentMetadata((current) => numberSegmentsPerPdf(current, false));
+    setStatus(
+      previousSeq
+        ? `連番の手動指定を解除しました（元の値: ${previousSeq}）。`
+        : "連番の手動指定を解除しました。",
+      "ok"
+    );
+  }
+
   function updateSeqStart(value: string): void {
     const parsed = Number(value);
     const nextStart = Number.isFinite(parsed) ? Math.max(1, Math.trunc(parsed)) : 1;
@@ -1949,10 +2136,39 @@ export default function Page() {
     setAffixDefs((current) => current.map((def) => (def.key === key ? { ...def, ...patch } : def)));
   }
 
-  function removeAffixDef(key: string): void {
+  async function removeAffixDef(key: string): Promise<void> {
+    // 入力済みの値が消える場合のみ件数つきで確認する。
+    // 件数は現存セグメント分のみ数える（分割変更で残った旧キーの値は利用者に見えないため件数に含めない。
+    // 削除自体は下の走査で旧キー分も含めた全エントリから行う）。
+    const liveSegmentKeys = new Set(allSegments.map((segment) => segment.key));
+    const affectedCount = Object.entries(segmentMetadata).filter(
+      ([segmentKey, values]) => liveSegmentKeys.has(segmentKey) && String(values[key] ?? "").trim()
+    ).length;
+    if (affectedCount > 0) {
+      const accepted = await confirmAction(`入力済みの値${affectedCount}件も削除されます。よろしいですか？`);
+      if (!accepted) {
+        return;
+      }
+    }
     invalidateWorkspaceRequests();
     clearOutputState();
     setAffixDefs((current) => current.filter((def) => def.key !== key));
+    // キー再利用（同じ affix1 等の再追加）で旧入力値が全セグメントに復活しないよう、値も削除する。
+    setSegmentMetadata((current) => {
+      let changed = false;
+      const next: SegmentMetadata = {};
+      for (const [segmentKey, values] of Object.entries(current)) {
+        if (key in values) {
+          const rest = { ...values };
+          delete rest[key];
+          next[segmentKey] = rest;
+          changed = true;
+        } else {
+          next[segmentKey] = values;
+        }
+      }
+      return changed ? next : current;
+    });
   }
 
   // 追加項目の値はセグメント個別（box_no等と同じ二層）。選択中セグメントの metadata へ書き込む。
@@ -1973,7 +2189,7 @@ export default function Page() {
     // OCR選択には改行・全角空白が混じりやすい。連続空白を1つに畳み、前後を除去してから転記する。
     const cleaned = selected.replace(/[\s　]+/g, " ").trim();
     if (!cleaned) {
-      setStatus("OCR本文を選択してから転記してください。", "warning");
+      setStatus("テキスト層の本文を選択してから転記してください。", "warning");
       return;
     }
     updateMetadata(selectedSegment, transcribeTargetKey, cleaned);
@@ -2187,7 +2403,8 @@ export default function Page() {
       setSplitPointsByPdf(state.split_points_by_pdf ?? {});
       setSegmentMetadata(state.segment_metadata ?? {});
       setCommonMetadata({ ...defaultCommonMetadata, ...(state.common_metadata ?? {}) });
-      setAffixDefs(Array.isArray(state.affix_defs) ? state.affix_defs : []);
+      // 復元値は shape を検証し、上限2件に切り詰める（不正データ経由のプレビュー≠出力を防ぐ）。
+      setAffixDefs(sanitizeAffixDefs(state.affix_defs));
       setSeqStart(typeof state.seq_start === "number" ? Math.max(1, Math.trunc(state.seq_start)) : 1);
       setSeqDigits(coerceSeqDigits(state.seq_digits));
       manualSeqKeysRef.current = new Set(Array.isArray(state.manual_seq_keys) ? state.manual_seq_keys : []);
@@ -2335,7 +2552,17 @@ export default function Page() {
           </div>
         ) : null}
         <div className="compact-group">
-          <span className="group-label">ページ状態一覧</span>
+          <span className="group-label">
+            ページ状態一覧
+            {thumbnailProgress ? (
+              <small className="muted-line page-state-note">
+                サムネイル取得中 {thumbnailProgress.loaded}/{thumbnailProgress.total}
+              </small>
+            ) : null}
+            {currentFile && currentFile.pageCount > MAX_THUMBNAILS ? (
+              <small className="muted-line page-state-note">{MAX_THUMBNAILS + 1}ページ以降はサムネイル省略</small>
+            ) : null}
+          </span>
           <div className="page-state-list">
             {currentPageStates.length ? (
               currentPageStates.map((page) => {
@@ -2795,8 +3022,13 @@ export default function Page() {
     const transcribeArmed = Boolean(targetDef && selectedSegment);
     return (
       <div className="legacy-panel-section assist-section ocr-text-panel">
-        <span className="group-label">OCRテキスト</span>
+        <span className="group-label">テキスト層（事前OCR済みPDF用）</span>
         <small>{pageTextStatus}</small>
+        {pageHasTextLayer === false ? (
+          <small className="muted-line text-layer-notice">
+            このページには文字データ（テキスト層）がありません。本ツールはOCRを行いません。分割・命名・出力はそのまま続けられます。
+          </small>
+        ) : null}
         {transcribeArmed && targetDef ? (
           <div className="ocr-transcribe-bar" role="status">
             <span>
@@ -2817,7 +3049,7 @@ export default function Page() {
         ) : null}
         <div
           className="ocr-text-scroll"
-          aria-label="OCRテキスト"
+          aria-label="テキスト層"
           tabIndex={transcribeArmed ? 0 : -1}
           onKeyDown={(event) => {
             if (!transcribeArmed) {
@@ -2874,15 +3106,16 @@ export default function Page() {
           >
             <ChevronRight aria-hidden="true" className="accordion-chevron" data-open={affixExpanded} size={14} />
             <span className="group-label">追加項目</span>
-            <span className="accordion-count">{affixDefs.length}件</span>
+            <span className="accordion-count">{affixDefs.length}/{MAX_AFFIX_COUNT}件</span>
           </button>
           <button
             className="ghost"
             disabled={affixDefs.length >= MAX_AFFIX_COUNT}
             onClick={handleAddAffix}
+            title={`追加項目は最大${MAX_AFFIX_COUNT}件まで`}
             type="button"
           >
-            <IconLabel icon={Plus}>追加</IconLabel>
+            <IconLabel icon={Plus}>追加（最大{MAX_AFFIX_COUNT}件）</IconLabel>
           </button>
         </div>
         <div id="affix-defs-body" className="affix-defs-body" hidden={!affixExpanded}>
@@ -2913,7 +3146,7 @@ export default function Page() {
                   <button
                     aria-label={`追加項目${index + 1}を削除`}
                     className="ghost danger"
-                    onClick={() => removeAffixDef(def.key)}
+                    onClick={() => void removeAffixDef(def.key)}
                     type="button"
                   >
                     <Trash2 aria-hidden="true" size={16} />
@@ -2969,16 +3202,38 @@ export default function Page() {
                 />
               </label>
               <label>
-                連番
+                <span className="seq-label-row">
+                  連番
+                  {manualSeqKeysRef.current.has(selectedSegment.key) ? (
+                    <button
+                      className="state-pill manual-seq-pill"
+                      onClick={() => releaseManualSeq(selectedSegment)}
+                      title="手動指定です。クリックで自動採番に戻します（入力を空にしても解除されます）"
+                      type="button"
+                    >
+                      手動
+                    </button>
+                  ) : null}
+                </span>
                 <input
                   inputMode="numeric"
                   name="seq"
                   value={selectedSegment.metadata.seq}
                   onChange={(event) => {
-                    manualSeqKeysRef.current.add(selectedSegment.key);
+                    // trim 後に空なら手動指定を解除し、再採番の対象に戻す（空のまま固定されるのを防ぐ）。
+                    if (event.target.value.trim()) {
+                      manualSeqKeysRef.current.add(selectedSegment.key);
+                    } else {
+                      manualSeqKeysRef.current.delete(selectedSegment.key);
+                    }
                     updateMetadata(selectedSegment, "seq", event.target.value);
                   }}
                 />
+                {String(selectedSegment.metadata.seq ?? "").trim().length > seqDigits ? (
+                  <small className="seq-digit-warning">
+                    桁数({seqDigits})を超えています。この番号はそのまま出力されます（並び順が崩れる場合があります）。
+                  </small>
+                ) : null}
               </label>
             </div>
             <details className="seq-rule-accordion">
@@ -3225,6 +3480,15 @@ export default function Page() {
     if (!selectedSearchTerms.length) {
       return <small className="muted-line">用語を選択してください。</small>;
     }
+    // テキスト層の有無はページ単位の判定。表示中ページになしと判明している場合は
+    // 「0件」ではなく「検索不能の可能性」を伝える（PDF全体の断言はしない）。
+    if (pageHasTextLayer === false) {
+      return (
+        <small className="muted-line">
+          表示中のページには文字データ（テキスト層）がないため検索できません。他のページにテキスト層があれば検索で見つかる場合があります。
+        </small>
+      );
+    }
     return <small className="muted-line">検索結果なし</small>;
   }
 
@@ -3387,8 +3651,12 @@ export default function Page() {
             <button onClick={openSearchTermModal} type="button">
               用語を選択
             </button>
-            <button disabled={!currentPdf || !selectedSearchTerms.length} onClick={() => void runTextSearch()} type="button">
-              検索/ハイライト
+            <button
+              disabled={!currentPdf || !selectedSearchTerms.length || isSearching}
+              onClick={() => void runTextSearch()}
+              type="button"
+            >
+              {isSearching ? "検索中…" : "検索/ハイライト"}
             </button>
           </div>
           <div className="search-results">
@@ -3425,8 +3693,8 @@ export default function Page() {
         <div className="legacy-panel-section assist-section">
           <div className="section-title-row">
             <span className="group-label">候補検索</span>
-            <button disabled={!currentPdf} onClick={() => void runIndexCandidateSearch()} type="button">
-              候補取得
+            <button disabled={!currentPdf || isCandidateLoading} onClick={() => void runIndexCandidateSearch()} type="button">
+              {isCandidateLoading ? "取得中…" : "候補取得"}
             </button>
           </div>
           <div className="index-candidates">
@@ -3447,12 +3715,17 @@ export default function Page() {
                 </button>
               ))
             ) : (
-              <small className="muted-line">候補なし</small>
+              <small className="muted-line">
+                {indexCandidatesFetched
+                  ? "候補が見つかりませんでした（0件）"
+                  : "未実行（「候補取得」を押すと表紙・区切りの候補を表示します）"}
+              </small>
             )}
           </div>
         </div>
         <div className="legacy-panel-section assist-section">
           <span className="group-label">白紙候補</span>
+          {blankScanProgress ? <small className="muted-line">{blankScanProgress}</small> : null}
           <div className="blank-candidates">
             {blankCandidates.length ? (
               blankCandidates.map((candidate) => (

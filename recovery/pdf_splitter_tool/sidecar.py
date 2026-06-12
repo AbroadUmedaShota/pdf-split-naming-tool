@@ -171,20 +171,28 @@ def search_text(request: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw_paths, list):
         raise TypeError("pdf_paths must be a JSON array.")
     query = str(request.get("query", "")).strip()
+    # NF-B1: queries（複数用語）が渡された場合は優先する。後方互換として query も受理。
+    raw_queries = request.get("queries")
+    queries: list[str] | None = None
+    if isinstance(raw_queries, list):
+        queries = [str(q) for q in raw_queries]
     scope = str(request.get("scope", "all_pdfs")).strip() or "all_pdfs"
     current_pdf_raw = str(request.get("current_pdf", "")).strip()
     current_pdf = Path(current_pdf_raw) if current_pdf_raw else None
     pdf_paths = [Path(str(path)) for path in raw_paths]
     if scope == "current_pdf" and current_pdf is not None:
         pdf_paths = [path for path in pdf_paths if path == current_pdf]
-    results = PdfProcessor.search_text(pdf_paths, query, current_pdf)
-    return {
+    results, truncated = PdfProcessor.search_text(pdf_paths, query, current_pdf, queries)
+    response: dict[str, Any] = {
         "ok": True,
         "command": "search_text",
         "query": query,
         "scope": scope,
         "results": results,
     }
+    if truncated:
+        response["truncated"] = True
+    return response
 
 
 def search_highlights(request: dict[str, Any]) -> dict[str, Any]:
@@ -221,13 +229,21 @@ def index_candidates(request: dict[str, Any]) -> dict[str, Any]:
 def blank_candidates(request: dict[str, Any]) -> dict[str, Any]:
     pdf_path = Path(str(request.get("pdf_path", "")))
     threshold = float(request.get("threshold", 0.985))
-    return {
+    # NF-C1: start_page で継続取得をサポート。フロントは scanned_until+1 を次リクエストの start_page に渡せる。
+    start_page = int(request.get("start_page", 1))
+    candidates, partial, scanned_until = PdfProcessor.blank_candidates(
+        pdf_path, threshold, start_page=start_page
+    )
+    response: dict[str, Any] = {
         "ok": True,
         "command": "blank_candidates",
         "pdf_path": str(pdf_path),
         "threshold": threshold,
-        "candidates": PdfProcessor.blank_candidates(pdf_path, threshold),
+        "candidates": candidates,
+        "partial": partial,
+        "scanned_until": scanned_until,
     }
+    return response
 
 
 def preflight(request: dict[str, Any]) -> dict[str, Any]:
