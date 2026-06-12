@@ -1124,6 +1124,12 @@ export default function Page() {
 
   function invalidateWorkspaceRequests(): void {
     workspaceRequestGateRef.current.invalidate();
+    // PDF切替や取込で文脈が変わったら、ズーム変更の遅延再描画も取り消す
+    // （凍結された旧PDFパスでプレビューを再要求してしまうのを防ぐ）。
+    if (zoomReloadTimerRef.current) {
+      clearTimeout(zoomReloadTimerRef.current);
+      zoomReloadTimerRef.current = null;
+    }
   }
 
   // 指定PDFのサムネイルキャッシュ鍵を破棄し、次回選択時に再取得させる。
@@ -1286,6 +1292,10 @@ export default function Page() {
       requestedPageRef.current = 1;
       setCurrentPage(1);
       setPreviewDataUrl("");
+      if (!remaining.length) {
+        // 最後の1件を外したら分割ステップは未訪問扱いに戻す。
+        setSplitStepVisited(false);
+      }
       if (nextPdf) {
         try {
           await loadPreview(nextPdf.path, 1);
@@ -1348,8 +1358,11 @@ export default function Page() {
     try {
       await loadPreview(currentFile.path, nextPage);
     } catch (error) {
-      // 失敗時は表示中ページへ基準を戻す（楽観更新の取り消し）。
-      requestedPageRef.current = currentPage;
+      // 失敗時は楽観更新を取り消す。ただし自分より新しい要求が出ていれば触らない
+      // （古いクロージャの巻き戻しで基準が表示と乖離するのを防ぐ）。
+      if (requestedPageRef.current === nextPage) {
+        requestedPageRef.current = currentPage;
+      }
       setStatus(`ページ移動エラー: ${String(error)}`, "danger");
     }
   }
@@ -2134,6 +2147,8 @@ export default function Page() {
       // 復元前の分割Undo履歴・選択分割点・検索/OCR/サムネイル状態を持ち越さない
       // （Ctrl+Z で復元前の分割点が適用される事故を防ぐ）。
       clearLegacyStep2AuxiliaryState();
+      // 復元後の分割ステップは未訪問扱いに戻す（分割点があれば done 判定は維持される）。
+      setSplitStepVisited(false);
       setPdfFiles(loaded);
       setOutputDir(state.output_dir || outputDir);
       setSplitPointsByPdf(state.split_points_by_pdf ?? {});
