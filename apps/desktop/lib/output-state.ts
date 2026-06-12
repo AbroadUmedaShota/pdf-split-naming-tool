@@ -10,6 +10,12 @@ export function isOutputCheckOk(check: OutputCheckLike): boolean {
   return check.ok && (!isExportItem(check) || check.status !== "failed");
 }
 
+// バッチ内で同名のファイル名が要求され、予約採番（_2 など）で別名に変わった行か。
+// ok のまま黙って別名出力される行をユーザーへ可視化するための判定。
+export function isOutputCheckRenamed(check: OutputCheckLike): boolean {
+  return Boolean(check.filename) && Boolean(check.requested_filename) && check.filename !== check.requested_filename;
+}
+
 export function outputIssueCount(checks: OutputCheckLike[]): number {
   return checks.filter((check) => !isOutputCheckOk(check)).length;
 }
@@ -33,7 +39,7 @@ function formatMessage(msg: string): string {
 
 export function outputListStateText(check: OutputCheckLike): string {
   if (isOutputCheckOk(check)) {
-    return "出力可能";
+    return isOutputCheckRenamed(check) ? "同名のため別名採番" : "出力可能";
   }
   if (check.has_existing_output) {
     return "既存あり（要対処）";
@@ -43,7 +49,7 @@ export function outputListStateText(check: OutputCheckLike): string {
 
 export function outputDetailStateText(check: OutputCheckLike): string {
   if (isOutputCheckOk(check)) {
-    return "出力可能";
+    return isOutputCheckRenamed(check) ? `バッチ内で同名のため「${check.filename}」を採番` : "出力可能";
   }
   if (isExportItem(check) && check.status === "failed") {
     return check.error || check.messages.map(formatMessage).join(" / ") || "出力失敗";

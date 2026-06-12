@@ -1,7 +1,7 @@
 "use client";
 
 import { desktopDir } from "@tauri-apps/api/path";
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm, open } from "@tauri-apps/plugin-dialog";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -57,7 +57,14 @@ import {
   missingMetadata,
   previewFilename
 } from "../lib/filename-policy";
-import { formatTopLevelMessage, isOutputCheckOk, outputDetailStateText, outputIssueCount, outputListStateText } from "../lib/output-state";
+import {
+  formatTopLevelMessage,
+  isOutputCheckOk,
+  isOutputCheckRenamed,
+  outputDetailStateText,
+  outputIssueCount,
+  outputListStateText
+} from "../lib/output-state";
 import { loadPagePreview } from "../lib/preview-flow";
 import { createPreviewRequestGate, previewCache } from "../lib/preview-cache";
 import {
@@ -80,6 +87,7 @@ type StepId = "import" | "split" | "input" | "output";
 type DevPreviewStep = StepId;
 
 type StepState = "active" | "done" | "attention" | "idle";
+type StatusTone = "ok" | "warning" | "danger" | "";
 type UpdateState = "idle" | "checking" | "current" | "available" | "installing" | "installed" | "error";
 type PreviewFitMode = "free" | "width" | "page";
 type SplitHistoryEntry = { pdfPath: string; points: number[] };
@@ -247,6 +255,16 @@ function basename(path: string): string {
 
 function sidecarError(response: SidecarResponse): string {
   return "error" in response ? response.error : "Sidecar response is not usable for this operation.";
+}
+
+// 破壊的操作の確認は Tauri WebView で動作しない恐れのある window.confirm を避け、
+// plugin-dialog の confirm を使う。ブラウザプレビュー等で plugin が使えない場合のみ退避する。
+async function confirmAction(message: string): Promise<boolean> {
+  try {
+    return await confirm(message, { kind: "warning", title: "確認" });
+  } catch {
+    return typeof window !== "undefined" && window.confirm(message);
+  }
 }
 
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {
@@ -458,7 +476,15 @@ export default function Page() {
   const [exportResult, setExportResult] = useState<SidecarExportResponse | null>(null);
   const [isPreflighting, setIsPreflighting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [status, setStatus] = useState("PDFを選択してください。");
+  const [isSavingState, setIsSavingState] = useState(false);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  // ステータスは文言とトーンをセットで保持する（文字列マッチによるトーン推定は誤判定するため廃止）。
+  const [statusState, setStatusState] = useState<{ message: string; tone: StatusTone }>({
+    message: "PDFを選択してください。",
+    tone: ""
+  });
+  // 分割ステップを一度でも開いたか（分割点ゼロ運用でもステッパーを「完了」にするための訪問フラグ）。
+  const [splitStepVisited, setSplitStepVisited] = useState(false);
   const [currentVersion, setCurrentVersion] = useState("0.1.0");
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
   const [updateMessage, setUpdateMessage] = useState("更新未確認");
@@ -493,9 +519,16 @@ export default function Page() {
   const pageTextRequestGateRef = useRef(createPreviewRequestGate());
   const pdfAuxiliaryRequestGateRef = useRef(createPreviewRequestGate());
   const zoomReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // 出力前チェック/出力実行の二重起動を同期的に防ぐ（連打対策。state は表示用 disable）。
+  // 出力前チェック/出力実行/状態保存の二重起動を同期的に防ぐ（連打対策。state は表示用 disable）。
   const preflightInFlightRef = useRef(false);
   const exportInFlightRef = useRef(false);
+  const saveStateInFlightRef = useRef(false);
+  // 応答待ち中の連打でも進めるよう、要求中ページを先行更新して基準にする（楽観更新）。
+  const requestedPageRef = useRef(1);
+  // プレビュー読込中表示用の同時実行カウンタ（古い要求の完了で表示を消さないため）。
+  const previewLoadCounterRef = useRef(0);
+  // 出力前チェック合格時の要求内容シグネチャ。出力実行前に現在値と比較し、編集後の出力を防ぐ。
+  const preflightSignatureRef = useRef("");
   // 連番を手動で上書きしたセグメントキー（再採番で保護。state に保存・復元される）。
   const manualSeqKeysRef = useRef<Set<string>>(new Set());
   // 取得済みサムネイルのキー（`${pdfPath}#${pageNo}`）。PDF再選択時の再取得を防ぐ。
@@ -558,10 +591,54 @@ export default function Page() {
   const canContinueFromImport = pdfFiles.length > 0 && Boolean(outputDir);
   const canRunPreflight = allSegments.length > 0 && Boolean(outputDir);
   const canExport = preflightChecks.length > 0 && outputIssues === 0 && existingOutputs === 0;
+  const totalSplitPointCount = useMemo(
+    () => pdfFiles.reduce((total, file) => total + splitPointsFor(file.pageCount, splitPointsByPdf[file.path]).length, 0),
+    [pdfFiles, splitPointsByPdf]
+  );
+  // 出力前チェック/出力実行が参照する要求内容のシグネチャ。応答待ち中・チェック後の編集検知に使う。
+  const exportRequestSignature = useMemo(
+    () =>
+      JSON.stringify({
+        affix_defs: affixDefs,
+        output_dir: outputDir,
+        seq_digits: seqDigits,
+        segments: allSegments.map((segment) => ({
+          pdf_path: segment.pdfPath,
+          start_page: segment.startPage,
+          end_page: segment.endPage,
+          metadata: segment.metadata
+        }))
+      }),
+    [affixDefs, allSegments, outputDir, seqDigits]
+  );
+  // 非同期処理の応答適用時に「最新の要求内容」と比較するため、毎レンダーで ref を同期する。
+  const exportRequestSignatureRef = useRef(exportRequestSignature);
+  exportRequestSignatureRef.current = exportRequestSignature;
+
+  function setStatus(message: string, tone: StatusTone = ""): void {
+    setStatusState({ message, tone });
+  }
 
   function clearOutputState(): void {
     setPreflightChecks([]);
     setExportResult(null);
+    preflightSignatureRef.current = "";
+  }
+
+  // 指定PDFにユーザーが入力した内容（分割点・手動入力値）があるか。
+  // 自動採番された seq は再現可能なので「入力済みデータ」とみなさない（手動上書きは対象）。
+  function hasUserEnteredDataForPdf(path: string): boolean {
+    if ((splitPointsByPdf[path] ?? []).length > 0) {
+      return true;
+    }
+    return Object.entries(segmentMetadata).some(([key, values]) => {
+      if (!key.startsWith(`${path}#`)) {
+        return false;
+      }
+      return Object.entries(values).some(([field, value]) =>
+        field === "seq" ? Boolean(value) && manualSeqKeysRef.current.has(key) : Boolean(value)
+      );
+    });
   }
 
   function clearLegacyStep2AuxiliaryState(): void {
@@ -596,6 +673,7 @@ export default function Page() {
     setActiveStep(step);
     setPdfFiles([{ path: step2ReviewPdfPath, pageCount: 11 }]);
     setCurrentPdf(step2ReviewPdfPath);
+    requestedPageRef.current = currentPageForStep;
     setCurrentPage(currentPageForStep);
     setPreviewDataUrl(step2ReviewPreviewDataUrl);
     setOutputDir(devPreviewOutputDir);
@@ -712,6 +790,7 @@ export default function Page() {
     }
     const nextPage = Math.max(1, Math.min(file.pageCount, pageNo));
     invalidateWorkspaceRequests();
+    requestedPageRef.current = nextPage;
     setCurrentPdf(pdfPath);
     if (devPreviewEnabled) {
       setCurrentPage(nextPage);
@@ -731,7 +810,7 @@ export default function Page() {
     try {
       await loadPreview(pdfPath, nextPage);
     } catch (error) {
-      setStatus(`プレビューエラー: ${String(error)}`);
+      setStatus(`プレビューエラー: ${String(error)}`, "danger");
     }
   }
 
@@ -806,6 +885,12 @@ export default function Page() {
     setDevPreviewEnabled(true);
     applyDevPreviewState(devStepFromUrl());
   }, []);
+
+  useEffect(() => {
+    if (activeStep === "split") {
+      setSplitStepVisited(true);
+    }
+  }, [activeStep]);
 
   useEffect(() => {
     if (!currentFile || devPreviewEnabled) {
@@ -927,7 +1012,7 @@ export default function Page() {
       setUpdateState("current");
       setUpdateMessage("最新版です。");
       if (manual) {
-        setStatus("最新版です。");
+        setStatus("最新版です。", "ok");
       }
     } catch (error) {
       if (isDisposed()) {
@@ -938,7 +1023,7 @@ export default function Page() {
       setUpdateState("error");
       setUpdateMessage(message);
       if (manual) {
-        setStatus(`更新確認エラー: ${message}`);
+        setStatus(`更新確認エラー: ${message}`, "danger");
       }
     }
   }
@@ -966,12 +1051,12 @@ export default function Page() {
       });
       setUpdateState("installed");
       setUpdateMessage("更新をインストールしました。再起動します。");
-      setStatus("更新をインストールしました。");
+      setStatus("更新をインストールしました。", "ok");
     } catch (error) {
       const message = updateErrorMessage(error);
       setUpdateState("error");
       setUpdateMessage(`更新インストールに失敗しました: ${message}`);
-      setStatus(`更新インストールエラー: ${message}`);
+      setStatus(`更新インストールエラー: ${message}`, "danger");
     }
   }
 
@@ -983,7 +1068,12 @@ export default function Page() {
       return canContinueFromImport ? "done" : pdfFiles.length || outputDir ? "attention" : "idle";
     }
     if (stepId === "split") {
-      return allSegments.length ? "done" : "idle";
+      // セグメントが存在するだけでは「完了」にしない。分割点を置いたか、
+      // 分割ステップを確認済み（訪問済み）の場合のみ完了とする。
+      if (!allSegments.length) {
+        return "idle";
+      }
+      return totalSplitPointCount > 0 || splitStepVisited ? "done" : "idle";
     }
     if (stepId === "input") {
       if (!allSegments.length) {
@@ -991,8 +1081,14 @@ export default function Page() {
       }
       return incompleteSegments ? "attention" : "done";
     }
-    if (exportResult?.summary.created) {
-      return "done";
+    // 出力ステップ: 部分失敗（failed>0）は完了扱いにせず要確認を出す。
+    if (exportResult) {
+      if (exportResult.summary.failed > 0) {
+        return "attention";
+      }
+      if (exportResult.summary.created > 0) {
+        return "done";
+      }
     }
     if (outputIssues) {
       return "attention";
@@ -1028,6 +1124,12 @@ export default function Page() {
 
   function invalidateWorkspaceRequests(): void {
     workspaceRequestGateRef.current.invalidate();
+    // PDF切替や取込で文脈が変わったら、ズーム変更の遅延再描画も取り消す
+    // （凍結された旧PDFパスでプレビューを再要求してしまうのを防ぐ）。
+    if (zoomReloadTimerRef.current) {
+      clearTimeout(zoomReloadTimerRef.current);
+      zoomReloadTimerRef.current = null;
+    }
   }
 
   // 指定PDFのサムネイルキャッシュ鍵を破棄し、次回選択時に再取得させる。
@@ -1046,20 +1148,29 @@ export default function Page() {
   }
 
   async function loadPreview(pdfPath: string, pageNo: number, zoomOverride = previewZoom): Promise<void> {
-    await loadPagePreview({
-      applyPreview(preview) {
-        setPreviewDataUrl(preview.imageDataUrl);
-        setCurrentPage(preview.pageNo);
-      },
-      cache: previewCache,
-      gate: previewRequestGateRef.current,
-      invalidPreviewMessage: "プレビューを取得できませんでした。",
-      pageNo,
-      pdfPath,
-      requestPreview: (request) => invokeSidecar(request),
-      responseErrorMessage: (response) => sidecarError(response as SidecarResponse),
-      zoom: zoomOverride
-    });
+    previewLoadCounterRef.current += 1;
+    setIsPreviewLoading(true);
+    try {
+      await loadPagePreview({
+        applyPreview(preview) {
+          setPreviewDataUrl(preview.imageDataUrl);
+          setCurrentPage(preview.pageNo);
+        },
+        cache: previewCache,
+        gate: previewRequestGateRef.current,
+        invalidPreviewMessage: "プレビューを取得できませんでした。",
+        pageNo,
+        pdfPath,
+        requestPreview: (request) => invokeSidecar(request),
+        responseErrorMessage: (response) => sidecarError(response as SidecarResponse),
+        zoom: zoomOverride
+      });
+    } finally {
+      previewLoadCounterRef.current -= 1;
+      if (previewLoadCounterRef.current === 0) {
+        setIsPreviewLoading(false);
+      }
+    }
   }
 
   async function choosePdfs(): Promise<void> {
@@ -1091,18 +1202,19 @@ export default function Page() {
         return [...byPath.values()];
       });
       setCurrentPdf(loaded[0].path);
+      requestedPageRef.current = 1;
       setCurrentPage(1);
       clearOutputState();
       await loadPreview(loaded[0].path, 1);
       if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
         return;
       }
-      setStatus(`${loaded.length}件のPDFを読み込みました。`);
+      setStatus(`${loaded.length}件のPDFを読み込みました。`, "ok");
     } catch (error) {
       if (requestId && !workspaceRequestGateRef.current.isCurrent(requestId)) {
         return;
       }
-      setStatus(`PDF取込エラー: ${String(error)}`);
+      setStatus(`PDF取込エラー: ${String(error)}`, "danger");
     }
   }
 
@@ -1112,18 +1224,19 @@ export default function Page() {
       invalidateWorkspaceRequests();
       setOutputDir(selected);
       clearOutputState();
-      setStatus("出力フォルダを設定しました。");
+      setStatus("出力フォルダを設定しました。", "ok");
     }
   }
 
   async function selectPdf(path: string): Promise<void> {
     invalidateWorkspaceRequests();
     setCurrentPdf(path);
+    requestedPageRef.current = 1;
     setCurrentPage(1);
     try {
       await loadPreview(path, 1);
     } catch (error) {
-      setStatus(`プレビューエラー: ${String(error)}`);
+      setStatus(`プレビューエラー: ${String(error)}`, "danger");
     }
   }
 
@@ -1131,15 +1244,25 @@ export default function Page() {
     invalidateWorkspaceRequests();
     setSelectedSegmentKey(segment.key);
     setCurrentPdf(segment.pdfPath);
+    requestedPageRef.current = segment.startPage;
     setCurrentPage(segment.startPage);
     try {
       await loadPreview(segment.pdfPath, segment.startPage);
     } catch (error) {
-      setStatus(`プレビューエラー: ${String(error)}`);
+      setStatus(`プレビューエラー: ${String(error)}`, "danger");
     }
   }
 
   async function removePdf(path: string): Promise<void> {
+    // 入力済みデータ（分割点・手動入力値）が消える場合のみ確認を挟む。
+    if (hasUserEnteredDataForPdf(path)) {
+      const accepted = await confirmAction(
+        `${basename(path)} の分割・入力内容も削除されます。一覧から外しますか？`
+      );
+      if (!accepted) {
+        return;
+      }
+    }
     const remaining = pdfFiles.filter((file) => file.path !== path);
     invalidateWorkspaceAndPreviewRequests();
     previewCache.clearPdf(path);
@@ -1166,13 +1289,18 @@ export default function Page() {
     if (currentPdf === path) {
       const nextPdf = remaining[0];
       setCurrentPdf(nextPdf?.path ?? "");
+      requestedPageRef.current = 1;
       setCurrentPage(1);
       setPreviewDataUrl("");
+      if (!remaining.length) {
+        // 最後の1件を外したら分割ステップは未訪問扱いに戻す。
+        setSplitStepVisited(false);
+      }
       if (nextPdf) {
         try {
           await loadPreview(nextPdf.path, 1);
         } catch (error) {
-          setStatus(`プレビューエラー: ${String(error)}`);
+          setStatus(`プレビューエラー: ${String(error)}`, "danger");
           return;
         }
       }
@@ -1180,16 +1308,25 @@ export default function Page() {
     setStatus(`${basename(path)} を一覧から外しました。`);
   }
 
-  function clearPdfSelection(): void {
+  async function clearPdfSelection(): Promise<void> {
+    // 入力済みデータ（分割点・手動入力値）が消える場合のみ確認を挟む。
+    if (pdfFiles.some((file) => hasUserEnteredDataForPdf(file.path))) {
+      const accepted = await confirmAction("入力済みの分割・命名内容も削除されます。PDF一覧をクリアしますか？");
+      if (!accepted) {
+        return;
+      }
+    }
     invalidateWorkspaceAndPreviewRequests();
     previewCache.clear();
     setPdfFiles([]);
     setCurrentPdf("");
+    requestedPageRef.current = 1;
     setCurrentPage(1);
     setPreviewDataUrl("");
     setSplitPointsByPdf({});
     setSegmentMetadata({});
     setSelectedSegmentKey("");
+    setSplitStepVisited(false);
     clearLegacyStep2AuxiliaryState();
     clearOutputState();
     setStatus("PDF一覧をクリアしました。");
@@ -1210,25 +1347,36 @@ export default function Page() {
     if (!currentFile) {
       return;
     }
-    const nextPage = Math.max(1, Math.min(currentFile.pageCount, currentPage + offset));
+    // 応答待ち中の連打が同じページを再要求しないよう、state ではなく要求中ページを基準にする。
+    const basePage = requestedPageRef.current;
+    const nextPage = Math.max(1, Math.min(currentFile.pageCount, basePage + offset));
+    if (nextPage === basePage) {
+      return;
+    }
+    requestedPageRef.current = nextPage;
     invalidateWorkspaceRequests();
     try {
       await loadPreview(currentFile.path, nextPage);
     } catch (error) {
-      setStatus(`ページ移動エラー: ${String(error)}`);
+      // 失敗時は楽観更新を取り消す。ただし自分より新しい要求が出ていれば触らない
+      // （古いクロージャの巻き戻しで基準が表示と乖離するのを防ぐ）。
+      if (requestedPageRef.current === nextPage) {
+        requestedPageRef.current = currentPage;
+      }
+      setStatus(`ページ移動エラー: ${String(error)}`, "danger");
     }
   }
 
   function addSplitBeforeCurrentPage(): void {
     invalidateWorkspaceRequests();
     if (!currentFile || currentPage <= 1) {
-      setStatus("先頭ページの前では分割できません。");
+      setStatus("先頭ページの前では分割できません。", "warning");
       return;
     }
     clearOutputState();
     updateCurrentPdfSplitPoints((currentPoints) => [...currentPoints, currentPage]);
     setSelectedSplitPoint(currentPage);
-    setStatus(`${currentPage}ページの前に分割を追加しました。`);
+    setStatus(`${currentPage}ページの前に分割を追加しました。`, "ok");
   }
 
   function undoLastSplit(): void {
@@ -1242,14 +1390,14 @@ export default function Page() {
     setStatus("最後の分割を取り消しました。");
   }
 
-  function clearCurrentPdfSplits(): void {
-    invalidateWorkspaceRequests();
+  async function clearCurrentPdfSplits(): Promise<void> {
     if (!currentFile || currentPdfSplitPointCount === 0) {
       return;
     }
-    if (!window.confirm("現在表示中PDFの分割をすべて解除します。よろしいですか？")) {
+    if (!(await confirmAction("現在表示中PDFの分割をすべて解除します。よろしいですか？"))) {
       return;
     }
+    invalidateWorkspaceRequests();
     clearOutputState();
     updateCurrentPdfSplitPoints(() => []);
     setSelectedSegmentKey("");
@@ -1264,7 +1412,7 @@ export default function Page() {
     }
     const targetPoint = selectedSplitPoint ?? (currentSplitPoints.includes(currentPage) ? currentPage : null);
     if (!targetPoint) {
-      setStatus("削除対象の分割点を選択してください。");
+      setStatus("削除対象の分割点を選択してください。", "warning");
       return;
     }
     clearOutputState();
@@ -1375,7 +1523,7 @@ export default function Page() {
       setSearchHighlights(responses.flat());
     } catch (error) {
       setSearchHighlights([]);
-      setStatus(`検索ハイライト取得エラー: ${String(error)}`);
+      setStatus(`検索ハイライト取得エラー: ${String(error)}`, "danger");
     }
   }
 
@@ -1403,7 +1551,7 @@ export default function Page() {
       setSearchResults([]);
       setSelectedSearchHit(null);
       setSearchHighlights([]);
-      setStatus("用語を選択してください。");
+      setStatus("用語を選択してください。", "warning");
       return;
     }
     if (devPreviewEnabled) {
@@ -1434,9 +1582,9 @@ export default function Page() {
       setSearchResults(mergedResults);
       setSelectedSearchHit(null);
       setSearchHighlights([]);
-      setStatus(`${mergedResults.length}ページの検索結果を取得しました。`);
+      setStatus(`${mergedResults.length}ページの検索結果を取得しました。`, "ok");
     } catch (error) {
-      setStatus(`検索エラー: ${String(error)}`);
+      setStatus(`検索エラー: ${String(error)}`, "danger");
     }
   }
 
@@ -1459,10 +1607,10 @@ export default function Page() {
       }
       const result = response as SidecarIndexCandidatesResponse;
       setIndexCandidates(result.candidates);
-      setStatus(`${result.candidates.length}件の候補を取得しました。`);
+      setStatus(`${result.candidates.length}件の候補を取得しました。`, "ok");
     } catch (error) {
       setIndexCandidates([]);
-      setStatus(`候補検索エラー: ${String(error)}`);
+      setStatus(`候補検索エラー: ${String(error)}`, "danger");
     }
   }
 
@@ -1483,12 +1631,13 @@ export default function Page() {
       clearTimeout(zoomReloadTimerRef.current);
     }
     const pdfPath = file.path;
-    const pageNo = currentPage;
     zoomReloadTimerRef.current = setTimeout(() => {
       zoomReloadTimerRef.current = null;
-      previewCache.clearPdf(pdfPath);
-      loadPreview(pdfPath, pageNo, normalizedZoom).catch((error) => {
-        setStatus(`プレビュー倍率変更エラー: ${String(error)}`);
+      // キャッシュキーは [pdfPath, pageNo] で zoom を含まないため、倍率変更時は全PDF分を破棄する
+      // （表示中PDF以外に旧倍率の画像が残ると、PDF切替時に古い倍率で表示されるため）。
+      previewCache.clear();
+      loadPreview(pdfPath, requestedPageRef.current, normalizedZoom).catch((error) => {
+        setStatus(`プレビュー倍率変更エラー: ${String(error)}`, "danger");
       });
     }, 180);
   }
@@ -1550,7 +1699,7 @@ export default function Page() {
       }
       if (event.key === "Delete" && event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey) {
         event.preventDefault();
-        clearCurrentPdfSplits();
+        void clearCurrentPdfSplits();
       }
   };
 
@@ -1644,7 +1793,7 @@ export default function Page() {
     }
     const index = allSegments.findIndex((segment) => segment.key === selectedSegment.key);
     if (index <= 0) {
-      setStatus("前の行がありません。");
+      setStatus("前の行がありません。", "warning");
       return;
     }
     const patch = copyableMetadataPatch(allSegments[index - 1].metadata);
@@ -1654,7 +1803,7 @@ export default function Page() {
       ...current,
       [selectedSegment.key]: { ...(current[selectedSegment.key] ?? {}), ...patch }
     }));
-    setStatus("前の行をコピーしました（連番は維持）。");
+    setStatus("前の行をコピーしました（連番は維持）。", "ok");
   }
 
   function applyMetadataToAllSegments(): void {
@@ -1671,7 +1820,7 @@ export default function Page() {
       }
       return next;
     });
-    setStatus("全セグメントへ適用しました（連番は各行を維持）。");
+    setStatus("全セグメントへ適用しました（連番は各行を維持）。", "ok");
   }
 
   function jumpToUnresolvedSegment(direction: number): void {
@@ -1740,7 +1889,7 @@ export default function Page() {
     invalidateWorkspaceRequests();
     clearOutputState();
     setSegmentMetadata((current) => numberSegmentsPerPdf(current, false));
-    setStatus("連番を再採番しました（PDF単位・手動入力は保持）。");
+    setStatus("連番を再採番しました（PDF単位・手動入力は保持）。", "ok");
   }
 
   function fillEmptySeqByRule(): void {
@@ -1806,11 +1955,11 @@ export default function Page() {
     // OCR選択には改行・全角空白が混じりやすい。連続空白を1つに畳み、前後を除去してから転記する。
     const cleaned = selected.replace(/[\s　]+/g, " ").trim();
     if (!cleaned) {
-      setStatus("OCR本文を選択してから転記してください。");
+      setStatus("OCR本文を選択してから転記してください。", "warning");
       return;
     }
     updateMetadata(selectedSegment, transcribeTargetKey, cleaned);
-    setStatus("追加項目へ転記しました。");
+    setStatus("追加項目へ転記しました。", "ok");
   }
 
   function requestSegments(): SidecarSegment[] {
@@ -1828,6 +1977,9 @@ export default function Page() {
     }
     preflightInFlightRef.current = true;
     setIsPreflighting(true);
+    setStatus("チェックしています…");
+    // 送信時点の要求内容を保持し、応答待ち中に編集された場合は結果を適用しない。
+    const requestSignature = exportRequestSignature;
     try {
       const response = await invokeSidecar({
         command: "preflight",
@@ -1836,16 +1988,29 @@ export default function Page() {
         affix_defs: affixDefs,
         seq_digits: seqDigits
       });
-      if (response.command !== "preflight") {
+      // エラー応答（checks なし）はここで弾き、不正な形を state に入れない。
+      if (!response.ok || response.command !== "preflight" || !("checks" in response)) {
         throw new Error(response.ok ? "出力前チェックに失敗しました。" : sidecarError(response));
+      }
+      if (exportRequestSignatureRef.current !== requestSignature) {
+        setStatus("内容が変更されたため再チェックしてください。", "warning");
+        return;
       }
       const result = response as SidecarPreflightResponse;
       setPreflightChecks(result.checks);
       setExportResult(null);
-      setStatus(result.can_run ? "出力できます。" : "修正が必要な項目があります。");
+      preflightSignatureRef.current = requestSignature;
+      const renamedCount = result.checks.filter((check) => isOutputCheckRenamed(check)).length;
+      if (!result.can_run) {
+        setStatus("修正が必要な項目があります。", "warning");
+      } else if (renamedCount) {
+        setStatus(`出力できます。バッチ内で同名のため別名（_2 形式）を採番した行が${renamedCount}件あります。`, "warning");
+      } else {
+        setStatus("出力できます。", "ok");
+      }
       setActiveStep("output");
     } catch (error) {
-      setStatus(`出力前チェックエラー: ${String(error)}`);
+      setStatus(`出力前チェックエラー: ${String(error)}`, "danger");
     } finally {
       preflightInFlightRef.current = false;
       setIsPreflighting(false);
@@ -1856,8 +2021,15 @@ export default function Page() {
     if (exportInFlightRef.current) {
       return;
     }
+    // 出力前チェック後にセグメント・出力先が編集された場合、確認済み一覧と異なる内容を出力しない。
+    if (preflightSignatureRef.current !== exportRequestSignatureRef.current) {
+      clearOutputState();
+      setStatus("内容が変更されたため再チェックしてください。", "warning");
+      return;
+    }
     exportInFlightRef.current = true;
     setIsExporting(true);
+    setStatus("出力しています…");
     try {
       const response = await invokeSidecar({
         command: "export",
@@ -1866,15 +2038,23 @@ export default function Page() {
         affix_defs: affixDefs,
         seq_digits: seqDigits
       });
-      if (response.command !== "export") {
+      // ok:false でも summary/items を持つ部分失敗レポートは正常応答として扱う。
+      // summary/items を欠くエラー応答だけをここで弾く。
+      if (response.command !== "export" || !("summary" in response) || !("items" in response)) {
         throw new Error(response.ok ? "出力に失敗しました。" : sidecarError(response));
       }
       const result = response as SidecarExportResponse;
       setExportResult(result);
       setPreflightChecks(result.items);
-      setStatus(result.ok ? "出力が完了しました。" : "出力結果を確認してください。");
+      if (result.summary.failed > 0) {
+        setStatus(`出力結果を確認してください（失敗 ${result.summary.failed}件）。`, "warning");
+      } else if (result.ok) {
+        setStatus("出力が完了しました。", "ok");
+      } else {
+        setStatus("出力結果を確認してください。", "warning");
+      }
     } catch (error) {
-      setStatus(`出力エラー: ${String(error)}`);
+      setStatus(`出力エラー: ${String(error)}`, "danger");
     } finally {
       exportInFlightRef.current = false;
       setIsExporting(false);
@@ -1882,43 +2062,74 @@ export default function Page() {
   }
 
   async function saveState(): Promise<void> {
-    const state: AppPersistedState = {
-      version: 1,
-      input_paths: pdfFiles.map((file) => file.path),
-      output_dir: outputDir,
-      split_points_by_pdf: splitPointsByPdf,
-      segment_metadata: segmentMetadata,
-      common_metadata: commonMetadata,
-      affix_defs: affixDefs,
-      seq_start: seqStart,
-      seq_digits: seqDigits,
-      manual_seq_keys: [...manualSeqKeysRef.current],
-      current_pdf: currentPdf,
-      current_page: currentPage
-    };
-    const response = await invokeSidecar({ command: "state_save", state });
-    setStatus(response.ok ? "状態を保存しました。" : `状態保存エラー: ${sidecarError(response)}`);
+    if (saveStateInFlightRef.current) {
+      return;
+    }
+    saveStateInFlightRef.current = true;
+    setIsSavingState(true);
+    setStatus("状態を保存しています…");
+    try {
+      // 現在のPDF・セグメント構成に存在しないキー（orphan）は永続化しない。
+      const currentSegmentKeys = new Set(allSegments.map((segment) => segment.key));
+      const currentPdfPaths = new Set(pdfFiles.map((file) => file.path));
+      const state: AppPersistedState = {
+        version: 1,
+        input_paths: pdfFiles.map((file) => file.path),
+        output_dir: outputDir,
+        split_points_by_pdf: Object.fromEntries(
+          Object.entries(splitPointsByPdf).filter(([path]) => currentPdfPaths.has(path))
+        ),
+        segment_metadata: Object.fromEntries(
+          Object.entries(segmentMetadata).filter(([key]) => currentSegmentKeys.has(key))
+        ),
+        common_metadata: commonMetadata,
+        affix_defs: affixDefs,
+        seq_start: seqStart,
+        seq_digits: seqDigits,
+        manual_seq_keys: [...manualSeqKeysRef.current].filter((key) => currentSegmentKeys.has(key)),
+        current_pdf: currentPdf,
+        current_page: currentPage
+      };
+      const response = await invokeSidecar({ command: "state_save", state });
+      if (response.ok) {
+        setStatus("状態を保存しました。", "ok");
+      } else {
+        setStatus(`状態保存エラー: ${sidecarError(response)}`, "danger");
+      }
+    } catch (error) {
+      setStatus(`状態保存エラー: ${String(error)}`, "danger");
+    } finally {
+      saveStateInFlightRef.current = false;
+      setIsSavingState(false);
+    }
   }
 
   async function loadState(): Promise<void> {
+    // 作業中データがある場合は、復元による破棄をユーザーに確認する。
+    if (pdfFiles.length > 0 || Object.keys(segmentMetadata).length > 0) {
+      const accepted = await confirmAction("現在の作業内容を破棄して保存済み状態を復元しますか？");
+      if (!accepted) {
+        return;
+      }
+    }
     const requestId = workspaceRequestGateRef.current.next();
     invalidatePreviewRequests();
-    const response = await invokeSidecar({ command: "state_load" });
-    if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
-      return;
-    }
-    if (!response.ok || response.command !== "state_load") {
-      setStatus(response.ok ? "状態読込に失敗しました。" : `状態読込エラー: ${sidecarError(response)}`);
-      return;
-    }
-    const state = response.state as Partial<AppPersistedState>;
-    if (!Array.isArray(state.input_paths) || !state.input_paths.length) {
-      setStatus("保存済み状態はありません。");
-      return;
-    }
-    const missingInputPaths = response.missing_input_paths ?? [];
-    const hasMissingInputPdf = response.messages?.includes("missing_input_pdf") || missingInputPaths.length > 0;
     try {
+      const response = await invokeSidecar({ command: "state_load" });
+      if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
+        return;
+      }
+      if (!response.ok || response.command !== "state_load" || !("state" in response)) {
+        setStatus(response.ok ? "状態読込に失敗しました。" : `状態読込エラー: ${sidecarError(response)}`, "danger");
+        return;
+      }
+      const state = response.state as Partial<AppPersistedState>;
+      if (!Array.isArray(state.input_paths) || !state.input_paths.length) {
+        setStatus("保存済み状態はありません。");
+        return;
+      }
+      const missingInputPaths = response.missing_input_paths ?? [];
+      const hasMissingInputPdf = response.messages?.includes("missing_input_pdf") || missingInputPaths.length > 0;
       const inputPathsToRestore = restorableInputPaths(state.input_paths, missingInputPaths);
       const loaded = await Promise.all(inputPathsToRestore.map((path) => loadPdfInfo(path)));
       if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
@@ -1933,7 +2144,11 @@ export default function Page() {
         savedInputPaths: state.input_paths
       });
       previewCache.clear();
-      loadedThumbnailKeysRef.current.clear();
+      // 復元前の分割Undo履歴・選択分割点・検索/OCR/サムネイル状態を持ち越さない
+      // （Ctrl+Z で復元前の分割点が適用される事故を防ぐ）。
+      clearLegacyStep2AuxiliaryState();
+      // 復元後の分割ステップは未訪問扱いに戻す（分割点があれば done 判定は維持される）。
+      setSplitStepVisited(false);
       setPdfFiles(loaded);
       setOutputDir(state.output_dir || outputDir);
       setSplitPointsByPdf(state.split_points_by_pdf ?? {});
@@ -1944,6 +2159,7 @@ export default function Page() {
       setSeqDigits(coerceSeqDigits(state.seq_digits));
       manualSeqKeysRef.current = new Set(Array.isArray(state.manual_seq_keys) ? state.manual_seq_keys : []);
       setCurrentPdf(restoreDecision.currentPdf);
+      requestedPageRef.current = restoreDecision.currentPage;
       setCurrentPage(restoreDecision.currentPage);
       const restoredSegmentKeys = new Set(
         buildSegments(loaded, state.split_points_by_pdf ?? {}, state.segment_metadata ?? {}, {
@@ -1962,22 +2178,16 @@ export default function Page() {
       if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
         return;
       }
-      setStatus(restoreDecision.statusText);
+      setStatus(restoreDecision.statusText, restoreDecision.missingStatusInput ? "warning" : "ok");
     } catch (error) {
       if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
         return;
       }
-      setStatus(`状態復元エラー: ${String(error)}`);
+      setStatus(`状態読込エラー: ${String(error)}`, "danger");
     }
   }
 
-  const statusTone = status.includes("エラー")
-    ? "danger"
-    : status.includes("修正") || status.includes("不足") || status.includes("再選択")
-      ? "warning"
-      : status.includes("完了") || status.includes("できます")
-        ? "ok"
-        : "";
+  const statusTone = statusState.tone;
   const updateTone =
     updateState === "error"
       ? "danger"
@@ -2006,7 +2216,7 @@ export default function Page() {
           title="PDF一覧"
           description={pdfFiles.length ? `${pdfFiles.length}件 / ${totalPages}ページ` : "処理対象PDFを追加します。"}
           action={
-            <button className="ghost danger" disabled={!pdfFiles.length} onClick={clearPdfSelection} type="button">
+            <button className="ghost danger" disabled={!pdfFiles.length} onClick={() => void clearPdfSelection()} type="button">
               <IconLabel icon={Trash2}>全クリア</IconLabel>
             </button>
           }
@@ -2059,7 +2269,7 @@ export default function Page() {
               aria-keyshortcuts="Control+Shift+Delete"
               className="ghost danger split-list-reset"
               disabled={!currentFile || currentPdfSplitPointCount === 0}
-              onClick={clearCurrentPdfSplits}
+              onClick={() => void clearCurrentPdfSplits()}
               title="現在表示中PDFの分割を全解除 (Ctrl+Shift+Delete)"
               type="button"
             >
@@ -2124,6 +2334,13 @@ export default function Page() {
                             event.stopPropagation();
                             setSelectedSplitPoint(page.pageNo);
                           }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setSelectedSplitPoint(page.pageNo);
+                            }
+                          }}
                           role="button"
                           tabIndex={0}
                         >
@@ -2173,6 +2390,10 @@ export default function Page() {
               </div>
             {allSegments.map((segment) => {
               const missing = missingMetadata(segment.metadata);
+              // 共通項目と異なる値を持つ行は「個別」と示す（空欄は未入力として別表示）。
+              const hasCustomCommonValue =
+                (segment.metadata.box_no && segment.metadata.box_no !== (commonMetadata.box_no ?? "")) ||
+                (segment.metadata.binder_no && segment.metadata.binder_no !== (commonMetadata.binder_no ?? ""));
               return (
                 <button
                   className={segment.key === selectedSegment?.key ? "mini-row selected" : "mini-row"}
@@ -2184,9 +2405,12 @@ export default function Page() {
                     <strong>{segment.pages}</strong>
                     <small>{basename(segment.pdfPath)}</small>
                   </span>
-                  <span>{`${segment.metadata.box_no || "-"} / ${segment.metadata.binder_no || "-"} / ${
-                    segment.metadata.seq || "-"
-                  }`}</span>
+                  <span>
+                    {`${segment.metadata.box_no || "-"} / ${segment.metadata.binder_no || "-"} / ${
+                      segment.metadata.seq || "-"
+                    }`}
+                    {hasCustomCommonValue ? <small className="state-pill">個別</small> : null}
+                  </span>
                   <span className={missing.length ? "state-text warning" : "state-text ok"}>
                     {missing.length ? "未入力" : "OK"}
                   </span>
@@ -2196,12 +2420,62 @@ export default function Page() {
             </div>
           </>
         ) : (
-          <EmptyState icon={PencilLine} title="入力対象がありません">
-            PDFを取込み、分割を確認してから入力します。
+          <EmptyState
+            action={
+              <button onClick={() => setActiveStep("import")} type="button">
+                <IconLabel icon={ArrowLeft}>PDF取込へ戻る</IconLabel>
+              </button>
+            }
+            icon={PencilLine}
+            title="入力対象がありません"
+          >
+            {pdfFiles.length
+              ? "分割セグメントがありません。分割ステップを確認してください。"
+              : "不足項目: PDF未選択。PDF取込へ戻って追加してください。"}
           </EmptyState>
         )}
       </div>
     );
+  }
+
+  // 出力前チェックに進めない理由（不足項目）。空状態のガイド表示に使う。
+  function outputMissingItems(): string[] {
+    const missing: string[] = [];
+    if (!pdfFiles.length) {
+      missing.push("PDF未選択");
+    }
+    if (!outputDir) {
+      missing.push("出力先未設定");
+    }
+    if (incompleteSegments) {
+      missing.push(`未入力 ${incompleteSegments}件`);
+    }
+    return missing;
+  }
+
+  // 不足項目を解消できるステップへ戻るボタン。不足がなければ出力前チェックを促す。
+  function renderOutputEmptyAction() {
+    const missing = outputMissingItems();
+    if (!missing.length) {
+      return (
+        <button disabled={!canRunPreflight || isPreflighting} onClick={runPreflight} type="button">
+          <IconLabel icon={ClipboardCheck}>{isPreflighting ? "チェック中…" : "出力前チェック"}</IconLabel>
+        </button>
+      );
+    }
+    const backStep: StepId = !pdfFiles.length || !outputDir ? "import" : "input";
+    return (
+      <button onClick={() => setActiveStep(backStep)} type="button">
+        <IconLabel icon={ArrowLeft}>{backStep === "import" ? "PDF取込へ戻る" : "入力へ戻る"}</IconLabel>
+      </button>
+    );
+  }
+
+  function outputEmptyStateText(): string {
+    const missing = outputMissingItems();
+    return missing.length
+      ? `不足項目: ${missing.join(" / ")}。該当ステップへ戻って解消してください。`
+      : "入力内容が揃ったら、ここで出力可否を確認します。";
   }
 
   function renderOutputList() {
@@ -2222,23 +2496,19 @@ export default function Page() {
                   <strong>{check.filename || check.requested_filename || "-"}</strong>
                   <small>{basename(check.pdf_path)} / {check.pages}ページ</small>
                 </span>
-                <span className={isOutputCheckOk(check) ? "state-text ok" : "state-text warning"}>
+                <span
+                  className={
+                    isOutputCheckOk(check) && !isOutputCheckRenamed(check) ? "state-text ok" : "state-text warning"
+                  }
+                >
                   {outputListStateText(check)}
                 </span>
               </div>
             ))}
           </div>
         ) : (
-          <EmptyState
-            action={
-              <button disabled={!canRunPreflight || isPreflighting} onClick={runPreflight} type="button">
-                <IconLabel icon={ClipboardCheck}>出力前チェック</IconLabel>
-              </button>
-            }
-            icon={Download}
-            title="未確認です"
-          >
-            入力内容が揃ったら、ここで出力可否を確認します。
+          <EmptyState action={renderOutputEmptyAction()} icon={Download} title="未確認です">
+            {outputEmptyStateText()}
           </EmptyState>
         )}
       </div>
@@ -2281,7 +2551,7 @@ export default function Page() {
               <button className="primary" onClick={choosePdfs} type="button">
                 <IconLabel icon={Upload}>PDFを選択</IconLabel>
               </button>
-              <button className="ghost danger" disabled={!pdfFiles.length} onClick={clearPdfSelection} type="button">
+              <button className="ghost danger" disabled={!pdfFiles.length} onClick={() => void clearPdfSelection()} type="button">
                 <IconLabel icon={Trash2}>全クリア</IconLabel>
               </button>
             </div>
@@ -2311,11 +2581,18 @@ export default function Page() {
             <div className="field-grid two">
               <label>
                 箱No
-                <input value={commonMetadata.box_no} onChange={(event) => updateCommonMetadata("box_no", event.target.value)} />
+                <input
+                  inputMode="numeric"
+                  name="common_box_no"
+                  value={commonMetadata.box_no}
+                  onChange={(event) => updateCommonMetadata("box_no", event.target.value)}
+                />
               </label>
               <label>
                 バインダーNo
                 <input
+                  inputMode="numeric"
+                  name="common_binder_no"
                   value={commonMetadata.binder_no}
                   onChange={(event) => updateCommonMetadata("binder_no", event.target.value)}
                 />
@@ -2325,11 +2602,11 @@ export default function Page() {
         </div>
         <div className="workbench-footer">
           <div className="aux-actions" aria-label="補助操作">
-            <button onClick={loadState} type="button">
+            <button onClick={() => void loadState()} type="button">
               <IconLabel icon={RotateCcw}>状態を復元</IconLabel>
             </button>
-            <button onClick={saveState} type="button">
-              <IconLabel icon={Save}>状態を保存</IconLabel>
+            <button disabled={isSavingState} onClick={() => void saveState()} type="button">
+              <IconLabel icon={Save}>{isSavingState ? "保存中…" : "状態を保存"}</IconLabel>
             </button>
           </div>
           <button className="primary wide" disabled={!canContinueFromImport} onClick={() => setActiveStep("split")} type="button">
@@ -2433,6 +2710,11 @@ export default function Page() {
     const previewClassName = `preview-frame ${previewFitMode}`;
     return (
       <div className={previewClassName}>
+        {isPreviewLoading ? (
+          <div aria-live="polite" className="preview-loading-indicator" role="status">
+            読み込み中…
+          </div>
+        ) : null}
         {previewDataUrl ? (
             <div className="preview-page-layer">
               <img alt="PDFページプレビュー" src={previewDataUrl} />
@@ -2626,6 +2908,9 @@ export default function Page() {
               <label>
                 箱No
                 <input
+                  inputMode="numeric"
+                  name="box_no"
+                  placeholder={commonMetadata.box_no ? `共通値: ${commonMetadata.box_no}` : undefined}
                   value={selectedSegment.metadata.box_no}
                   onChange={(event) => updateMetadata(selectedSegment, "box_no", event.target.value)}
                 />
@@ -2633,6 +2918,9 @@ export default function Page() {
               <label>
                 バインダーNo
                 <input
+                  inputMode="numeric"
+                  name="binder_no"
+                  placeholder={commonMetadata.binder_no ? `共通値: ${commonMetadata.binder_no}` : undefined}
                   value={selectedSegment.metadata.binder_no}
                   onChange={(event) => updateMetadata(selectedSegment, "binder_no", event.target.value)}
                 />
@@ -2640,6 +2928,8 @@ export default function Page() {
               <label>
                 連番
                 <input
+                  inputMode="numeric"
+                  name="seq"
                   value={selectedSegment.metadata.seq}
                   onChange={(event) => {
                     manualSeqKeysRef.current.add(selectedSegment.key);
@@ -2680,7 +2970,7 @@ export default function Page() {
               </div>
             </details>
             <div className="action-row">
-              <button className="primary" disabled={!allSegments.length} onClick={resequence} type="button">
+              <button disabled={!allSegments.length} onClick={resequence} type="button">
                 <IconLabel icon={ClipboardCheck}>連番を再採番</IconLabel>
               </button>
               <button
@@ -2715,7 +3005,7 @@ export default function Page() {
             <StatusCheck ok={Boolean(outputDir)} label="出力先" detail={outputDir || "未設定"} />
           </div>
           <button className="primary wide" disabled={!canRunPreflight || isPreflighting} onClick={runPreflight} type="button">
-            <IconLabel icon={ChevronRight}>出力前チェック</IconLabel>
+            <IconLabel icon={ChevronRight}>{isPreflighting ? "チェック中…" : "出力前チェック"}</IconLabel>
           </button>
         </div>
       </aside>
@@ -2768,16 +3058,16 @@ export default function Page() {
             ))}
           </div>
         ) : (
-          <EmptyState icon={Download} title="出力前チェック待ちです">
-            入力内容が揃ったら、ここで出力可否を確認します。
+          <EmptyState action={renderOutputEmptyAction()} icon={Download} title="出力前チェック待ちです">
+            {outputEmptyStateText()}
           </EmptyState>
         )}
         <div className="workbench-footer">
           <button disabled={!canRunPreflight || isPreflighting} onClick={runPreflight} type="button">
-            <IconLabel icon={ClipboardCheck}>再チェック</IconLabel>
+            <IconLabel icon={ClipboardCheck}>{isPreflighting ? "チェック中…" : "再チェック"}</IconLabel>
           </button>
           <button className="primary wide" disabled={!canExport || isExporting} onClick={runExport} type="button">
-            <IconLabel icon={Download}>出力実行</IconLabel>
+            <IconLabel icon={Download}>{isExporting ? "出力中…" : "出力実行"}</IconLabel>
           </button>
         </div>
       </section>
@@ -2859,7 +3149,11 @@ export default function Page() {
     setSearchResults([]);
     setSelectedSearchHit(null);
     setSearchHighlights([]);
-    setStatus(preset.selectedTerms.length ? "検索用語を更新しました。" : "用語を選択してください。");
+    if (preset.selectedTerms.length) {
+      setStatus("検索用語を更新しました。", "ok");
+    } else {
+      setStatus("用語を選択してください。", "warning");
+    }
   }
 
   function renderHighlightedOcrText(): ReactNode {
@@ -3203,14 +3497,14 @@ export default function Page() {
             </div>
           </div>
           <div className={`status-pill ${statusTone}`} role="status">
-            {statusTone === "danger" ? (
+            {statusTone === "danger" || statusTone === "warning" ? (
               <AlertTriangle aria-hidden="true" size={16} />
             ) : statusTone === "ok" ? (
               <CheckCircle2 aria-hidden="true" size={16} />
             ) : (
               <ClipboardCheck aria-hidden="true" size={16} />
             )}
-            <span>{status}</span>
+            <span>{statusState.message}</span>
           </div>
         </div>
       </header>

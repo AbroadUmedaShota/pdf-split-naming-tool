@@ -34,9 +34,11 @@ export function missingPdfStatus({ allMissing, paths }: MissingPdfStatusInput): 
   const names = paths.slice(0, 2).map(basename).join("、");
   const suffix = paths.length > 2 ? ` ほか${paths.length - 2}件` : "";
   const target = names ? `（${names}${suffix}）` : "";
+  // 保存時は現在のPDF構成でフィルタされるため、欠損PDF分の入力値は保存し直すと消える。
+  const lossWarning = "このまま保存すると読み込めなかったPDFの入力値は失われます。";
   return allMissing
-    ? `保存済みPDFが見つかりません${target}。再選択してください。`
-    : `一部の保存済みPDFが見つかりません${target}。再選択してください。`;
+    ? `保存済みPDFが見つかりません${target}。再選択してください。${lossWarning}`
+    : `一部の保存済みPDFが見つかりません${target}。再選択してください。${lossWarning}`;
 }
 
 export function restorableInputPaths(savedInputPaths: string[], missingInputPaths: string[]): string[] {
