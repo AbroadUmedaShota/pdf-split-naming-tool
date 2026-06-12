@@ -253,8 +253,26 @@ function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
+// サイドカーの構造化エラー（error を持たず messages にメッセージIDのみを持つ応答）の表示文言。
+const SIDECAR_MESSAGE_TEXT: Record<string, string> = {
+  missing_output_dir: "出力先が未設定です。",
+  no_segments: "セグメントがありません。",
+  preflight_failed: "出力前チェックで問題が見つかりました。"
+};
+
 function sidecarError(response: SidecarResponse): string {
-  return "error" in response ? response.error : "Sidecar response is not usable for this operation.";
+  if ("error" in response) {
+    return response.error;
+  }
+  if ("messages" in response && Array.isArray(response.messages)) {
+    const known = response.messages
+      .map((id) => SIDECAR_MESSAGE_TEXT[id])
+      .filter((text): text is string => Boolean(text));
+    if (known.length) {
+      return known.join(" ");
+    }
+  }
+  return "サイドカーの応答をこの操作に使用できません。";
 }
 
 // 破壊的操作の確認は Tauri WebView で動作しない恐れのある window.confirm を避け、
@@ -2129,18 +2147,33 @@ export default function Page() {
         return;
       }
       const missingInputPaths = response.missing_input_paths ?? [];
-      const hasMissingInputPdf = response.messages?.includes("missing_input_pdf") || missingInputPaths.length > 0;
       const inputPathsToRestore = restorableInputPaths(state.input_paths, missingInputPaths);
-      const loaded = await Promise.all(inputPathsToRestore.map((path) => loadPdfInfo(path)));
+      // 1件の読込失敗（削除直後・ロック・破損等）で復元全体を失敗させないため、
+      // allSettled で開けた分だけ復元し、開けなかったPDFは欠損として報告する。
+      const loadResults = await Promise.allSettled(inputPathsToRestore.map((path) => loadPdfInfo(path)));
       if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
         return;
       }
+      const loaded: PdfFile[] = [];
+      const unreadablePaths: string[] = [];
+      loadResults.forEach((result, index) => {
+        if (result.status === "fulfilled") {
+          loaded.push(result.value);
+        } else {
+          unreadablePaths.push(inputPathsToRestore[index]);
+        }
+      });
+      // state_load が検出した欠損と、存在するが開けなかったPDFをまとめて欠損扱いにする
+      // （保存時の入力パス順で列挙し、ステータス表示の並びを安定させる）。
+      const unavailableSet = new Set([...missingInputPaths, ...unreadablePaths]);
+      const unavailablePaths = state.input_paths.filter((path) => unavailableSet.has(path));
+      const hasMissingInputPdf = response.messages?.includes("missing_input_pdf") || unavailablePaths.length > 0;
       const restoreDecision = resolveMissingSavedPdfRestore({
         currentPage: state.current_page,
         currentPdf: state.current_pdf,
         hasMissingInputPdf,
         loadedPdfFiles: loaded,
-        missingInputPaths,
+        missingInputPaths: unavailablePaths,
         savedInputPaths: state.input_paths
       });
       previewCache.clear();
@@ -2178,7 +2211,11 @@ export default function Page() {
       if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
         return;
       }
-      setStatus(restoreDecision.statusText, restoreDecision.missingStatusInput ? "warning" : "ok");
+      // 一部欠損は warning、1件も復元できなかった場合は danger で報告する。
+      setStatus(
+        restoreDecision.statusText,
+        restoreDecision.missingStatusInput ? (restoreDecision.missingStatusInput.allMissing ? "danger" : "warning") : "ok"
+      );
     } catch (error) {
       if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
         return;
@@ -2312,11 +2349,24 @@ export default function Page() {
                   .filter(Boolean)
                   .join(" ");
                 return (
-                  <button
+                  // button 内に操作可能な分割ボタンをネストできない（HTML仕様違反）ため、
+                  // 行は div[role="button"] で実装し、キーボード操作（Enter/Space）を補う。
+                  <div
                     className={rowClassName}
                     key={`${currentPdf}-${page.pageNo}`}
                     onClick={() => void selectPageForPreview(currentPdf, page.pageNo)}
-                    type="button"
+                    onKeyDown={(event) => {
+                      // 内側の分割ボタン由来のキー操作で行のページ移動まで発火させない。
+                      if (event.target !== event.currentTarget) {
+                        return;
+                      }
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        void selectPageForPreview(currentPdf, page.pageNo);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
                   >
                     <span className="page-thumb mini">
                       {page.thumbnail ? <img alt="" src={page.thumbnail} /> : <span>{page.pageNo}</span>}
@@ -2327,29 +2377,21 @@ export default function Page() {
                     </span>
                     <span className="page-state-flags">
                       {page.hasSplitBefore ? (
-                        <span
+                        <button
                           aria-label={`${page.pageNo}ページ前の分割点を選択`}
                           className="split-marker"
                           onClick={(event) => {
                             event.stopPropagation();
                             setSelectedSplitPoint(page.pageNo);
                           }}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              setSelectedSplitPoint(page.pageNo);
-                            }
-                          }}
-                          role="button"
-                          tabIndex={0}
+                          type="button"
                         >
                           分割
-                        </span>
+                        </button>
                       ) : null}
                       {typeof page.blankScore === "number" ? <span className="blank-marker">白紙</span> : null}
                     </span>
-                  </button>
+                  </div>
                 );
               })
             ) : (
@@ -2628,6 +2670,7 @@ export default function Page() {
                 disabled={!currentFile}
                 max={currentFile?.pageCount ?? 1}
                 min={1}
+                name="current_page"
                 onChange={(event) => void selectPageForPreview(currentPdf, Number(event.target.value) || 1)}
                 type="number"
                 value={currentPage}
@@ -2950,6 +2993,7 @@ export default function Page() {
                     開始番号
                     <input
                       min={1}
+                      name="seq_start"
                       type="number"
                       value={seqStart}
                       onChange={(event) => updateSeqStart(event.target.value)}
@@ -2960,6 +3004,7 @@ export default function Page() {
                     <input
                       max={MAX_SEQ_DIGITS}
                       min={MIN_SEQ_DIGITS}
+                      name="seq_digits"
                       type="number"
                       value={seqDigits}
                       onChange={(event) => updateSeqDigits(event.target.value)}
