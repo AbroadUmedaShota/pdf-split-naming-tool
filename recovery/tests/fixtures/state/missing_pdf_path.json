@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "input_paths": [
+    "missing-fixture-input.pdf"
+  ],
+  "current_page": 1
+}

@@ -113,12 +113,25 @@ def test_release_docs_explain_updater_signing_and_latest_json() -> None:
     assert "pdf-organizer-desktop_" in manifest_script
 
 
-def test_desktop_sidecar_contract_is_minimal_mvp() -> None:
+def test_desktop_sidecar_contract_includes_legacy_step2_read_apis() -> None:
     sidecar_contract = (DESKTOP / "lib" / "sidecar.ts").read_text(encoding="utf-8")
 
-    for command in ("pdf_info", "page_preview", "preflight", "export", "state_load", "state_save"):
+    for command in (
+        "pdf_info",
+        "page_preview",
+        "page_thumbnail",
+        "page_text",
+        "search_text",
+        "search_highlights",
+        "index_candidates",
+        "blank_candidates",
+        "preflight",
+        "export",
+        "state_load",
+        "state_save",
+    ):
         assert f'"{command}"' in sidecar_contract
-    for removed in ("page_text", "presets", "history", "reuse_existing", "skip", "output_actions"):
+    for removed in ("presets", "history", "reuse_existing", "skip", "output_actions"):
         assert f'"{removed}"' not in sidecar_contract
 
 
@@ -128,6 +141,11 @@ def test_desktop_sidecar_contract_documents_mvp_response_shapes() -> None:
     assert "export type SidecarResponse" in sidecar_contract
     assert "export type SidecarPreviewResponse" in sidecar_contract
     assert "image_data_url: string" in sidecar_contract
+    assert "export type SidecarPageTextResponse" in sidecar_contract
+    assert "export type SidecarSearchTextResponse" in sidecar_contract
+    assert "export type SidecarSearchHighlightsResponse" in sidecar_contract
+    assert "export type SidecarIndexCandidatesResponse" in sidecar_contract
+    assert "export type SidecarBlankCandidatesResponse" in sidecar_contract
     assert "summary: SidecarExportSummary" in sidecar_contract
     assert '"created" | "failed"' in sidecar_contract
     assert "state: AppPersistedState" in sidecar_contract

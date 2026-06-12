@@ -62,6 +62,42 @@ npm run release:manifest
 
 6. GitHub Releases に installer、`.sig`、`latest.json` をアップロードします。
    アップロードには `src-tauri\target\release\bundle\release-assets\` 配下の ASCII 名ファイルを使います。
+   installer と `.sig` はそのままアップロードします。
+
+```powershell
+$repo = "AbroadUmedaShota/pdf-split-naming-tool"
+$version = "0.1.2"
+$tag = "v$version"
+
+gh release upload $tag `
+  "src-tauri\target\release\bundle\release-assets\pdf-organizer-desktop_${version}_x64-setup.exe" `
+  "src-tauri\target\release\bundle\release-assets\pdf-organizer-desktop_${version}_x64-setup.exe.sig" `
+  --repo $repo
+```
+
+`latest.json` は GitHub の `releases/latest/download/latest.json` 経路で
+`504 Gateway Time-out` になることがあるため、拡張子なしの一時名でアップロードしてから
+asset 名だけを `latest.json` に戻します。これにより GitHub Releases 側の content type が
+`application/octet-stream` になり、Tauri updater から安定して取得できます。
+
+```powershell
+$repo = "AbroadUmedaShota/pdf-split-naming-tool"
+$version = "0.1.2"
+$tag = "v$version"
+$tempDir = Join-Path $env:TEMP "pdf-updater-release"
+$tempAsset = Join-Path $tempDir "latest-json"
+New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+Copy-Item -LiteralPath "src-tauri\target\release\bundle\release-assets\latest.json" -Destination $tempAsset -Force
+
+gh release upload $tag $tempAsset --repo $repo --clobber
+$asset = gh release view $tag --repo $repo --json assets |
+  ConvertFrom-Json |
+  Select-Object -ExpandProperty assets |
+  Where-Object { $_.name -eq "latest-json" } |
+  Select-Object -First 1
+$assetId = [regex]::Match($asset.apiUrl, "/assets/(\d+)$").Groups[1].Value
+gh api -X PATCH "repos/$repo/releases/assets/$assetId" -f name="latest.json" | Out-Null
+```
 
 `latest.json` は GitHub Releases の asset として、次の URL で取得できる名前にします。
 
@@ -69,9 +105,27 @@ npm run release:manifest
 https://github.com/AbroadUmedaShota/pdf-split-naming-tool/releases/latest/download/latest.json
 ```
 
+7. 公開後に配信 URL と manifest の中身を確認します。
+
+```powershell
+$repo = "AbroadUmedaShota/pdf-split-naming-tool"
+$version = "0.1.2"
+$tag = "v$version"
+
+curl.exe -sS -L "https://github.com/AbroadUmedaShota/pdf-split-naming-tool/releases/latest/download/latest.json"
+curl.exe -I -L "https://github.com/AbroadUmedaShota/pdf-split-naming-tool/releases/latest/download/pdf-organizer-desktop_${version}_x64-setup.exe"
+gh release view $tag --repo $repo --json assets,tagName,url
+```
+
+`latest.json` asset の `contentType` は `application/octet-stream` であることを確認します。
+
 ## 動作確認
 
 - 古いバージョンの packaged app を起動し、ヘッダーの `更新確認` を押します。
 - 新しいバージョンが表示されることを確認します。
 - `インストール` を押し、Windows installer が更新を完了できることを確認します。
 - 同じバージョンでは `最新版です。` と表示されることを確認します。
+
+リリース asset の URL 確認だけでは、アプリ内 updater の E2E 確認は完了扱いにしません。
+最低 1 回は旧バージョンをインストールした状態から、新バージョンの検出、インストール、
+再起動後のバージョン表示まで確認します。

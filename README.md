@@ -7,7 +7,7 @@
 ## 状態
 
 - 作成日: 2026-05-19
-- 現在の段階: Tauri/Next.js のデスクトップアプリ本体と、Python sidecar のPDF処理部品へ整理済み。現段階の仕様は最小構成
+- 現在の段階: Tauri/Next.js のデスクトップアプリ本体と、Python sidecar のPDF処理部品へ整理済み。現行MVP仕様を基準に、STEP2検索支援、STEP3追加項目命名、Tauri updater 配布ラインまで実装済み
 - 元ソース: 主要なローカル開発置き場では未発見
 - ビルド済み配布物: `\\ao100\103_共有\アプリケーション\自社開発シリーズ\PDF分割命名ツール_v3_1_1`
 - 解析済み入口モジュール: `pdf_splitter_app.py`
@@ -15,11 +15,13 @@
 - 現在のユーザー向けアプリ: `apps/desktop/`
 - 現在のPDF処理部品: `recovery/pdf_splitter_tool/`
 - 現段階の正本要件: `docs/01_要件定義書.md`
+- 実装状況: `docs/05_実装状況.md`
 - ドキュメント索引: `docs/README.md`
 - デザインシステム: `docs/2026-05-31_デザインシステム.md`
-- 現在のUI方針: 横ステッパー、左一覧ペイン、中央作業ペイン、右側の進捗/次アクションパネルで構成するB案ベース
+- リリース手順: `apps/desktop/RELEASE.md`
+- 現在のUI方針: 横ステッパーとSTEP別作業台UIを基本とし、対象一覧、主作業、補助操作をSTEPごとに最適配置する
 - 画面幅方針: デスクトップPCおよび小型ノートPC幅を主対象とする。スマホ幅は表示崩れ防止のみで、実作業向け最適化は行わない
-- OCR方針: 最小構成では後回し。将来有効化する場合もOCRエンジンは同梱せず、事前OCR済みPDFまたは既存テキスト層ありPDFを入力条件にする
+- OCR方針: 事前OCR済みPDFまたは既存テキスト層ありPDFのSTEP2検索支援は実装済み。画像PDFへのOCRエンジン内蔵、Tesseract、外部OCR API連携は後回しにする
 
 ## 現在の実装構成
 
@@ -27,21 +29,40 @@
 
 `recovery/pdf_splitter_tool/` は、Tauriアプリから呼び出すPython sidecarです。PDFページ数取得、プレビュー生成、分割、命名、出力前チェック、状態保存を担当します。旧Tkinter GUIは現段階の実装対象から外しており、独立した2つ目のユーザー向けアプリとしては扱いません。
 
-UIはPDFプレビュー、分割一覧、入力表を扱う業務ツールのため、PC幅での操作効率を優先します。画面は横ステッパー、左一覧ペイン、中央作業ペイン、右側の進捗/次アクションパネルで構成します。モバイル幅は確認用の表示崩れ防止に留め、スマートフォンで実作業できることはMVP受入条件に含めません。
+UIはPDFプレビュー、ページ状態一覧、命名入力、出力前チェックを扱う業務ツールのため、PC幅での操作効率を優先します。画面は横ステッパーとSTEP別作業台UIで構成し、STEP2では左のページ状態一覧、中央プレビュー、右の分割設定/検索支援を使います。モバイル幅は確認用の表示崩れ防止に留め、スマートフォンで実作業できることはMVP受入条件に含めません。
 
 ## フォルダ
 
-- `docs/`: 現行MVPの要件定義書、ドキュメント索引、デザインシステム
+- `docs/`: 現行MVPの要件定義書、実装状況、ドキュメント索引、デザインシステム、将来構想
 - `docs/archive/`: 調査結果、旧仕様、復元計画、社内展開メモ、配布前チェックリスト
 - `docs/assets/`: 仕様書で参照する画像などの管理対象アセット
 - `apps/desktop/`: Tauri + Next.js のデスクトップアプリ本体
+- `apps/desktop/RELEASE.md`: Tauri updater と GitHub Releases によるリリース手順
 - `recovery/`: Python sidecar、PDF処理ロジック、テスト。ユーザー向けGUIアプリではない
 - `artifacts/analysis/`: 配布物から抽出した解析用ファイル。Git管理対象外
 - `recovery/dist/`: 旧PyInstaller配布候補。Git管理対象外
 
+## 自動回帰検証
+
+リポジトリ単位の自動回帰検証は、ルートから次を実行します。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify.ps1
+```
+
+このスクリプトは Python pytest、desktop 側 JS 回帰テスト、desktop typecheck をまとめて確認するためのものです。実ブラウザ/Tauri E2E や、現場PDFを使った手動受入確認の代替ではありません。
+
+現場PDFまたはサンプルPDFで、受入前の手元スモークを行う場合は次を実行します。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\sample-pdf-smoke.ps1 -PdfPath "C:\path\to\sample.pdf"
+```
+
+この検証は元PDFを変更せず、一時フォルダへ1ページ目のみを出力し、sidecar の `pdf_info` / preview / preflight / export / state roundtrip を確認します。実ブラウザ/Tauri E2E や、人間による受入判断の代替ではありません。
+
 ## 次に決めること
 
-1. 現場PDFで、PDF取込、手動分割、1ページ分割、命名、出力が成立するか確認する。
-2. Tauriアプリとしての配布方法を確定する。
+1. 現場PDFで、PDF取込、手動分割、検索支援、追加項目命名、出力が成立するか人間が受入確認する。
+2. updater配布は `apps/desktop/RELEASE.md` に沿って、旧バージョンからの検出、インストール、再起動後のバージョン表示まで確認する。
 3. `recovery/` のフォルダ名を将来 `sidecar/` または `backend/` へ変更するか判断する。
-4. OCR、白紙検出、プリセット管理、履歴などの拡張機能は、最小構成の運用確認後に別Issueで判断する。
+4. 画像PDFへのOCRエンジン内蔵、検索/白紙候補からの自動分割、プリセット管理、履歴などの拡張機能は、現行MVPの運用確認後に別Issueで判断する。

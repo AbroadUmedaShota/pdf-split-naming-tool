@@ -12,9 +12,10 @@ const releaseBaseUrl =
   "https://github.com/AbroadUmedaShota/pdf-split-naming-tool/releases/latest/download/";
 
 function findUpdaterAsset() {
+  const versionPattern = packageJson.version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const candidates = [
-    { dir: join(bundleRoot, "nsis"), pattern: /setup\.exe$/ },
-    { dir: join(bundleRoot, "msi"), pattern: /\.msi$/ }
+    { dir: join(bundleRoot, "nsis"), pattern: new RegExp(`_${versionPattern}_x64-setup\\.exe$`) },
+    { dir: join(bundleRoot, "msi"), pattern: new RegExp(`_${versionPattern}_x64_ja-JP\\.msi$`) }
   ];
 
   for (const candidate of candidates) {

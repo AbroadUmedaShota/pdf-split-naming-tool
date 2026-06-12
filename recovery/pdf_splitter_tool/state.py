@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .state_schema import normalize_state_payload
+
 
 STATE_FILENAME = "_pdf_split_state.json"
 STATE_BAK_FILENAME = "_pdf_split_state.bak.json"
@@ -47,7 +49,7 @@ class StateManager:
         valid: list[tuple[float, Path]] = []
         for path in candidates:
             try:
-                self._load_file(path)
+                self._load_file(path, allow_invalid_input_paths=True)
                 mtime = path.stat().st_mtime
                 valid.append((mtime, path))
             except Exception:
@@ -61,7 +63,7 @@ class StateManager:
         if not self.state_path.exists():
             return self._load_without_state()
         try:
-            return self._load_file(self.state_path)
+            return self._load_file(self.state_path, allow_invalid_input_paths=True)
         except Exception:
             self._archive_corrupt_file(self.state_path)
             return self._load_without_state()
@@ -74,7 +76,15 @@ class StateManager:
         silently revert to an older save.
         """
         tmp_path = self._best_valid_tmp()
-        bak_ok = self.backup_path.exists()
+        # 壊れた bak は候補に入れず、この時点で .corrupt へ退避する
+        # （mtime 比較が「壊れているが新しい bak」を選ばないように）。
+        bak_ok = False
+        if self.backup_path.exists():
+            try:
+                self._load_file(self.backup_path, allow_invalid_input_paths=True)
+                bak_ok = True
+            except Exception:
+                self._archive_corrupt_file(self.backup_path)
 
         # Decide which candidate is newer.
         use_tmp = False
@@ -90,42 +100,59 @@ class StateManager:
                 use_tmp = True
 
         if use_tmp and tmp_path is not None:
-            try:
-                payload = self._load_file(tmp_path)
-                tmp_path.replace(self.state_path)
+            payload = self._promote_tmp(tmp_path)
+            if payload is not None:
                 return payload
-            except Exception:
-                self._archive_corrupt_file(tmp_path)
 
         if bak_ok:
             try:
-                payload = self._load_file(self.backup_path)
-                self._restore_loaded_payload(payload)
-                return payload
+                payload = self._load_file(self.backup_path, allow_invalid_input_paths=True)
             except Exception:
                 self._archive_corrupt_file(self.backup_path)
+            else:
+                # 復元書き込みに失敗しても、読めた payload は返す（読み取りを優先）。
+                try:
+                    self._restore_loaded_payload(payload)
+                except OSError:
+                    pass
+                return payload
 
         # Try remaining tmp candidates that were not yet processed.
         tmp_path2 = self._best_valid_tmp()
         if tmp_path2 is not None:
-            try:
-                payload = self._load_file(tmp_path2)
-                tmp_path2.replace(self.state_path)
+            payload = self._promote_tmp(tmp_path2)
+            if payload is not None:
                 return payload
-            except Exception:
-                self._archive_corrupt_file(tmp_path2)
 
         return {}
+
+    def _promote_tmp(self, tmp_path: Path) -> dict[str, Any] | None:
+        """Load *tmp_path* and try to promote it to state_path.
+
+        Promotion failure (e.g. locked file) is non-fatal: the loaded payload is
+        still returned so a recoverable save is never discarded.
+        """
+        try:
+            payload = self._load_file(tmp_path, allow_invalid_input_paths=True)
+        except Exception:
+            self._archive_corrupt_file(tmp_path)
+            return None
+        try:
+            tmp_path.replace(self.state_path)
+        except OSError:
+            pass
+        return payload
 
     def _restore_loaded_payload(self, payload: dict[str, Any]) -> None:
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.state_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def _load_file(self, path: Path) -> dict[str, Any]:
+    def _load_file(self, path: Path, *, allow_invalid_input_paths: bool = False) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            raise StateFormatError("State payload must be a JSON object.")
-        return payload
+        try:
+            return normalize_state_payload(payload, allow_invalid_input_paths=allow_invalid_input_paths)
+        except TypeError as exc:
+            raise StateFormatError(str(exc)) from exc
 
     def _corrupt_archive_path_for(self, source_path: Path) -> Path:
         base_path = source_path.with_name(f"{source_path.name}.corrupt")

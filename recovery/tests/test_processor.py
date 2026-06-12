@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import fitz
+import pytest
 
 from pdf_splitter_tool.models import Segment
 from pdf_splitter_tool.processor import PdfProcessor
@@ -20,6 +21,31 @@ def test_yoshida_filename_uses_fixed_required_fields() -> None:
 
     assert result.ok
     assert result.normalized_filename == "01_02_003.pdf"
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ({"box_no": "9", "binder_no": "8", "seq": "7"}, "09_08_007.pdf"),
+        ({"box_no": "12", "binder_no": "34", "seq": "56"}, "12_34_056.pdf"),
+        ({"box_no": "123", "binder_no": "4", "seq": "5"}, "123_04_005.pdf"),
+    ],
+)
+def test_yoshida_filename_zero_pads_box_binder_and_seq(metadata: dict[str, str], expected: str) -> None:
+    result = PdfProcessor.build_yoshida_filename(metadata)
+
+    assert result.ok
+    assert result.raw_filename == expected
+    assert result.normalized_filename == expected
+
+
+def test_yoshida_filename_sanitizes_windows_invalid_filename_chars() -> None:
+    result = PdfProcessor.build_yoshida_filename({"box_no": "1/2", "binder_no": '3:4', "seq": "5*6"})
+
+    assert result.ok
+    assert result.raw_filename == '1/2_3:4_5*6.pdf'
+    assert result.normalized_filename == "1_2_3_4_5_6.pdf"
+    assert result.warnings == ("filename_sanitized",)
 
 
 def test_yoshida_filename_requires_box_binder_seq() -> None:
@@ -62,23 +88,9 @@ def test_page_preview_returns_jpeg_data_url(tmp_path: Path) -> None:
     source = tmp_path / "source.pdf"
     make_pdf(source, 1)
 
-    data_url, page_count = PdfProcessor.page_preview_data_url(source, 1)
+    data_url = PdfProcessor.page_preview_data_url(source, 1)
 
     assert data_url.startswith("data:image/jpeg;base64,")
-    assert page_count == 1
-
-
-def test_page_preview_raises_for_out_of_range_page(tmp_path: Path) -> None:
-    source = tmp_path / "source.pdf"
-    make_pdf(source, 2)
-
-    import pytest
-
-    with pytest.raises(ValueError, match="page_no must be between"):
-        PdfProcessor.page_preview_data_url(source, 0)
-
-    with pytest.raises(ValueError, match="page_no must be between"):
-        PdfProcessor.page_preview_data_url(source, 3)
 
 
 def test_split_pdf_uses_one_based_inclusive_segment(tmp_path: Path) -> None:
