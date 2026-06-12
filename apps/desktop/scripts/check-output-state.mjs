@@ -23,6 +23,7 @@ compile(outputStateModule.exports, require, outputStateModule, sourcePath, dirna
 
 const {
   isOutputCheckOk,
+  isOutputCheckRenamed,
   outputDetailStateText,
   outputIssueCount,
   outputListStateText,
@@ -67,3 +68,21 @@ assert.equal(isOutputCheckOk(preflightInvalid), false);
 assert.equal(outputListStateText(preflightInvalid), "要修正");
 assert.equal(outputDetailStateText(preflightInvalid), "連番 is required");
 assert.equal(outputIssueCount([preflightOk, exportFailedAfterPreflight, preflightInvalid]), 2);
+
+// batch-duplicate: ok のまま予約採番（_2）で別名になった行は warning として可視化する
+const preflightRenamed = {
+  ...preflightOk,
+  filename: "01_02_003_2.pdf",
+  output_path: "C:\\out\\01_02_003_2.pdf",
+};
+
+assert.equal(isOutputCheckRenamed(preflightOk), false);
+assert.equal(isOutputCheckRenamed(preflightRenamed), true);
+assert.equal(isOutputCheckOk(preflightRenamed), true);
+assert.equal(outputListStateText(preflightRenamed), "同名のため別名採番");
+assert.equal(outputDetailStateText(preflightRenamed), "バッチ内で同名のため「01_02_003_2.pdf」を採番");
+// 採番済みでも ok 行なので issue には数えない（出力自体は可能）
+assert.equal(outputIssueCount([preflightRenamed]), 0);
+
+// filename が空（失敗行など）は採番扱いにしない
+assert.equal(isOutputCheckRenamed({ ...preflightOk, filename: "" }), false);

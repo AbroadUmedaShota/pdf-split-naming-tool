@@ -74,7 +74,7 @@ button:disabled {
 
 button:focus-visible,
 input:focus-visible {
-  outline: 3px solid rgba(8, 127, 115, 0.18);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -1990,6 +1990,7 @@ button.primary:hover:not(:disabled) {
 
 .preview-frame {
   display: grid;
+  position: relative;
   min-height: 520px;
   max-height: calc(100vh - 320px);
   place-items: center;
@@ -2016,6 +2017,20 @@ button.primary:hover:not(:disabled) {
   margin: 18px;
   background: #ffffff;
   box-shadow: 0 14px 32px rgba(31, 41, 55, 0.18);
+}
+
+/* プレビュー読込中の控えめなインジケータ。前の画像を残したまま右上に重ねる。 */
+.preview-loading-indicator {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 2;
+  padding: 4px 10px;
+  border: 1px solid rgba(212, 224, 229, 0.96);
+  border-radius: var(--radius-2);
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--muted);
+  font-size: var(--font-size-caption);
 }
 
 .preview-page-layer {
