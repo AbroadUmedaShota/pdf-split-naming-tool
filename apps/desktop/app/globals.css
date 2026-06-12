@@ -7,7 +7,6 @@
   --surface-3: #eef4f7;
   --text: #152227;
   --muted: #63747d;
-  --subtle: #8b9aa2;
   --border: #d4e0e5;
   --border-strong: #aebfc8;
   --accent: #087f73;
@@ -74,7 +73,7 @@ button:disabled {
 
 button:focus-visible,
 input:focus-visible {
-  outline: 3px solid rgba(8, 127, 115, 0.18);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -121,6 +120,16 @@ input:focus-visible {
   min-width: 0;
 }
 
+.header-state-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.header-state-actions button {
+  white-space: nowrap;
+}
+
 .brand-row {
   gap: var(--space-3);
   min-width: 0;
@@ -135,7 +144,7 @@ input:focus-visible {
   border-radius: var(--radius-2);
   background: linear-gradient(135deg, #0b8075, #123d45);
   color: #ffffff;
-  font-size: 13px;
+  font-size: var(--font-size-caption);
   font-weight: 800;
 }
 
@@ -172,7 +181,7 @@ input:focus-visible {
   color: var(--muted);
   box-shadow: var(--shadow-soft);
   padding: 9px 12px;
-  font-size: 13px;
+  font-size: var(--font-size-caption);
   line-height: 1.35;
 }
 
@@ -188,7 +197,7 @@ input:focus-visible {
   background: rgba(255, 255, 255, 0.86);
   box-shadow: var(--shadow-soft);
   padding: 8px 10px;
-  font-size: 13px;
+  font-size: var(--font-size-caption);
 }
 
 .update-card.ok {
@@ -321,7 +330,7 @@ input:focus-visible {
   border-radius: var(--radius-1);
   background: var(--surface-3);
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--font-size-caption);
   font-weight: 800;
 }
 
@@ -408,6 +417,15 @@ input:focus-visible {
   text-align: right;
 }
 
+.stat-line.warning {
+  border-color: rgba(161, 92, 7, 0.3);
+  background: var(--warning-bg);
+}
+
+.stat-line.warning strong {
+  color: var(--warning);
+}
+
 .task-layout {
   align-items: start;
   display: grid;
@@ -481,7 +499,7 @@ button,
 .icon-button,
 .ghost {
   border: 1px solid rgba(212, 224, 229, 0.96);
-  border-radius: 7px;
+  border-radius: var(--radius-2);
   background: rgba(255, 255, 255, 0.9);
   color: var(--text);
   min-height: 38px;
@@ -591,7 +609,7 @@ button.primary:hover:not(:disabled) {
 .field-grid input {
   width: 100%;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-2);
   background: rgba(255, 255, 255, 0.96);
   color: var(--text);
   min-height: 40px;
@@ -600,7 +618,8 @@ button.primary:hover:not(:disabled) {
 
 .field-grid input:focus {
   border-color: var(--accent);
-  outline: 3px solid rgba(8, 127, 115, 0.14);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .summary-strip {
@@ -691,6 +710,10 @@ button.primary:hover:not(:disabled) {
   text-align: right;
 }
 
+.row-meta.warning {
+  color: var(--warning);
+}
+
 .list-row.selected,
 .mini-row.selected {
   border-color: rgba(37, 99, 235, 0.38);
@@ -733,6 +756,31 @@ button.primary:hover:not(:disabled) {
   box-shadow: 0 14px 32px rgba(31, 41, 55, 0.18);
 }
 
+.preview-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+}
+
+.preview-stage.loading img {
+  opacity: 0.45;
+  transition: opacity var(--transition-fast);
+}
+
+.preview-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: var(--radius-2);
+  background: rgba(21, 34, 39, 0.72);
+  color: #ffffff;
+  padding: 6px 12px;
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+}
+
 .empty-state {
   display: grid;
   justify-items: center;
@@ -769,6 +817,10 @@ button.primary:hover:not(:disabled) {
 .filename-preview strong {
   overflow-wrap: anywhere;
   font-size: 20px;
+}
+
+.filename-preview strong.warning {
+  color: var(--warning);
 }
 
 .mini-table {
@@ -836,6 +888,17 @@ button.primary:hover:not(:disabled) {
   background: var(--danger-bg);
 }
 
+.output-row.warning {
+  border-color: rgba(161, 92, 7, 0.3);
+  background: var(--warning-bg);
+}
+
+.rename-note {
+  display: block;
+  color: var(--muted);
+  font-size: var(--font-size-caption);
+}
+
 .check-table {
   overflow: auto;
 }
@@ -868,6 +931,11 @@ button.primary:hover:not(:disabled) {
   border-color: rgba(180, 35, 24, 0.28);
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+.check-row.warning {
+  border-color: rgba(161, 92, 7, 0.3);
+  background: var(--warning-bg);
 }
 
 .log-box {

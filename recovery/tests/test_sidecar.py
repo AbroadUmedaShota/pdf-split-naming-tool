@@ -29,11 +29,11 @@ def test_sidecar_pdf_info_returns_import_metadata(tmp_path: Path) -> None:
     assert response["command"] == "pdf_info"
     assert response["pdf_path"] == str(source)
     assert response["page_count"] == 3
-    assert response["page_numbers"] == [1, 2, 3]
+    assert "page_numbers" not in response
     assert response["naming_template"] == "{box_no:0>2}_{binder_no:0>2}_{seq:0>3}.pdf"
 
 
-def test_sidecar_page_preview_returns_data_url(tmp_path: Path) -> None:
+def test_sidecar_page_preview_returns_jpeg_data_url(tmp_path: Path) -> None:
     source = tmp_path / "source.pdf"
     make_pdf(source, 1)
 
@@ -41,7 +41,8 @@ def test_sidecar_page_preview_returns_data_url(tmp_path: Path) -> None:
 
     assert response["ok"] is True
     assert response["command"] == "page_preview"
-    assert response["image_data_url"].startswith("data:image/png;base64,")
+    assert response["image_data_url"].startswith("data:image/jpeg;base64,")
+    assert response["page_count"] == 1
 
 
 def test_sidecar_preflight_returns_json_ready_checks(tmp_path: Path) -> None:
@@ -214,3 +215,5 @@ def test_sidecar_cli_reads_request_file_and_prints_json(tmp_path: Path) -> None:
     response = json.loads(completed.stdout)
     assert response["ok"] is True
     assert response["checks"][0]["filename"] == "01_02_003.pdf"
+    # ISS-013: sidecar CLI response must be compact JSON (no indent).
+    assert "\n" not in completed.stdout.rstrip("\n")

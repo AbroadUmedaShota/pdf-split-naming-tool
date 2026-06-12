@@ -1,6 +1,6 @@
 "use client";
 
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm, open } from "@tauri-apps/plugin-dialog";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -23,14 +23,13 @@ import {
   XCircle,
   type LucideIcon
 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   invokeSidecar,
   type AppPersistedState,
   type SidecarExportResponse,
   type SidecarOutputCheck,
   type SidecarPdfInfoResponse,
-  type SidecarPreflightResponse,
   type SidecarPreviewResponse,
   type SidecarResponse,
   type SidecarSegment
@@ -61,6 +60,8 @@ type SegmentView = {
 
 type StepState = "active" | "done" | "attention" | "idle";
 type UpdateState = "idle" | "checking" | "current" | "available" | "installing" | "installed" | "error";
+type StatusTone = "ok" | "warning" | "danger" | "";
+type BusyAction = "" | "import" | "remove" | "preflight" | "export" | "save" | "load";
 
 const steps: Array<{ id: StepId; label: string; hint: string; icon: LucideIcon }> = [
   { id: "import", label: "PDF取込", hint: "PDF / 出力先", icon: FileText },
@@ -72,6 +73,7 @@ const steps: Array<{ id: StepId; label: string; hint: string; icon: LucideIcon }
 const emptyCommonMetadata = { box_no: "", binder_no: "" };
 const requiredMetadata = ["box_no", "binder_no", "seq"] as const;
 const invalidFilenameChars = /[<>:"/\\|?*]/g;
+const previewCacheLimit = 20;
 
 function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -85,6 +87,21 @@ function pageLabel(startPage: number, endPage: number): string {
   return startPage === endPage ? `${startPage}` : `${startPage}-${endPage}`;
 }
 
+function previewCacheKey(pdfPath: string, pageNo: number): string {
+  return `${pdfPath}#${pageNo}`;
+}
+
+function hasMetadataValues(metadata: Record<string, string>): boolean {
+  return Object.values(metadata).some((value) => value.trim());
+}
+
+function segmentKeySetFor(file: PdfFile, splitPoints: number[]): Set<string> {
+  const points = splitPointsFor(file.pageCount, splitPoints);
+  const starts = [1, ...points];
+  const ends = [...points.map((point) => point - 1), file.pageCount];
+  return new Set(starts.map((startPage, index) => segmentKey(file.path, startPage, ends[index])));
+}
+
 function padMetadata(value: string, length: number): string {
   const trimmed = value.trim();
   return trimmed.length >= length ? trimmed : trimmed.padStart(length, "0");
@@ -95,9 +112,9 @@ function sanitizeFilename(filename: string): string {
   return sanitized || "output.pdf";
 }
 
-function previewFilename(metadata: Record<string, string>): string {
+function previewFilename(metadata: Record<string, string>): string | null {
   if (missingMetadata(metadata).length) {
-    return "未入力";
+    return null;
   }
   return sanitizeFilename(
     `${padMetadata(metadata.box_no ?? "", 2)}_${padMetadata(metadata.binder_no ?? "", 2)}_${padMetadata(
@@ -134,6 +151,14 @@ function buildSegments(
     return starts.map((startPage, index) => {
       const endPage = ends[index];
       const key = segmentKey(file.path, startPage, endPage);
+      // 個別値が空欄の box_no / binder_no は除去し、共通値へフォールバックさせる（seq に共通値はない）
+      const overrides = { ...(segmentMetadata[key] ?? {}) };
+      if (!(overrides.box_no ?? "").trim()) {
+        delete overrides.box_no;
+      }
+      if (!(overrides.binder_no ?? "").trim()) {
+        delete overrides.binder_no;
+      }
       return {
         key,
         pdfPath: file.path,
@@ -144,11 +169,30 @@ function buildSegments(
           box_no: commonMetadata.box_no ?? "",
           binder_no: commonMetadata.binder_no ?? "",
           seq: "",
-          ...(segmentMetadata[key] ?? {})
+          ...overrides
         }
       };
     });
   });
+}
+
+function toSidecarSegments(segments: SegmentView[]): SidecarSegment[] {
+  return segments.map((segment) => ({
+    pdf_path: segment.pdfPath,
+    start_page: segment.startPage,
+    end_page: segment.endPage,
+    metadata: segment.metadata
+  }));
+}
+
+function duplicateRequestedFilenames(checks: SidecarOutputCheck[]): Set<string> {
+  const counts = new Map<string, number>();
+  for (const check of checks) {
+    if (check.requested_filename) {
+      counts.set(check.requested_filename, (counts.get(check.requested_filename) ?? 0) + 1);
+    }
+  }
+  return new Set([...counts.entries()].filter(([, count]) => count > 1).map(([name]) => name));
 }
 
 function IconLabel({ children, icon: Icon }: { children: ReactNode; icon: LucideIcon }) {
@@ -219,9 +263,9 @@ function StatusCheck({ detail, label, ok }: { detail?: string; label: string; ok
   );
 }
 
-function StatLine({ label, value }: { label: string; value: string }) {
+function StatLine({ label, tone, value }: { label: string; tone?: "warning"; value: string }) {
   return (
-    <div className="stat-line">
+    <div className={tone === "warning" ? "stat-line warning" : "stat-line"}>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
@@ -239,9 +283,18 @@ export default function Page() {
   const [splitPointsByPdf, setSplitPointsByPdf] = useState<Record<string, number[]>>({});
   const [segmentMetadata, setSegmentMetadata] = useState<Record<string, Record<string, string>>>({});
   const [selectedSegmentKey, setSelectedSegmentKey] = useState("");
+  const [splitVisited, setSplitVisited] = useState(false);
   const [preflightChecks, setPreflightChecks] = useState<SidecarOutputCheck[]>([]);
   const [exportResult, setExportResult] = useState<SidecarExportResponse | null>(null);
-  const [status, setStatus] = useState("PDFを選択してください。");
+  const [status, setStatusState] = useState<{ message: string; tone: StatusTone }>({
+    message: "PDFを選択してください。",
+    tone: ""
+  });
+  const [busy, setBusy] = useState<BusyAction>("");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const previewGenerationRef = useRef(0);
+  const previewCacheRef = useRef<Map<string, string>>(new Map());
+  const pageRequestRef = useRef(1); // 楽観更新用の要求中ページ。currentPage は描画用
   const [currentVersion, setCurrentVersion] = useState("0.1.0");
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
   const [updateMessage, setUpdateMessage] = useState("更新未確認");
@@ -265,10 +318,71 @@ export default function Page() {
   const canContinueFromImport = pdfFiles.length > 0 && Boolean(outputDir);
   const canRunPreflight = allSegments.length > 0 && Boolean(outputDir);
   const canExport = preflightChecks.length > 0 && outputIssues === 0;
+  const isBusy = busy !== "";
+  // 応答待ち中に編集された場合の検出用。送信内容のシグネチャと出力先の最新値を ref に写す
+  const requestSignature = useMemo(() => JSON.stringify(toSidecarSegments(allSegments)), [allSegments]);
+  const requestSignatureRef = useRef(requestSignature);
+  requestSignatureRef.current = requestSignature;
+  const outputDirRef = useRef(outputDir);
+  outputDirRef.current = outputDir;
+  // 直近で成功した preflight の送信内容。出力実行前の同一性チェックに使う
+  const preflightSnapshotRef = useRef<{ signature: string; outputDir: string } | null>(null);
+  const duplicateRequestedNames = useMemo(() => duplicateRequestedFilenames(preflightChecks), [preflightChecks]);
+  const outputShortages: Array<{ step: StepId; stepLabel: string; label: string }> = [];
+  if (!pdfFiles.length) {
+    outputShortages.push({ step: "import", stepLabel: "PDF取込", label: "PDFが未選択" });
+  }
+  if (!outputDir) {
+    outputShortages.push({ step: "import", stepLabel: "PDF取込", label: "出力先が未設定" });
+  }
+  if (pdfFiles.length > 0 && incompleteSegments > 0) {
+    outputShortages.push({ step: "input", stepLabel: "入力", label: `未入力${incompleteSegments}件` });
+  }
+
+  function setStatus(message: string, tone: StatusTone = ""): void {
+    setStatusState({ message, tone });
+  }
+
+  function busyLabel(action: BusyAction, label: string): string {
+    return busy === action ? "処理中…" : label;
+  }
 
   function clearOutputState(): void {
+    preflightSnapshotRef.current = null;
     setPreflightChecks([]);
     setExportResult(null);
+  }
+
+  function readPreviewCache(key: string): string | undefined {
+    const cache = previewCacheRef.current;
+    const value = cache.get(key);
+    if (value !== undefined) {
+      cache.delete(key);
+      cache.set(key, value);
+    }
+    return value;
+  }
+
+  function writePreviewCache(key: string, value: string): void {
+    const cache = previewCacheRef.current;
+    cache.delete(key);
+    cache.set(key, value);
+    while (cache.size > previewCacheLimit) {
+      const oldest = cache.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      cache.delete(oldest);
+    }
+  }
+
+  function dropPreviewCacheFor(pdfPath: string): void {
+    const cache = previewCacheRef.current;
+    for (const key of [...cache.keys()]) {
+      if (key.startsWith(`${pdfPath}#`)) {
+        cache.delete(key);
+      }
+    }
   }
 
   useEffect(() => {
@@ -293,6 +407,12 @@ export default function Page() {
     };
   }, []);
 
+  useEffect(() => {
+    if (activeStep === "split") {
+      setSplitVisited(true);
+    }
+  }, [activeStep]);
+
   async function checkForUpdates(manual: boolean, isDisposed: () => boolean = () => false): Promise<void> {
     setUpdateState("checking");
     setUpdateMessage("更新を確認しています。");
@@ -315,7 +435,7 @@ export default function Page() {
       setUpdateState("current");
       setUpdateMessage("最新版です。");
       if (manual) {
-        setStatus("最新版です。");
+        setStatus("最新版です。", "ok");
       }
     } catch (error) {
       if (isDisposed()) {
@@ -326,7 +446,7 @@ export default function Page() {
       setUpdateState("error");
       setUpdateMessage(message);
       if (manual) {
-        setStatus(`更新確認エラー: ${message}`);
+        setStatus(`更新確認エラー: ${message}`, "danger");
       }
     }
   }
@@ -354,12 +474,12 @@ export default function Page() {
       });
       setUpdateState("installed");
       setUpdateMessage("更新をインストールしました。再起動します。");
-      setStatus("更新をインストールしました。");
+      setStatus("更新をインストールしました。", "ok");
     } catch (error) {
       const message = updateErrorMessage(error);
       setUpdateState("error");
       setUpdateMessage(`更新インストールに失敗しました: ${message}`);
-      setStatus(`更新インストールエラー: ${message}`);
+      setStatus(`更新インストールエラー: ${message}`, "danger");
     }
   }
 
@@ -371,7 +491,13 @@ export default function Page() {
       return canContinueFromImport ? "done" : pdfFiles.length || outputDir ? "attention" : "idle";
     }
     if (stepId === "split") {
-      return allSegments.length ? "done" : "idle";
+      if (!allSegments.length) {
+        return "idle";
+      }
+      const hasSplitPoints = pdfFiles.some(
+        (file) => splitPointsFor(file.pageCount, splitPointsByPdf[file.path]).length > 0
+      );
+      return hasSplitPoints || splitVisited ? "done" : "idle";
     }
     if (stepId === "input") {
       if (!allSegments.length) {
@@ -379,11 +505,19 @@ export default function Page() {
       }
       return incompleteSegments ? "attention" : "done";
     }
-    if (exportResult?.summary.created) {
-      return "done";
-    }
-    if (outputIssues) {
-      return "attention";
+    if (stepId === "output") {
+      if (exportResult) {
+        if (exportResult.summary.failed > 0) {
+          return "attention";
+        }
+        if (exportResult.summary.created > 0) {
+          return "done";
+        }
+      }
+      if (outputIssues) {
+        return "attention";
+      }
+      return "idle";
     }
     return "idle";
   }
@@ -411,16 +545,40 @@ export default function Page() {
   }
 
   async function loadPreview(pdfPath: string, pageNo: number): Promise<void> {
-    const response = await invokeSidecar({ command: "page_preview", pdf_path: pdfPath, page_no: pageNo });
-    if (!response.ok || response.command !== "page_preview") {
-      throw new Error(response.ok ? "プレビューを取得できませんでした。" : sidecarError(response));
+    const generation = ++previewGenerationRef.current;
+    const cached = readPreviewCache(previewCacheKey(pdfPath, pageNo));
+    if (cached !== undefined) {
+      setPreviewDataUrl(cached);
+      setPreviewLoading(false);
+      return;
     }
-    const preview = response as SidecarPreviewResponse;
-    setPreviewDataUrl(preview.image_data_url);
-    setCurrentPage(preview.page_no);
+    setPreviewLoading(true);
+    try {
+      const response = await invokeSidecar({ command: "page_preview", pdf_path: pdfPath, page_no: pageNo });
+      if (!response.ok || response.command !== "page_preview") {
+        throw new Error(response.ok ? "プレビューを取得できませんでした。" : sidecarError(response));
+      }
+      const preview = response as SidecarPreviewResponse;
+      // キャッシュキーは要求側パスに統一する（応答側パスは区切り文字が異なりうる）
+      writePreviewCache(previewCacheKey(pdfPath, pageNo), preview.image_data_url);
+      if (generation !== previewGenerationRef.current) {
+        return;
+      }
+      setPreviewDataUrl(preview.image_data_url);
+      setPreviewLoading(false);
+    } catch (error) {
+      if (generation === previewGenerationRef.current) {
+        setPreviewLoading(false);
+        throw error;
+      }
+    }
   }
 
   async function choosePdfs(): Promise<void> {
+    if (busy) {
+      return;
+    }
+    setBusy("import");
     try {
       const selected = await open({
         multiple: true,
@@ -431,6 +589,9 @@ export default function Page() {
         return;
       }
       const loaded = await Promise.all(paths.map((path) => loadPdfInfo(path)));
+      for (const file of loaded) {
+        dropPreviewCacheFor(file.path);
+      }
       setPdfFiles((existing) => {
         const byPath = new Map(existing.map((file) => [file.path, file]));
         for (const file of loaded) {
@@ -439,137 +600,223 @@ export default function Page() {
         return [...byPath.values()];
       });
       setCurrentPdf(loaded[0].path);
+      pageRequestRef.current = 1;
       setCurrentPage(1);
+      setSplitVisited(false);
       clearOutputState();
       await loadPreview(loaded[0].path, 1);
-      setStatus(`${loaded.length}件のPDFを読み込みました。`);
+      setStatus(`${loaded.length}件のPDFを読み込みました。`, "ok");
     } catch (error) {
-      setStatus(`PDF取込エラー: ${String(error)}`);
+      setStatus(`PDF取込エラー: ${String(error)}`, "danger");
+    } finally {
+      setBusy("");
     }
   }
 
   async function chooseOutputDir(): Promise<void> {
+    if (busy) {
+      return;
+    }
     const selected = await open({ directory: true, multiple: false });
     if (typeof selected === "string") {
       setOutputDir(selected);
       clearOutputState();
-      setStatus("出力フォルダを設定しました。");
+      setStatus("出力フォルダを設定しました。", "ok");
     }
   }
 
   async function selectPdf(path: string): Promise<void> {
+    if (busy) {
+      return;
+    }
     setCurrentPdf(path);
+    pageRequestRef.current = 1;
     setCurrentPage(1);
     try {
       await loadPreview(path, 1);
     } catch (error) {
-      setStatus(`プレビューエラー: ${String(error)}`);
+      setStatus(`プレビューエラー: ${String(error)}`, "danger");
     }
   }
 
   async function removePdf(path: string): Promise<void> {
-    const remaining = pdfFiles.filter((file) => file.path !== path);
-    setPdfFiles(remaining);
-    setSplitPointsByPdf((current) => {
-      const next = { ...current };
-      delete next[path];
-      return next;
-    });
-    setSegmentMetadata((current) => {
-      const next: Record<string, Record<string, string>> = {};
-      for (const [key, value] of Object.entries(current)) {
-        if (!key.startsWith(`${path}#`)) {
-          next[key] = value;
-        }
-      }
-      return next;
-    });
-    if (selectedSegmentKey.startsWith(`${path}#`)) {
-      setSelectedSegmentKey("");
+    if (busy) {
+      return;
     }
-    clearOutputState();
-    if (currentPdf === path) {
-      const nextPdf = remaining[0];
-      setCurrentPdf(nextPdf?.path ?? "");
-      setCurrentPage(1);
-      setPreviewDataUrl("");
-      if (nextPdf) {
-        try {
-          await loadPreview(nextPdf.path, 1);
-        } catch (error) {
-          setStatus(`プレビューエラー: ${String(error)}`);
-          return;
-        }
+    const hasInputs =
+      Object.entries(segmentMetadata).some(
+        ([key, metadata]) => key.startsWith(`${path}#`) && hasMetadataValues(metadata)
+      ) || (splitPointsByPdf[path] ?? []).length > 0;
+    if (hasInputs) {
+      const proceed = await confirm(
+        `${basename(path)} の入力済みの値と分割点が失われます。一覧から外しますか？`,
+        { title: "PDFの除外", kind: "warning" }
+      );
+      if (!proceed) {
+        return;
       }
     }
-    setStatus(`${basename(path)} を一覧から外しました。`);
+    setBusy("remove");
+    try {
+      dropPreviewCacheFor(path);
+      const remaining = pdfFiles.filter((file) => file.path !== path);
+      setPdfFiles(remaining);
+      setSplitPointsByPdf((current) => {
+        const next = { ...current };
+        delete next[path];
+        return next;
+      });
+      setSegmentMetadata((current) => {
+        const next: Record<string, Record<string, string>> = {};
+        for (const [key, value] of Object.entries(current)) {
+          if (!key.startsWith(`${path}#`)) {
+            next[key] = value;
+          }
+        }
+        return next;
+      });
+      if (selectedSegmentKey.startsWith(`${path}#`)) {
+        setSelectedSegmentKey("");
+      }
+      clearOutputState();
+      if (currentPdf === path) {
+        const nextPdf = remaining[0];
+        setCurrentPdf(nextPdf?.path ?? "");
+        pageRequestRef.current = 1;
+        setCurrentPage(1);
+        setPreviewDataUrl("");
+        if (nextPdf) {
+          try {
+            await loadPreview(nextPdf.path, 1);
+          } catch (error) {
+            setStatus(`プレビューエラー: ${String(error)}`, "danger");
+            return;
+          }
+        }
+      }
+      setStatus(`${basename(path)} を一覧から外しました。`, "ok");
+    } finally {
+      setBusy("");
+    }
   }
 
-  function clearPdfSelection(): void {
+  async function clearPdfSelection(): Promise<void> {
+    if (busy) {
+      return;
+    }
+    const hasInputs =
+      Object.values(segmentMetadata).some((metadata) => hasMetadataValues(metadata)) ||
+      Object.values(splitPointsByPdf).some((points) => points.length > 0);
+    if (hasInputs) {
+      const proceed = await confirm("入力済みの値と分割点が失われます。PDF一覧をクリアしますか？", {
+        title: "全クリア",
+        kind: "warning"
+      });
+      if (!proceed) {
+        return;
+      }
+    }
+    previewCacheRef.current.clear();
     setPdfFiles([]);
     setCurrentPdf("");
+    pageRequestRef.current = 1;
     setCurrentPage(1);
     setPreviewDataUrl("");
     setSplitPointsByPdf({});
     setSegmentMetadata({});
     setSelectedSegmentKey("");
+    setSplitVisited(false);
     clearOutputState();
-    setStatus("PDF一覧をクリアしました。");
+    setStatus("PDF一覧をクリアしました。", "ok");
   }
 
   function resetOutputDir(): void {
+    if (busy) {
+      return;
+    }
     setOutputDir("");
     clearOutputState();
-    setStatus("出力先をリセットしました。");
+    setStatus("出力先をリセットしました。", "ok");
   }
 
   async function movePage(offset: number): Promise<void> {
-    if (!currentFile) {
+    if (!currentFile || busy) {
       return;
     }
-    const nextPage = Math.max(1, Math.min(currentFile.pageCount, currentPage + offset));
+    const nextPage = Math.max(1, Math.min(currentFile.pageCount, pageRequestRef.current + offset));
+    if (nextPage === pageRequestRef.current) {
+      return;
+    }
+    pageRequestRef.current = nextPage;
+    setCurrentPage(nextPage);
     try {
       await loadPreview(currentFile.path, nextPage);
     } catch (error) {
-      setStatus(`ページ移動エラー: ${String(error)}`);
+      setStatus(`ページ移動エラー: ${String(error)}`, "danger");
     }
   }
 
-  function addSplitBeforeCurrentPage(): void {
+  async function applySplitPoints(file: PdfFile, nextPoints: number[], message: string): Promise<void> {
+    const nextKeys = segmentKeySetFor(file, nextPoints);
+    const orphanKeys = Object.keys(segmentMetadata).filter(
+      (key) => key.startsWith(`${file.path}#`) && !nextKeys.has(key)
+    );
+    const filledCount = orphanKeys.filter((key) => hasMetadataValues(segmentMetadata[key] ?? {})).length;
+    if (filledCount > 0) {
+      const proceed = await confirm(`入力済み${filledCount}件の値が失われます。続行しますか？`, {
+        title: "分割の変更",
+        kind: "warning"
+      });
+      if (!proceed) {
+        return;
+      }
+    }
+    clearOutputState();
+    setSplitPointsByPdf((current) => ({
+      ...current,
+      [file.path]: splitPointsFor(file.pageCount, nextPoints)
+    }));
+    if (orphanKeys.length) {
+      setSegmentMetadata((current) => {
+        const next = { ...current };
+        for (const key of orphanKeys) {
+          delete next[key];
+        }
+        return next;
+      });
+    }
+    setStatus(message, "ok");
+  }
+
+  async function addSplitBeforeCurrentPage(): Promise<void> {
     if (!currentFile || currentPage <= 1) {
-      setStatus("先頭ページの前では分割できません。");
+      setStatus("先頭ページの前では分割できません。", "warning");
       return;
     }
-    clearOutputState();
-    setSplitPointsByPdf((current) => ({
-      ...current,
-      [currentFile.path]: splitPointsFor(currentFile.pageCount, [...(current[currentFile.path] ?? []), currentPage])
-    }));
-    setStatus(`${currentPage}ページの前に分割を追加しました。`);
+    await applySplitPoints(
+      currentFile,
+      [...(splitPointsByPdf[currentFile.path] ?? []), currentPage],
+      `${currentPage}ページの前に分割を追加しました。`
+    );
   }
 
-  function undoLastSplit(): void {
+  async function undoLastSplit(): Promise<void> {
     if (!currentFile) {
       return;
     }
-    clearOutputState();
-    setSplitPointsByPdf((current) => {
-      const points = splitPointsFor(currentFile.pageCount, current[currentFile.path]);
-      return { ...current, [currentFile.path]: points.slice(0, -1) };
-    });
-    setStatus("最後の分割を取り消しました。");
+    const points = splitPointsFor(currentFile.pageCount, splitPointsByPdf[currentFile.path]);
+    await applySplitPoints(currentFile, points.slice(0, -1), "最後の分割を取り消しました。");
   }
 
-  function splitEveryPage(): void {
+  async function splitEveryPage(): Promise<void> {
     if (!currentFile) {
       return;
     }
-    clearOutputState();
-    setSplitPointsByPdf((current) => ({
-      ...current,
-      [currentFile.path]: Array.from({ length: Math.max(0, currentFile.pageCount - 1) }, (_value, index) => index + 2)
-    }));
-    setStatus("1ページごとの分割にしました。");
+    await applySplitPoints(
+      currentFile,
+      Array.from({ length: Math.max(0, currentFile.pageCount - 1) }, (_value, index) => index + 2),
+      "1ページごとの分割にしました。"
+    );
   }
 
   function updateCommonMetadata(key: "box_no" | "binder_no", value: string): void {
@@ -588,7 +835,20 @@ export default function Page() {
     }));
   }
 
-  function resequence(): void {
+  async function resequence(): Promise<void> {
+    if (busy) {
+      return;
+    }
+    const overwriteCount = allSegments.filter((segment) => segment.metadata.seq.trim()).length;
+    if (overwriteCount > 0) {
+      const proceed = await confirm(`${overwriteCount}件の連番を上書きします。続行しますか？`, {
+        title: "連番の再採番",
+        kind: "warning"
+      });
+      if (!proceed) {
+        return;
+      }
+    }
     clearOutputState();
     setSegmentMetadata((current) => {
       const next = { ...current };
@@ -597,99 +857,202 @@ export default function Page() {
       });
       return next;
     });
-    setStatus("連番を再採番しました。");
-  }
-
-  function requestSegments(): SidecarSegment[] {
-    return allSegments.map((segment) => ({
-      pdf_path: segment.pdfPath,
-      start_page: segment.startPage,
-      end_page: segment.endPage,
-      metadata: segment.metadata
-    }));
+    setStatus("連番を再採番しました。", "ok");
   }
 
   async function runPreflight(): Promise<void> {
+    if (busy) {
+      return;
+    }
+    setBusy("preflight");
     try {
-      const response = await invokeSidecar({ command: "preflight", output_dir: outputDir, segments: requestSegments() });
-      if (response.command !== "preflight") {
-        throw new Error(response.ok ? "出力前チェックに失敗しました。" : sidecarError(response));
+      const segments = toSidecarSegments(allSegments);
+      const sentSignature = JSON.stringify(segments);
+      const sentOutputDir = outputDir;
+      const response = await invokeSidecar({ command: "preflight", output_dir: sentOutputDir, segments });
+      if (!response.ok || !("checks" in response)) {
+        throw new Error(sidecarError(response));
       }
-      const result = response as SidecarPreflightResponse;
-      setPreflightChecks(result.checks);
+      // 応答待ち中にセグメントや出力先が編集された場合、古いチェック結果は適用しない
+      if (sentSignature !== requestSignatureRef.current || sentOutputDir !== outputDirRef.current) {
+        setStatus("内容が変更されたため再チェックしてください。", "warning");
+        return;
+      }
+      preflightSnapshotRef.current = { signature: sentSignature, outputDir: sentOutputDir };
+      setPreflightChecks(response.checks);
       setExportResult(null);
-      setStatus(result.can_run ? "出力できます。" : "修正が必要な項目があります。");
+      const duplicates = duplicateRequestedFilenames(response.checks);
+      if (!response.can_run) {
+        setStatus("修正が必要な項目があります。", "warning");
+      } else if (duplicates.size) {
+        setStatus("出力できますが、同じ予定ファイル名が複数あります。連番を確認してください。", "warning");
+      } else {
+        setStatus("出力できます。", "ok");
+      }
       setActiveStep("output");
     } catch (error) {
-      setStatus(`出力前チェックエラー: ${String(error)}`);
+      setStatus(`出力前チェックエラー: ${String(error)}`, "danger");
+    } finally {
+      setBusy("");
     }
   }
 
   async function runExport(): Promise<void> {
+    if (busy) {
+      return;
+    }
+    const segments = toSidecarSegments(allSegments);
+    const snapshot = preflightSnapshotRef.current;
+    // チェック済み内容と現在の内容が一致しない限り出力しない
+    if (!snapshot || snapshot.signature !== JSON.stringify(segments) || snapshot.outputDir !== outputDir) {
+      clearOutputState();
+      setStatus("内容が変更されたため再チェックしてください。", "warning");
+      return;
+    }
+    setBusy("export");
     try {
-      const response = await invokeSidecar({ command: "export", output_dir: outputDir, segments: requestSegments() });
-      if (response.command !== "export") {
-        throw new Error(response.ok ? "出力に失敗しました。" : sidecarError(response));
+      const response = await invokeSidecar({ command: "export", output_dir: outputDir, segments });
+      if (!("summary" in response) || !("items" in response)) {
+        throw new Error(sidecarError(response));
       }
-      const result = response as SidecarExportResponse;
-      setExportResult(result);
-      setPreflightChecks(result.items);
-      setStatus(result.ok ? "出力が完了しました。" : "出力結果を確認してください。");
+      preflightSnapshotRef.current = null;
+      setExportResult(response);
+      setPreflightChecks([]);
+      if (response.ok && response.summary.failed === 0) {
+        setStatus("出力が完了しました。", "ok");
+      } else {
+        setStatus(`出力結果を確認してください。失敗 ${response.summary.failed}件`, "warning");
+      }
     } catch (error) {
-      setStatus(`出力エラー: ${String(error)}`);
+      setStatus(`出力エラー: ${String(error)}`, "danger");
+    } finally {
+      setBusy("");
     }
   }
 
   async function saveState(): Promise<void> {
-    const state: AppPersistedState = {
-      version: 1,
-      input_paths: pdfFiles.map((file) => file.path),
-      output_dir: outputDir,
-      split_points_by_pdf: splitPointsByPdf,
-      segment_metadata: segmentMetadata,
-      common_metadata: commonMetadata,
-      current_pdf: currentPdf,
-      current_page: currentPage
-    };
-    const response = await invokeSidecar({ command: "state_save", state });
-    setStatus(response.ok ? "状態を保存しました。" : `状態保存エラー: ${sidecarError(response)}`);
+    if (busy) {
+      return;
+    }
+    setBusy("save");
+    try {
+      const currentKeys = new Set(allSegments.map((segment) => segment.key));
+      const filteredSegmentMetadata = Object.fromEntries(
+        Object.entries(segmentMetadata).filter(([key]) => currentKeys.has(key))
+      );
+      // segment_metadata と同様に、現在の PDF 一覧に存在しないパスの分割点は保存しない
+      const currentPdfPaths = new Set(pdfFiles.map((file) => file.path));
+      const filteredSplitPoints = Object.fromEntries(
+        Object.entries(splitPointsByPdf).filter(([path]) => currentPdfPaths.has(path))
+      );
+      const state: AppPersistedState = {
+        version: 1,
+        input_paths: pdfFiles.map((file) => file.path),
+        output_dir: outputDir,
+        split_points_by_pdf: filteredSplitPoints,
+        segment_metadata: filteredSegmentMetadata,
+        common_metadata: commonMetadata,
+        current_pdf: currentPdf,
+        current_page: currentPage,
+        active_step: activeStep
+      };
+      const response = await invokeSidecar({ command: "state_save", state });
+      if (!response.ok) {
+        setStatus(`状態保存エラー: ${sidecarError(response)}`, "danger");
+        return;
+      }
+      setStatus("状態を保存しました。", "ok");
+    } catch (error) {
+      setStatus(`状態保存エラー: ${String(error)}`, "danger");
+    } finally {
+      setBusy("");
+    }
   }
 
   async function loadState(): Promise<void> {
-    const response = await invokeSidecar({ command: "state_load" });
-    if (!response.ok || response.command !== "state_load") {
-      setStatus(response.ok ? "状態読込に失敗しました。" : `状態読込エラー: ${sidecarError(response)}`);
+    if (busy) {
       return;
     }
-    const state = response.state as Partial<AppPersistedState>;
-    if (!Array.isArray(state.input_paths) || !state.input_paths.length) {
-      setStatus("保存済み状態はありません。");
-      return;
+    const hasWork =
+      pdfFiles.length > 0 ||
+      hasMetadataValues(commonMetadata) ||
+      Object.values(segmentMetadata).some((metadata) => hasMetadataValues(metadata));
+    if (hasWork) {
+      const proceed = await confirm("現在の作業内容を破棄して保存済み状態を復元しますか？", {
+        title: "状態の復元",
+        kind: "warning"
+      });
+      if (!proceed) {
+        return;
+      }
     }
+    setBusy("load");
     try {
-      const loaded = await Promise.all(state.input_paths.map((path) => loadPdfInfo(path)));
+      const response = await invokeSidecar({ command: "state_load" });
+      if (!response.ok || response.command !== "state_load") {
+        setStatus(response.ok ? "状態読込エラー: 状態読込に失敗しました。" : `状態読込エラー: ${sidecarError(response)}`, "danger");
+        return;
+      }
+      const state = response.state as Partial<AppPersistedState>;
+      const inputPaths = Array.isArray(state.input_paths) ? state.input_paths : [];
+      if (!inputPaths.length) {
+        setStatus("保存済み状態はありません。");
+        return;
+      }
+      const results = await Promise.allSettled(inputPaths.map((path) => loadPdfInfo(path)));
+      const loaded: PdfFile[] = [];
+      const missingNames: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled") {
+          loaded.push(result.value);
+        } else {
+          missingNames.push(basename(inputPaths[index]));
+        }
+      });
+      if (!loaded.length) {
+        setStatus(`状態読込エラー: PDFを読み込めませんでした: ${missingNames.join(", ")}`, "danger");
+        return;
+      }
+      previewCacheRef.current.clear();
       setPdfFiles(loaded);
       setOutputDir(state.output_dir ?? "");
       setSplitPointsByPdf(state.split_points_by_pdf ?? {});
       setSegmentMetadata(state.segment_metadata ?? {});
       setCommonMetadata({ ...emptyCommonMetadata, ...(state.common_metadata ?? {}) });
-      setCurrentPdf(state.current_pdf || loaded[0].path);
-      setCurrentPage(state.current_page ?? 1);
+      const targetPdf = loaded.find((file) => file.path === state.current_pdf) ?? loaded[0];
+      const targetPage = Math.max(1, Math.min(targetPdf.pageCount, state.current_page ?? 1));
+      setCurrentPdf(targetPdf.path);
+      pageRequestRef.current = targetPage;
+      setCurrentPage(targetPage);
+      setSelectedSegmentKey("");
       clearOutputState();
-      await loadPreview(state.current_pdf || loaded[0].path, state.current_page ?? 1);
-      setStatus("状態を復元しました。");
+      const restoredStep = steps.some((step) => step.id === state.active_step)
+        ? (state.active_step as StepId)
+        : "import";
+      setActiveStep(restoredStep);
+      setSplitVisited(restoredStep !== "import");
+      if (missingNames.length) {
+        setStatus(
+          `${inputPaths.length}件中${missingNames.length}件は読み込めませんでした: ${missingNames.join(
+            ", "
+          )}。このまま保存すると読み込めなかったPDFの入力値は失われます。`,
+          "warning"
+        );
+      } else {
+        setStatus("状態を復元しました。", "ok");
+      }
+      try {
+        await loadPreview(targetPdf.path, targetPage);
+      } catch (previewError) {
+        setStatus(`プレビューエラー: ${String(previewError)}`, "danger");
+      }
     } catch (error) {
-      setStatus(`状態復元エラー: ${String(error)}`);
+      setStatus(`状態読込エラー: ${String(error)}`, "danger");
+    } finally {
+      setBusy("");
     }
   }
 
-  const statusTone = status.includes("エラー")
-    ? "danger"
-    : status.includes("修正") || status.includes("不足")
-      ? "warning"
-      : status.includes("完了") || status.includes("できます")
-        ? "ok"
-        : "";
   const updateTone =
     updateState === "error"
       ? "danger"
@@ -706,7 +1069,12 @@ export default function Page() {
           title="PDF一覧"
           description={pdfFiles.length ? `${pdfFiles.length}件 / ${totalPages}ページ` : "処理対象PDFを追加します。"}
           action={
-            <button className="ghost danger" disabled={!pdfFiles.length} onClick={clearPdfSelection} type="button">
+            <button
+              className="ghost danger"
+              disabled={!pdfFiles.length || isBusy}
+              onClick={() => void clearPdfSelection()}
+              type="button"
+            >
               <IconLabel icon={Trash2}>全クリア</IconLabel>
             </button>
           }
@@ -723,6 +1091,7 @@ export default function Page() {
                 <button
                   aria-label={`${basename(file.path)} を一覧から外す`}
                   className="icon-button danger"
+                  disabled={isBusy}
                   onClick={() => void removePdf(file.path)}
                   type="button"
                 >
@@ -734,8 +1103,8 @@ export default function Page() {
         ) : (
           <EmptyState
             action={
-              <button className="primary" onClick={choosePdfs} type="button">
-                <IconLabel icon={Upload}>PDFを選択</IconLabel>
+              <button className="primary" disabled={isBusy} onClick={choosePdfs} type="button">
+                <IconLabel icon={Upload}>{busyLabel("import", "PDFを選択")}</IconLabel>
               </button>
             }
             icon={FileText}
@@ -779,20 +1148,23 @@ export default function Page() {
           <span className="group-label">セグメント</span>
           <div className="queue-list slim">
             {allSegments.length ? (
-              allSegments.map((segment) => (
-                <button
-                  className={segment.key === selectedSegmentKey ? "list-row selected" : "list-row"}
-                  key={segment.key}
-                  onClick={() => setSelectedSegmentKey(segment.key)}
-                  type="button"
-                >
-                  <span>
-                    <strong>{segment.pages}ページ</strong>
-                    <small>{basename(segment.pdfPath)}</small>
-                  </span>
-                  <span className="row-meta">{previewFilename(segment.metadata)}</span>
-                </button>
-              ))
+              allSegments.map((segment) => {
+                const filename = previewFilename(segment.metadata);
+                return (
+                  <button
+                    className={segment.key === selectedSegment?.key ? "list-row selected" : "list-row"}
+                    key={segment.key}
+                    onClick={() => setSelectedSegmentKey(segment.key)}
+                    type="button"
+                  >
+                    <span>
+                      <strong>{segment.pages}ページ</strong>
+                      <small>{basename(segment.pdfPath)}</small>
+                    </span>
+                    <span className={filename ? "row-meta" : "row-meta warning"}>{filename ?? "未入力"}</span>
+                  </button>
+                );
+              })
             ) : (
               <EmptyState icon={Split} title="分割なし">
                 PDFを選択するとページ範囲が表示されます。
@@ -847,6 +1219,26 @@ export default function Page() {
     );
   }
 
+  function renderShortageActions() {
+    const stepsToVisit = [...new Map(outputShortages.map((item) => [item.step, item])).values()];
+    if (!stepsToVisit.length) {
+      return null;
+    }
+    return (
+      <div className="action-row">
+        {stepsToVisit.map((item) => (
+          <button key={item.step} onClick={() => setActiveStep(item.step)} type="button">
+            <IconLabel icon={ArrowLeft}>{`${item.stepLabel}へ戻る`}</IconLabel>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function shortageSummary(): string {
+    return `不足している項目: ${outputShortages.map((item) => item.label).join(" / ")}。下のボタンから該当ステップへ戻れます。`;
+  }
+
   function renderOutputList() {
     return (
       <div className="pane stack">
@@ -856,29 +1248,44 @@ export default function Page() {
         />
         {preflightChecks.length ? (
           <div className="output-list">
-            {preflightChecks.map((check, index) => (
-              <div className={check.ok ? "output-row" : "output-row error"} key={`${check.pdf_path}-${check.pages}-${index}`}>
-                <span>
-                  <strong>{check.filename || check.requested_filename || "-"}</strong>
-                  <small>{check.pages}ページ</small>
-                </span>
-                <span className={check.ok ? "state-text ok" : "state-text warning"}>
-                  {check.ok ? (check.has_existing_output ? "既存あり" : "出力可能") : "要修正"}
-                </span>
-              </div>
-            ))}
+            {preflightChecks.map((check, index) => {
+              const renamed =
+                check.has_existing_output && Boolean(check.filename) && check.filename !== check.requested_filename;
+              const duplicate = Boolean(check.requested_filename) && duplicateRequestedNames.has(check.requested_filename);
+              return (
+                <div
+                  className={!check.ok ? "output-row error" : duplicate ? "output-row warning" : "output-row"}
+                  key={`${check.pdf_path}-${check.pages}-${index}`}
+                >
+                  <span>
+                    <strong>{check.requested_filename || check.filename || "-"}</strong>
+                    <small>{check.pages}ページ</small>
+                    {renamed ? (
+                      <small className="rename-note">{`→ ${check.filename} として保存（上書きしません）`}</small>
+                    ) : null}
+                  </span>
+                  <span className={check.ok && !duplicate ? "state-text ok" : "state-text warning"}>
+                    {!check.ok ? "要修正" : duplicate ? "連番重複" : check.has_existing_output ? "既存あり" : "出力可能"}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <EmptyState
             action={
-              <button disabled={!canRunPreflight} onClick={runPreflight} type="button">
-                <IconLabel icon={ClipboardCheck}>出力前チェック</IconLabel>
-              </button>
+              outputShortages.length ? (
+                renderShortageActions()
+              ) : (
+                <button disabled={!canRunPreflight || isBusy} onClick={runPreflight} type="button">
+                  <IconLabel icon={ClipboardCheck}>{busyLabel("preflight", "出力前チェック")}</IconLabel>
+                </button>
+              )
             }
             icon={Download}
             title="未確認です"
           >
-            入力内容が揃ったら、ここで出力可否を確認します。
+            {outputShortages.length ? shortageSummary() : "入力内容が揃ったら、ここで出力可否を確認します。"}
           </EmptyState>
         )}
       </div>
@@ -903,30 +1310,31 @@ export default function Page() {
       <section className="work-card stack" aria-label="PDF取込">
         <PaneHeader title="取込設定" description="対象PDF、出力先、共通項目をここで揃えます。" />
         <div className="action-row">
-          <button className="primary" onClick={choosePdfs} type="button">
-            <IconLabel icon={Upload}>PDFを選択</IconLabel>
+          <button className="primary" disabled={isBusy} onClick={choosePdfs} type="button">
+            <IconLabel icon={Upload}>{busyLabel("import", "PDFを選択")}</IconLabel>
           </button>
-          <button onClick={chooseOutputDir} type="button">
+          <button disabled={isBusy} onClick={chooseOutputDir} type="button">
             <IconLabel icon={FolderOpen}>出力フォルダ</IconLabel>
           </button>
-          <button disabled={!outputDir} onClick={resetOutputDir} type="button">
+          <button disabled={!outputDir || isBusy} onClick={resetOutputDir} type="button">
             <IconLabel icon={XCircle}>出力先リセット</IconLabel>
-          </button>
-          <button onClick={loadState} type="button">
-            <IconLabel icon={RotateCcw}>状態を復元</IconLabel>
-          </button>
-          <button onClick={saveState} type="button">
-            <IconLabel icon={Save}>状態を保存</IconLabel>
           </button>
         </div>
         <div className="field-grid two">
           <label>
             箱No
-            <input value={commonMetadata.box_no} onChange={(event) => updateCommonMetadata("box_no", event.target.value)} />
+            <input
+              inputMode="numeric"
+              name="box_no"
+              value={commonMetadata.box_no}
+              onChange={(event) => updateCommonMetadata("box_no", event.target.value)}
+            />
           </label>
           <label>
             バインダーNo
             <input
+              inputMode="numeric"
+              name="binder_no"
               value={commonMetadata.binder_no}
               onChange={(event) => updateCommonMetadata("binder_no", event.target.value)}
             />
@@ -949,29 +1357,41 @@ export default function Page() {
           description={currentFile ? `${currentPage} / ${currentFile.pageCount}ページ` : "PDFを取込画面で選択してください。"}
         />
         <div className="action-row">
-          <button disabled={!currentFile || currentPage <= 1} onClick={() => void movePage(-1)} type="button">
+          <button disabled={!currentFile || currentPage <= 1 || isBusy} onClick={() => void movePage(-1)} type="button">
             <IconLabel icon={ArrowLeft}>前ページ</IconLabel>
           </button>
           <button
-            disabled={!currentFile || currentPage >= (currentFile?.pageCount ?? 1)}
+            disabled={!currentFile || currentPage >= (currentFile?.pageCount ?? 1) || isBusy}
             onClick={() => void movePage(1)}
             type="button"
           >
             <IconLabel icon={ArrowRight}>次ページ</IconLabel>
           </button>
-          <button className="primary" disabled={!currentFile} onClick={addSplitBeforeCurrentPage} type="button">
+          <button
+            className="primary"
+            disabled={!currentFile || isBusy}
+            onClick={() => void addSplitBeforeCurrentPage()}
+            type="button"
+          >
             <IconLabel icon={Split}>現在ページの前で分割</IconLabel>
           </button>
-          <button disabled={!currentFile} onClick={splitEveryPage} type="button">
+          <button disabled={!currentFile || isBusy} onClick={() => void splitEveryPage()} type="button">
             <IconLabel icon={ClipboardCheck}>1ページごとに分割</IconLabel>
           </button>
-          <button disabled={!currentFile} onClick={undoLastSplit} type="button">
+          <button disabled={!currentFile || isBusy} onClick={() => void undoLastSplit()} type="button">
             <IconLabel icon={Undo2}>最後の分割を取り消す</IconLabel>
           </button>
         </div>
         <div className="preview-frame">
           {previewDataUrl ? (
-            <img alt="PDFページプレビュー" src={previewDataUrl} />
+            <div className={previewLoading ? "preview-stage loading" : "preview-stage"}>
+              <img alt={`PDFページプレビュー（${currentPage}ページ目）`} src={previewDataUrl} />
+              {previewLoading ? <span className="preview-loading">読み込み中…</span> : null}
+            </div>
+          ) : previewLoading ? (
+            <EmptyState icon={FileText} title="読み込み中">
+              ページプレビューを読み込んでいます。
+            </EmptyState>
           ) : (
             <EmptyState icon={FileText} title="プレビューなし">
               PDFを選択するとページプレビューを表示します。
@@ -983,6 +1403,9 @@ export default function Page() {
   }
 
   function renderInputWork() {
+    // 入力欄は個別値（segmentMetadata）をそのまま表示し、空欄時は placeholder で共通値を見せる
+    const selectedOverrides = selectedSegment ? segmentMetadata[selectedSegment.key] ?? {} : {};
+    const selectedPreviewName = selectedSegment ? previewFilename(selectedSegment.metadata) : null;
     return (
       <section className="work-card stack" aria-label="入力">
         <PaneHeader
@@ -995,14 +1418,21 @@ export default function Page() {
         />
         <div className="filename-preview">
           <span>出力名プレビュー</span>
-          <strong>{selectedSegment ? previewFilename(selectedSegment.metadata) : "-"}</strong>
+          <strong className={selectedSegment && !selectedPreviewName ? "warning" : undefined}>
+            {selectedSegment ? selectedPreviewName ?? "未入力" : "-"}
+          </strong>
         </div>
         <div className="action-row">
-          <button className="primary" disabled={!allSegments.length} onClick={resequence} type="button">
+          <button disabled={!allSegments.length || isBusy} onClick={() => void resequence()} type="button">
             <IconLabel icon={ClipboardCheck}>連番を再採番</IconLabel>
           </button>
-          <button disabled={!allSegments.length || !outputDir} onClick={runPreflight} type="button">
-            <IconLabel icon={ChevronRight}>出力前チェック</IconLabel>
+          <button
+            className="primary"
+            disabled={!allSegments.length || !outputDir || isBusy}
+            onClick={runPreflight}
+            type="button"
+          >
+            <IconLabel icon={ChevronRight}>{busyLabel("preflight", "出力前チェック")}</IconLabel>
           </button>
         </div>
         {selectedSegment ? (
@@ -1010,28 +1440,44 @@ export default function Page() {
             <label>
               箱No
               <input
-                value={selectedSegment.metadata.box_no}
+                inputMode="numeric"
+                name="box_no"
+                placeholder={commonMetadata.box_no.trim() ? commonMetadata.box_no : undefined}
+                value={selectedOverrides.box_no ?? ""}
                 onChange={(event) => updateMetadata(selectedSegment, "box_no", event.target.value)}
               />
             </label>
             <label>
               バインダーNo
               <input
-                value={selectedSegment.metadata.binder_no}
+                inputMode="numeric"
+                name="binder_no"
+                placeholder={commonMetadata.binder_no.trim() ? commonMetadata.binder_no : undefined}
+                value={selectedOverrides.binder_no ?? ""}
                 onChange={(event) => updateMetadata(selectedSegment, "binder_no", event.target.value)}
               />
             </label>
             <label>
               連番
               <input
+                inputMode="numeric"
+                name="seq"
                 value={selectedSegment.metadata.seq}
                 onChange={(event) => updateMetadata(selectedSegment, "seq", event.target.value)}
               />
             </label>
           </div>
         ) : (
-          <EmptyState icon={PencilLine} title="入力対象がありません">
-            分割セグメントを作成してから入力します。
+          <EmptyState
+            action={
+              <button onClick={() => setActiveStep(pdfFiles.length ? "split" : "import")} type="button">
+                <IconLabel icon={ArrowLeft}>{pdfFiles.length ? "分割へ戻る" : "PDF取込へ戻る"}</IconLabel>
+              </button>
+            }
+            icon={PencilLine}
+            title="入力対象がありません"
+          >
+            {pdfFiles.length ? "分割セグメントを作成してから入力します。" : "PDFを取込んでから入力します。"}
           </EmptyState>
         )}
       </section>
@@ -1046,11 +1492,11 @@ export default function Page() {
           description={preflightChecks.length ? `${preflightChecks.length}件の出力予定` : "出力前チェック待ち"}
         />
         <div className="action-row">
-          <button disabled={!allSegments.length || !outputDir} onClick={runPreflight} type="button">
-            <IconLabel icon={ClipboardCheck}>出力前チェック</IconLabel>
+          <button disabled={!allSegments.length || !outputDir || isBusy} onClick={runPreflight} type="button">
+            <IconLabel icon={ClipboardCheck}>{busyLabel("preflight", "出力前チェック")}</IconLabel>
           </button>
-          <button className="primary" disabled={!canExport} onClick={runExport} type="button">
-            <IconLabel icon={Download}>出力実行</IconLabel>
+          <button className="primary" disabled={!canExport || isBusy} onClick={runExport} type="button">
+            <IconLabel icon={Download}>{busyLabel("export", "出力実行")}</IconLabel>
           </button>
         </div>
         <div className="summary-strip">
@@ -1062,6 +1508,15 @@ export default function Page() {
           <div className="log-box">
             <strong>出力結果</strong>
             <p>{`作成 ${exportResult.summary.created}件 / 失敗 ${exportResult.summary.failed}件`}</p>
+            {exportResult.items
+              .filter((item) => item.status === "failed")
+              .map((item, index) => (
+                <p className="danger" key={`${item.pdf_path}-${item.pages}-${index}`}>
+                  {`${item.filename || item.requested_filename || basename(item.pdf_path)}: ${
+                    item.error || item.messages.join(" / ") || "不明なエラー"
+                  }`}
+                </p>
+              ))}
           </div>
         ) : null}
         {preflightChecks.length ? (
@@ -1072,18 +1527,37 @@ export default function Page() {
               <span>既存</span>
               <span>状態</span>
             </div>
-            {preflightChecks.map((check, index) => (
-              <div className={check.ok ? "check-row" : "check-row error"} key={`${check.pdf_path}-${check.pages}-${index}`}>
-                <span>{check.pages}</span>
-                <span>{check.filename || check.requested_filename || "-"}</span>
-                <span>{check.has_existing_output ? "あり" : "なし"}</span>
-                <span>{check.ok ? "出力可能" : check.messages.join(" / ")}</span>
-              </div>
-            ))}
+            {preflightChecks.map((check, index) => {
+              const renamed =
+                check.has_existing_output && Boolean(check.filename) && check.filename !== check.requested_filename;
+              const duplicate = Boolean(check.requested_filename) && duplicateRequestedNames.has(check.requested_filename);
+              return (
+                <div
+                  className={!check.ok ? "check-row error" : duplicate ? "check-row warning" : "check-row"}
+                  key={`${check.pdf_path}-${check.pages}-${index}`}
+                >
+                  <span>{check.pages}</span>
+                  <span>
+                    {check.requested_filename || check.filename || "-"}
+                    {renamed ? (
+                      <small className="rename-note">{`→ ${check.filename} として保存（上書きしません）`}</small>
+                    ) : null}
+                  </span>
+                  <span>{check.has_existing_output ? "あり" : "なし"}</span>
+                  <span>
+                    {!check.ok
+                      ? check.messages.join(" / ")
+                      : duplicate
+                        ? "連番重複（同じ予定ファイル名があります）"
+                        : "出力可能"}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         ) : (
-          <EmptyState icon={Download} title="出力前チェック待ちです">
-            入力内容が揃ったら、ここで出力可否を確認します。
+          <EmptyState action={renderShortageActions()} icon={Download} title="出力前チェック待ちです">
+            {outputShortages.length ? shortageSummary() : "入力内容が揃ったら、ここで出力可否を確認します。"}
           </EmptyState>
         )}
       </section>
@@ -1141,8 +1615,8 @@ export default function Page() {
             <strong>{readySegments}</strong>
             <span>/ {allSegments.length}件 OK</span>
           </div>
-          <button className="primary wide" disabled={!canRunPreflight} onClick={runPreflight} type="button">
-            <IconLabel icon={ChevronRight}>出力前チェック</IconLabel>
+          <button className="primary wide" disabled={!canRunPreflight || isBusy} onClick={runPreflight} type="button">
+            <IconLabel icon={ChevronRight}>{busyLabel("preflight", "出力前チェック")}</IconLabel>
           </button>
         </aside>
       );
@@ -1157,11 +1631,11 @@ export default function Page() {
           label="既存ファイル"
           detail={preflightChecks.length ? (existingOutputs ? `${existingOutputs}件は一意名で回避` : "既存なし") : "未確認"}
         />
-        <button disabled={!canRunPreflight} onClick={runPreflight} type="button">
-          <IconLabel icon={ClipboardCheck}>再チェック</IconLabel>
+        <button disabled={!canRunPreflight || isBusy} onClick={runPreflight} type="button">
+          <IconLabel icon={ClipboardCheck}>{busyLabel("preflight", "再チェック")}</IconLabel>
         </button>
-        <button className="primary wide" disabled={!canExport} onClick={runExport} type="button">
-          <IconLabel icon={Download}>出力実行</IconLabel>
+        <button className="primary wide" disabled={!canExport || isBusy} onClick={runExport} type="button">
+          <IconLabel icon={Download}>{busyLabel("export", "出力実行")}</IconLabel>
         </button>
       </aside>
     );
@@ -1178,6 +1652,14 @@ export default function Page() {
           </div>
         </div>
         <div className="header-actions">
+          <div className="header-state-actions">
+            <button disabled={isBusy} onClick={() => void loadState()} type="button">
+              <IconLabel icon={RotateCcw}>{busyLabel("load", "状態を復元")}</IconLabel>
+            </button>
+            <button disabled={isBusy} onClick={() => void saveState()} type="button">
+              <IconLabel icon={Save}>{busyLabel("save", "状態を保存")}</IconLabel>
+            </button>
+          </div>
           <div className={`update-card ${updateTone}`}>
             <div className="update-copy">
               <small>現在のバージョン: {currentVersion}</small>
@@ -1201,15 +1683,15 @@ export default function Page() {
               ) : null}
             </div>
           </div>
-          <div className={`status-pill ${statusTone}`} role="status">
-            {statusTone === "danger" ? (
+          <div className={`status-pill ${status.tone}`} role="status">
+            {status.tone === "danger" || status.tone === "warning" ? (
               <AlertTriangle aria-hidden="true" size={16} />
-            ) : statusTone === "ok" ? (
+            ) : status.tone === "ok" ? (
               <CheckCircle2 aria-hidden="true" size={16} />
             ) : (
               <ClipboardCheck aria-hidden="true" size={16} />
             )}
-            <span>{status}</span>
+            <span>{status.message}</span>
           </div>
         </div>
       </header>
@@ -1244,8 +1726,12 @@ export default function Page() {
       <section className="overview-strip" aria-label="作業状況">
         <StatLine label="PDF" value={`${pdfFiles.length}件`} />
         <StatLine label="分割" value={`${allSegments.length}件`} />
-        <StatLine label="入力" value={allSegments.length ? `${readySegments}件 OK` : "未確認"} />
-        <StatLine label="出力先" value={outputDir ? "設定済み" : "未設定"} />
+        <StatLine
+          label="入力"
+          tone={allSegments.length ? undefined : "warning"}
+          value={allSegments.length ? `${readySegments}件 OK` : "未確認"}
+        />
+        <StatLine label="出力先" tone={outputDir ? undefined : "warning"} value={outputDir ? "設定済み" : "未設定"} />
       </section>
 
       <section className="task-layout" aria-label="PDF整理ワークスペース">

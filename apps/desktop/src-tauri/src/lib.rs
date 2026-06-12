@@ -1,23 +1,304 @@
+use tauri::Manager;
+
+/// Number of recent stderr lines kept for diagnostics when the sidecar fails.
+const STDERR_TAIL_MAX_LINES: usize = 50;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(SidecarState(std::sync::Arc::new(std::sync::Mutex::new(
+            None,
+        ))))
         .invoke_handler(tauri::generate_handler![run_sidecar])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            // Secondary shutdown path. The primary path is pipe closure on app
+            // process exit, which makes the Python side see stdin EOF and quit.
+            let state = app_handle.state::<SidecarState>();
+            let mut slot = state
+                .0
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let _ = kill_resident_sidecar(&mut slot);
+        }
+    });
+}
+
+/// Shared slot holding the resident Python sidecar process, if any.
+///
+/// The `Mutex` also serializes requests: only one request is in flight at a
+/// time, matching the JSON Lines protocol (one request line, one response
+/// line). The `Arc` lets the slot move into `spawn_blocking` closures.
+struct SidecarState(std::sync::Arc<std::sync::Mutex<Option<ResidentSidecar>>>);
+
+struct ResidentSidecar {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    /// Lines read from the child's stdout by a dedicated reader thread.
+    /// Channel disconnection signals that the process died (stdout EOF).
+    stdout_rx: std::sync::mpsc::Receiver<std::io::Result<String>>,
+    /// Recent stderr lines, drained by a dedicated thread to avoid pipe
+    /// deadlocks and attached to error messages for diagnostics.
+    stderr_tail: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
+    /// Envelope id for the next request. Starts at 1 for every spawned
+    /// process and increases monotonically.
+    next_id: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SidecarMode {
+    Resident,
+    Oneshot,
 }
 
 #[tauri::command]
-fn run_sidecar(request: serde_json::Value) -> Result<serde_json::Value, String> {
+async fn run_sidecar(
+    state: tauri::State<'_, SidecarState>,
+    request: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let recovery_dir = find_recovery_dir()?;
-    let request_text = serde_json::to_string(&request).map_err(|error| error.to_string())?;
     let explicit_python = std::env::var_os("PDF_ORGANIZER_PYTHON").map(std::path::PathBuf::from);
     let python_launcher = sidecar_python_launcher_from(explicit_python.as_deref());
     let timeout_override = std::env::var("PDF_ORGANIZER_SIDECAR_TIMEOUT_MS").ok();
     let timeout = sidecar_timeout_from(timeout_override.as_deref());
+    let mode_override = std::env::var("PDF_ORGANIZER_SIDECAR_MODE").ok();
+    let mode = sidecar_mode_from(mode_override.as_deref());
+    let shared_slot = std::sync::Arc::clone(&state.0);
 
+    tauri::async_runtime::spawn_blocking(move || match mode {
+        SidecarMode::Oneshot => {
+            let request_text =
+                serde_json::to_string(&request).map_err(|error| error.to_string())?;
+            run_sidecar_oneshot(&recovery_dir, &python_launcher, &request_text, timeout)
+        }
+        SidecarMode::Resident => run_sidecar_resident(
+            &shared_slot,
+            &recovery_dir,
+            &python_launcher,
+            &request,
+            timeout,
+        ),
+    })
+    .await
+    .map_err(|error| error.to_string())
+    .and_then(|result| result)
+}
+
+fn sidecar_mode_from(value: Option<&str>) -> SidecarMode {
+    match value {
+        Some(raw) if raw.trim().eq_ignore_ascii_case("oneshot") => SidecarMode::Oneshot,
+        _ => SidecarMode::Resident,
+    }
+}
+
+fn run_sidecar_resident(
+    shared_slot: &std::sync::Mutex<Option<ResidentSidecar>>,
+    recovery_dir: &std::path::Path,
+    python_launcher: &PythonLauncher,
+    request: &serde_json::Value,
+    timeout: std::time::Duration,
+) -> Result<serde_json::Value, String> {
+    let mut slot = shared_slot
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    let needs_spawn = match slot.as_mut() {
+        None => true,
+        // A process that already exited is unusable; replace it lazily.
+        Some(sidecar) => !matches!(sidecar.child.try_wait(), Ok(None)),
+    };
+    if needs_spawn {
+        let _ = kill_resident_sidecar(&mut slot);
+        *slot = Some(spawn_resident_sidecar(recovery_dir, python_launcher)?);
+    }
+
+    let sidecar = slot
+        .as_mut()
+        .ok_or_else(|| "Python sidecar is not running".to_string())?;
+    match send_request_to_sidecar(sidecar, request, timeout) {
+        Ok(response) => Ok(response),
+        Err(message) => {
+            // Timeout, process death, or protocol desync: kill the process and
+            // clear the slot so the next request re-spawns a fresh sidecar.
+            let stderr_tail = kill_resident_sidecar(&mut slot);
+            Err(append_stderr_tail(message, &stderr_tail))
+        }
+    }
+}
+
+fn spawn_resident_sidecar(
+    recovery_dir: &std::path::Path,
+    python_launcher: &PythonLauncher,
+) -> Result<ResidentSidecar, String> {
+    let child = std::process::Command::new(&python_launcher.program)
+        .args(python_launcher.args.iter().map(String::as_str))
+        .args(["-m", "pdf_splitter_tool", "--sidecar-serve"])
+        .current_dir(recovery_dir)
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUTF8", "1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("failed to start Python sidecar: {error}"))?;
+    attach_resident_sidecar(child)
+}
+
+fn attach_resident_sidecar(mut child: std::process::Child) -> Result<ResidentSidecar, String> {
+    let stdin = child.stdin.take();
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let (Some(stdin), Some(stdout), Some(stderr)) = (stdin, stdout, stderr) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("failed to open Python sidecar pipes".to_string());
+    };
+
+    let (stdout_tx, stdout_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+
+        for line in std::io::BufReader::new(stdout).lines() {
+            let is_read_error = line.is_err();
+            if stdout_tx.send(line).is_err() || is_read_error {
+                break;
+            }
+        }
+        // Dropping stdout_tx disconnects the channel, signalling EOF.
+    });
+
+    let stderr_tail = std::sync::Arc::new(std::sync::Mutex::new(
+        std::collections::VecDeque::with_capacity(STDERR_TAIL_MAX_LINES),
+    ));
+    let stderr_tail_writer = std::sync::Arc::clone(&stderr_tail);
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+
+        for line in std::io::BufReader::new(stderr).lines() {
+            let Ok(line) = line else { break };
+            let mut tail = stderr_tail_writer
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            tail.push_back(line);
+            while tail.len() > STDERR_TAIL_MAX_LINES {
+                tail.pop_front();
+            }
+        }
+    });
+
+    Ok(ResidentSidecar {
+        child,
+        stdin,
+        stdout_rx,
+        stderr_tail,
+        next_id: 1,
+    })
+}
+
+fn send_request_to_sidecar(
+    sidecar: &mut ResidentSidecar,
+    request: &serde_json::Value,
+    timeout: std::time::Duration,
+) -> Result<serde_json::Value, String> {
+    use std::io::Write;
+
+    let id = sidecar.next_id;
+    sidecar.next_id += 1;
+    let envelope = build_sidecar_envelope(id, request)?;
+    sidecar
+        .stdin
+        .write_all(envelope.as_bytes())
+        .and_then(|()| sidecar.stdin.write_all(b"\n"))
+        .and_then(|()| sidecar.stdin.flush())
+        .map_err(|error| format!("failed to write to Python sidecar: {error}"))?;
+
+    match sidecar.stdout_rx.recv_timeout(timeout) {
+        Ok(Ok(line)) => parse_sidecar_response_line(&line, id),
+        Ok(Err(error)) => Err(format!("failed to read Python sidecar stdout: {error}")),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(format!(
+            "Python sidecar timed out after {} ms",
+            timeout.as_millis()
+        )),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err("Python sidecar exited unexpectedly".to_string())
+        }
+    }
+}
+
+fn build_sidecar_envelope(id: u64, request: &serde_json::Value) -> Result<String, String> {
+    serde_json::to_string(&serde_json::json!({ "id": id, "request": request }))
+        .map_err(|error| format!("failed to encode sidecar request envelope: {error}"))
+}
+
+fn parse_sidecar_response_line(
+    line: &str,
+    expected_id: u64,
+) -> Result<serde_json::Value, String> {
+    let envelope: serde_json::Value = serde_json::from_str(line).map_err(|error| {
+        format!("Python sidecar protocol desync: response is not valid JSON: {error}")
+    })?;
+    let received_id = envelope.get("id").and_then(serde_json::Value::as_u64);
+    if received_id != Some(expected_id) {
+        let received = envelope
+            .get("id")
+            .map_or_else(|| "missing".to_string(), |value| value.to_string());
+        return Err(format!(
+            "Python sidecar protocol desync: expected response id {expected_id}, received {received}"
+        ));
+    }
+    envelope
+        .get("response")
+        .cloned()
+        .ok_or_else(|| "Python sidecar protocol desync: response field is missing".to_string())
+}
+
+/// Kills the resident sidecar (if any), clears the slot, and returns a
+/// snapshot of its recent stderr lines for diagnostics.
+fn kill_resident_sidecar(slot: &mut Option<ResidentSidecar>) -> String {
+    match slot.take() {
+        Some(mut sidecar) => {
+            let _ = sidecar.child.kill();
+            let _ = sidecar.child.wait();
+            stderr_tail_snapshot(&sidecar.stderr_tail)
+        }
+        None => String::new(),
+    }
+}
+
+fn stderr_tail_snapshot(
+    stderr_tail: &std::sync::Mutex<std::collections::VecDeque<String>>,
+) -> String {
+    let tail = stderr_tail
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    tail.iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn append_stderr_tail(message: String, stderr_tail: &str) -> String {
+    if stderr_tail.trim().is_empty() {
+        message
+    } else {
+        format!("{message}\nPython sidecar stderr (recent lines):\n{stderr_tail}")
+    }
+}
+
+/// Legacy one-process-per-request execution, kept as a fallback that can be
+/// selected with `PDF_ORGANIZER_SIDECAR_MODE=oneshot`.
+fn run_sidecar_oneshot(
+    recovery_dir: &std::path::Path,
+    python_launcher: &PythonLauncher,
+    request_text: &str,
+    timeout: std::time::Duration,
+) -> Result<serde_json::Value, String> {
     let mut child = std::process::Command::new(&python_launcher.program)
         .args(python_launcher.args.iter().map(String::as_str))
         .args(["-m", "pdf_splitter_tool", "--sidecar-request", "-"])
@@ -257,6 +538,66 @@ mod tests {
     }
 
     #[test]
+    fn sidecar_mode_defaults_to_resident() {
+        assert_eq!(sidecar_mode_from(None), SidecarMode::Resident);
+        assert_eq!(sidecar_mode_from(Some("")), SidecarMode::Resident);
+        assert_eq!(sidecar_mode_from(Some("resident")), SidecarMode::Resident);
+        assert_eq!(sidecar_mode_from(Some("unknown")), SidecarMode::Resident);
+    }
+
+    #[test]
+    fn sidecar_mode_oneshot_can_be_selected() {
+        assert_eq!(sidecar_mode_from(Some("oneshot")), SidecarMode::Oneshot);
+        assert_eq!(sidecar_mode_from(Some(" ONESHOT ")), SidecarMode::Oneshot);
+    }
+
+    #[test]
+    fn sidecar_envelope_is_compact_single_line_json() {
+        let request = serde_json::json!({"command": "page_preview", "page_no": 3});
+
+        let envelope = build_sidecar_envelope(7, &request).unwrap();
+
+        assert_eq!(
+            envelope,
+            r#"{"id":7,"request":{"command":"page_preview","page_no":3}}"#
+        );
+        assert!(!envelope.contains('\n'));
+    }
+
+    #[test]
+    fn sidecar_response_with_matching_id_returns_response_payload() {
+        let response =
+            parse_sidecar_response_line(r#"{"id":7,"response":{"ok":true}}"#, 7).unwrap();
+
+        assert_eq!(response, serde_json::json!({"ok": true}));
+    }
+
+    #[test]
+    fn sidecar_response_with_mismatched_or_null_id_is_desync() {
+        let mismatched =
+            parse_sidecar_response_line(r#"{"id":8,"response":{"ok":true}}"#, 7).unwrap_err();
+        let null_id =
+            parse_sidecar_response_line(r#"{"id":null,"response":{"ok":false}}"#, 7).unwrap_err();
+
+        assert!(mismatched.contains("desync"), "{mismatched}");
+        assert!(null_id.contains("desync"), "{null_id}");
+    }
+
+    #[test]
+    fn sidecar_response_that_is_not_json_is_desync() {
+        let error = parse_sidecar_response_line("plain text noise", 7).unwrap_err();
+
+        assert!(error.contains("desync"), "{error}");
+    }
+
+    #[test]
+    fn sidecar_response_without_response_field_is_desync() {
+        let error = parse_sidecar_response_line(r#"{"id":7}"#, 7).unwrap_err();
+
+        assert!(error.contains("desync"), "{error}");
+    }
+
+    #[test]
     fn sidecar_wait_drains_large_stdout_while_process_runs() {
         let mut child = std::process::Command::new("py")
             .args([
@@ -273,6 +614,133 @@ mod tests {
 
         assert!(output.status.success());
         assert_eq!(output.stdout.len(), 200000);
+    }
+
+    const FAKE_ECHO_SIDECAR: &str = r#"
+import json
+import sys
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    envelope = json.loads(line)
+    reply = {"id": envelope["id"], "response": {"ok": True, "echo": envelope["request"]}}
+    sys.stdout.write(json.dumps(reply, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+"#;
+
+    const FAKE_WRONG_ID_SIDECAR: &str = r#"
+import json
+import sys
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    reply = {"id": 9999, "response": {"ok": True}}
+    sys.stdout.write(json.dumps(reply, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+"#;
+
+    fn spawn_fake_sidecar(python_body: &str) -> ResidentSidecar {
+        let child = std::process::Command::new("py")
+            .args(["-3.12", "-c", python_body])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        attach_resident_sidecar(child).unwrap()
+    }
+
+    #[test]
+    fn resident_sidecar_exchanges_sequential_requests_with_monotonic_ids() {
+        let mut sidecar = spawn_fake_sidecar(FAKE_ECHO_SIDECAR);
+
+        for request_no in 1..=3u64 {
+            let request = serde_json::json!({"command": "ping", "n": request_no});
+            let response = send_request_to_sidecar(
+                &mut sidecar,
+                &request,
+                std::time::Duration::from_secs(10),
+            )
+            .unwrap();
+            assert_eq!(response, serde_json::json!({"ok": true, "echo": request}));
+        }
+        assert_eq!(sidecar.next_id, 4);
+
+        let _ = sidecar.child.kill();
+        let _ = sidecar.child.wait();
+    }
+
+    #[test]
+    fn resident_sidecar_times_out_when_no_response_arrives() {
+        let mut sidecar =
+            spawn_fake_sidecar("import sys, time\nsys.stdin.readline()\ntime.sleep(60)\n");
+        let request = serde_json::json!({"command": "ping"});
+
+        let error =
+            send_request_to_sidecar(&mut sidecar, &request, std::time::Duration::from_millis(300))
+                .unwrap_err();
+
+        assert!(error.contains("timed out"), "{error}");
+        let _ = sidecar.child.kill();
+        let _ = sidecar.child.wait();
+    }
+
+    #[test]
+    fn resident_sidecar_reports_process_death_and_keeps_stderr_tail() {
+        let mut sidecar = spawn_fake_sidecar(
+            "import sys\nsys.stdin.readline()\nsys.stderr.write('fake sidecar crashed\\n')\nsys.stderr.flush()\nsys.exit(3)\n",
+        );
+        let request = serde_json::json!({"command": "ping"});
+
+        let error =
+            send_request_to_sidecar(&mut sidecar, &request, std::time::Duration::from_secs(10))
+                .unwrap_err();
+        assert!(error.contains("exited"), "{error}");
+
+        // The stderr reader thread runs asynchronously; poll briefly for it
+        // to capture the crash line before taking the snapshot.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if stderr_tail_snapshot(&sidecar.stderr_tail).contains("fake sidecar crashed") {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "stderr tail never captured the crash line"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let mut slot = Some(sidecar);
+        let stderr_tail = kill_resident_sidecar(&mut slot);
+        assert!(stderr_tail.contains("fake sidecar crashed"), "{stderr_tail}");
+        assert!(slot.is_none());
+    }
+
+    #[test]
+    fn resident_sidecar_detects_id_desync() {
+        let mut sidecar = spawn_fake_sidecar(FAKE_WRONG_ID_SIDECAR);
+        let request = serde_json::json!({"command": "ping"});
+
+        let error =
+            send_request_to_sidecar(&mut sidecar, &request, std::time::Duration::from_secs(10))
+                .unwrap_err();
+
+        assert!(error.contains("desync"), "{error}");
+        let _ = sidecar.child.kill();
+        let _ = sidecar.child.wait();
+    }
+
+    #[test]
+    fn append_stderr_tail_only_when_present() {
+        assert_eq!(append_stderr_tail("boom".to_string(), ""), "boom");
+        assert_eq!(append_stderr_tail("boom".to_string(), "  \n "), "boom");
+
+        let combined = append_stderr_tail("boom".to_string(), "trace line");
+        assert!(combined.starts_with("boom\n"));
+        assert!(combined.contains("trace line"));
     }
 
     fn unique_test_dir(name: &str) -> std::path::PathBuf {

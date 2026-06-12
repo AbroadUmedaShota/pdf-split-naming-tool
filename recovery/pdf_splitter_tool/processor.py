@@ -15,6 +15,14 @@ except Exception:  # pragma: no cover - depends on local runtime
 
 INVALID_FILENAME_CHARS = r'<>:"/\|?*'
 YOSHIDA_TEMPLATE = "{box_no:0>2}_{binder_no:0>2}_{seq:0>3}.pdf"
+
+# Windows reserved device names (case-insensitive, extension-independent).
+# Matching against the stem prevents CON.pdf / con.PDF / CON from reaching the OS.
+_WINDOWS_RESERVED_STEMS = frozenset(
+    ["CON", "PRN", "AUX", "NUL"]
+    + [f"COM{n}" for n in range(1, 10)]
+    + [f"LPT{n}" for n in range(1, 10)]
+)
 REQUIRED_METADATA = ("box_no", "binder_no", "seq")
 MAX_FILENAME_LENGTH = 180
 
@@ -31,12 +39,18 @@ class PdfProcessor:
         if not sanitized:
             sanitized = "output.pdf"
             warnings.append("filename_empty_after_sanitize")
+        # Reject Windows reserved device names (CON, NUL, COM1-9, LPT1-9, …).
+        # Check the stem only so "CON.pdf" and "con.PDF" are both caught.
+        stem = Path(sanitized).stem.upper()
+        if stem in _WINDOWS_RESERVED_STEMS:
+            sanitized = f"_{sanitized}"
+            warnings.append("reserved_name_prefixed")
         return sanitized, tuple(warnings)
 
     @staticmethod
     def build_yoshida_filename(metadata: dict[str, str]) -> FilenameBuildResult:
-        values = {key: str(metadata.get(key, "")) for key in REQUIRED_METADATA}
-        errors = [f"missing_required:{key}" for key in REQUIRED_METADATA if not values[key].strip()]
+        values = {key: str(metadata.get(key, "")).strip() for key in REQUIRED_METADATA}
+        errors = [f"missing_required:{key}" for key in REQUIRED_METADATA if not values[key]]
         raw = ""
         if not errors:
             try:
@@ -72,14 +86,25 @@ class PdfProcessor:
             return doc.page_count
 
     @staticmethod
-    def page_preview_data_url(pdf_path: Path, page_no: int, zoom: float = 1.2) -> str:
+    def page_preview_data_url(
+        pdf_path: Path, page_no: int, zoom: float = 1.2, jpg_quality: int = 75
+    ) -> tuple[str, int]:
+        """Return ``(data_url, page_count)`` for *page_no* in *pdf_path*.
+
+        Validates *page_no* against the document's actual page count and raises
+        ``ValueError`` when out of range.  The image is encoded as JPEG to keep
+        the payload small for scan-origin PDFs.
+        """
         if fitz is None:
             raise RuntimeError("PyMuPDF is required for PDF rendering.")
         with fitz.open(pdf_path) as doc:
+            page_count = doc.page_count
+            if page_no < 1 or page_no > page_count:
+                raise ValueError(f"page_no must be between 1 and {page_count}")
             page = doc.load_page(page_no - 1)
             pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
-        encoded = base64.b64encode(pixmap.tobytes("png")).decode("ascii")
-        return f"data:image/png;base64,{encoded}"
+        encoded = base64.b64encode(pixmap.tobytes("jpg", jpg_quality=jpg_quality)).decode("ascii")
+        return f"data:image/jpeg;base64,{encoded}", page_count
 
     @staticmethod
     def calculate_sha256(path: Path) -> str:

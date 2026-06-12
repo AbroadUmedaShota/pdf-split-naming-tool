@@ -1,13 +1,59 @@
 from __future__ import annotations
 
+import json
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from .models import Segment
 from .processor import PdfProcessor, YOSHIDA_TEMPLATE
 from .runtime import work_dir_from_request
 from .state import StateManager
 from .workflow import SegmentOutputCheck, check_segment_outputs
+
+
+def serve(stdin: TextIO, stdout: TextIO) -> None:
+    """JSON Lines serve loop: read one request per line, write one response per line.
+
+    Designed to be called with real sys.stdin/sys.stdout by __main__.py, or with
+    io.StringIO instances in tests.  The loop terminates normally on stdin EOF.
+    Any exception that escapes from within the loop body is caught and returned as
+    a protocol-layer error response so the process never dies on a bad message.
+    """
+    for raw_line in stdin:
+        line = raw_line.strip()
+        if not line:
+            continue
+        request_id: int | None = None
+        try:
+            envelope = json.loads(line)
+            if not isinstance(envelope, dict):
+                raise TypeError("Envelope must be a JSON object.")
+            request_id = envelope.get("id")
+            payload = envelope.get("request")
+            if payload is None:
+                raise KeyError("Envelope missing 'request' key.")
+            response_body = handle_request(payload)
+        except Exception as exc:
+            response_body = _error_response("", exc)
+        try:
+            envelope_out = json.dumps(
+                {"id": request_id, "response": response_body},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        except Exception as exc:
+            envelope_out = json.dumps(
+                {"id": request_id, "response": _error_response("", exc)},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        try:
+            stdout.write(envelope_out + "\n")
+            stdout.flush()
+        except (BrokenPipeError, OSError):
+            # stdout の相手（デスクトップシェル）が切断済み。セッション終了として静かに抜ける。
+            return
 
 
 def handle_request(request: object) -> dict[str, Any]:
@@ -50,7 +96,6 @@ def pdf_info(request: dict[str, Any]) -> dict[str, Any]:
         "command": "pdf_info",
         "pdf_path": str(pdf_path),
         "page_count": page_count,
-        "page_numbers": list(range(1, page_count + 1)),
         "naming_template": YOSHIDA_TEMPLATE,
     }
 
@@ -58,16 +103,16 @@ def pdf_info(request: dict[str, Any]) -> dict[str, Any]:
 def page_preview(request: dict[str, Any]) -> dict[str, Any]:
     pdf_path = Path(str(request.get("pdf_path", "")))
     page_no = int(request.get("page_no", 1))
-    page_count = PdfProcessor.page_count(pdf_path)
-    if page_no < 1 or page_no > page_count:
-        raise ValueError(f"page_no must be between 1 and {page_count}")
+    # page_preview_data_url opens the PDF once, validates page_no, and returns
+    # (data_url, page_count) — no second open needed.
+    image_data_url, page_count = PdfProcessor.page_preview_data_url(pdf_path, page_no)
     return {
         "ok": True,
         "command": "page_preview",
         "pdf_path": str(pdf_path),
         "page_no": page_no,
         "page_count": page_count,
-        "image_data_url": PdfProcessor.page_preview_data_url(pdf_path, page_no),
+        "image_data_url": image_data_url,
     }
 
 

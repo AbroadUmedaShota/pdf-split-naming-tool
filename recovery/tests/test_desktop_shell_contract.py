@@ -34,6 +34,21 @@ def test_desktop_tauri_exposes_python_sidecar_bridge() -> None:
     assert "tauri::generate_handler![run_sidecar]" in lib_rs
 
 
+def test_desktop_tauri_runs_resident_sidecar_with_oneshot_fallback() -> None:
+    lib_rs = (DESKTOP / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
+
+    assert "--sidecar-serve" in lib_rs
+    assert "SidecarState" in lib_rs
+    assert "PDF_ORGANIZER_SIDECAR_MODE" in lib_rs
+    assert "run_sidecar_oneshot" in lib_rs
+    assert "--sidecar-request" in lib_rs
+    assert "PDF_ORGANIZER_SIDECAR_TIMEOUT_MS" in lib_rs
+    assert "PDF_ORGANIZER_PYTHON" in lib_rs
+    assert "recv_timeout" in lib_rs
+    assert "RunEvent::Exit" in lib_rs
+    assert "desync" in lib_rs
+
+
 def test_desktop_tauri_enables_dialog_plugin_for_local_file_selection() -> None:
     package_json = json.loads((DESKTOP / "package.json").read_text(encoding="utf-8"))
     cargo_toml = (DESKTOP / "src-tauri" / "Cargo.toml").read_text(encoding="utf-8")
@@ -64,7 +79,8 @@ def test_desktop_tauri_enables_signed_github_release_updates() -> None:
         "https://github.com/AbroadUmedaShota/pdf-split-naming-tool/releases/latest/download/latest.json"
     ]
     assert "updater:default" in capabilities["permissions"]
-    assert "process:default" in capabilities["permissions"]
+    assert "process:allow-restart" in capabilities["permissions"]
+    assert "process:default" not in capabilities["permissions"]
 
 
 def test_desktop_ui_exposes_update_check_controls() -> None:

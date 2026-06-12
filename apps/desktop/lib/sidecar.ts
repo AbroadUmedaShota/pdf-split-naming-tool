@@ -24,6 +24,7 @@ export type AppPersistedState = {
   common_metadata: Record<string, string>;
   current_pdf: string;
   current_page: number;
+  active_step?: "import" | "split" | "input" | "output";
 };
 
 export type SidecarRequest =
@@ -67,7 +68,6 @@ export type SidecarPdfInfoResponse = {
   command: "pdf_info";
   pdf_path: string;
   page_count: number;
-  page_numbers: number[];
   naming_template: string;
 };
 
