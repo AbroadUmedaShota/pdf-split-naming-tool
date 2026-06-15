@@ -2058,7 +2058,9 @@ button.split-marker:hover:not(:disabled) {
   position: relative;
   min-height: 520px;
   max-height: calc(100vh - 320px);
-  place-items: center;
+  /* 収まる時は中央、はみ出す時だけ端寄せ（safe）。拡大時に上端へジャンプする違和感を防ぎ、
+     かつ中央寄せで上端が見切れてスクロールできなくなる問題も避ける。 */
+  place-items: safe center;
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-2);
@@ -2143,6 +2145,19 @@ button.split-marker:hover:not(:disabled) {
 .preview-frame.page img {
   max-width: min(100%, 760px);
   max-height: calc(100% - 28px);
+}
+
+/* 実寸（free）モードはサイドカーが倍率付きで描画した画像を等倍で表示する。
+   max-width の頭打ちを外し、はみ出しはフレームの overflow:auto でスクロールさせる。
+   これでスライダー・Ctrl+ホイール・実寸ボタンの拡大縮小が実際に表示へ反映される。
+   縦位置は基底の place-items: safe center に任せる（free 専用の上寄せはジャンプの原因なので付けない）。 */
+.preview-frame.free .preview-page-layer {
+  max-width: none;
+}
+
+.preview-frame.free .preview-page-layer img,
+.preview-frame.free img {
+  max-width: none;
 }
 
 /* STEP3 入力プレビュー: 全体表示で画像が縦に確実に収まるようにフィットさせる */
