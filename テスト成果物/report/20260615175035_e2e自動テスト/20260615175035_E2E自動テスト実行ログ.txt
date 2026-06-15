@@ -1,0 +1,131 @@
+Command: npx playwright test --reporter=json (cwd=apps/desktop)
+ExitCode: 0
+Timestamp: 20260615175035
+
+--- stdout ---
+{
+  "config": {
+    "configFile": "C:\\Users\\user\\Desktop\\workspace\\pdfbunkatsukun\\apps\\desktop\\playwright.config.js",
+    "rootDir": "C:/Users/user/Desktop/workspace/pdfbunkatsukun/apps/desktop/e2e",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/user/Desktop/workspace/pdfbunkatsukun/apps/desktop/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "C:/Users/user/Desktop/workspace/pdfbunkatsukun/apps/desktop/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.60.0",
+    "workers": 4,
+    "webServer": {
+      "command": "npm run dev",
+      "url": "http://localhost:3000",
+      "cwd": "C:\\Users\\user\\Desktop\\workspace\\pdfbunkatsukun\\apps\\desktop",
+      "reuseExistingServer": true,
+      "timeout": 120000,
+      "stdout": "pipe",
+      "stderr": "pipe"
+    }
+  },
+  "suites": [
+    {
+      "title": "desktop-shell.e2e.spec.js",
+      "file": "desktop-shell.e2e.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "PDF分割くん デスクトップ UI（dev preview）",
+          "file": "desktop-shell.e2e.spec.js",
+          "line": 16,
+          "column": 6,
+          "specs": [
+            {
+              "title": "TC-E2E-011 検索ハイライト表示中にページ移動すると前ページのハイライトが残らない",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2029,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-15T08:51:09.873Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "b7db046e20a835372663-dde46529e177282355bf",
+              "file": "desktop-shell.e2e.spec.js",
+              "line": 17,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-06-15T08:51:08.813Z",
+    "duration": 3415.4660000000003,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}
+
+
+--- stderr/log ---
