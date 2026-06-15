@@ -2284,6 +2284,12 @@ button.split-marker:hover:not(:disabled) {
   background: var(--danger-bg);
 }
 
+/* 出力実行で作成済みになった行。出力可能（未出力）と区別する完了表示。 */
+.output-row.created {
+  border-color: rgba(22, 118, 71, 0.24);
+  background: var(--ok-bg);
+}
+
 .check-table {
   overflow: auto;
 }
@@ -2318,10 +2324,70 @@ button.split-marker:hover:not(:disabled) {
   color: var(--danger);
 }
 
+/* 出力実行で作成済みになった行。出力可能（未出力）と区別する完了表示。 */
+.check-row.created {
+  border-color: rgba(22, 118, 71, 0.24);
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
 .log-box {
   border-left: 3px solid var(--accent);
   background: var(--surface-2);
   padding: 10px 12px;
+}
+
+/* 出力結果: 全件成功は緑、失敗ありは赤の左罫線で深刻度を一目で区別する。 */
+.log-box.is-complete {
+  border-left-color: var(--ok);
+}
+
+.log-box.has-failures {
+  border-left-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+/* 出力結果のトップレベルメッセージ（例: 一部出力できず）。bullet を消して揃える。 */
+.export-messages {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-size-caption);
+  color: var(--muted);
+}
+
+/* 失敗した出力行のファイル名と理由の明細。後工程に進む前の原因特定用。 */
+.export-failures {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.export-failures li {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr);
+  gap: var(--space-2);
+  align-items: baseline;
+  font-size: var(--font-size-caption);
+}
+
+.export-failure-name {
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.export-failure-reason {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+/* 部分失敗時の復旧手順ガイド。失敗行をどう再出力するかをその場で示す。 */
+.export-recovery-hint {
+  margin: 8px 0 0;
+  font-size: var(--font-size-caption);
+  color: var(--text);
 }
 
 .status-check {

@@ -12,7 +12,7 @@ pub fn run() {
         .manage(SidecarState(std::sync::Arc::new(std::sync::Mutex::new(
             None,
         ))))
-        .invoke_handler(tauri::generate_handler![run_sidecar])
+        .invoke_handler(tauri::generate_handler![run_sidecar, reveal_path])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
@@ -88,6 +88,50 @@ async fn run_sidecar(
     .await
     .map_err(|error| error.to_string())
     .and_then(|result| result)
+}
+
+/// Opens the given directory (the export output folder) in the OS file
+/// manager so the operator can move straight from export to checking the
+/// generated PDFs. Validation is factored into `reveal_target` for testing;
+/// the spawn itself is fire-and-forget (we do not wait on the file manager).
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    let target = reveal_target(&path)?;
+    open_in_file_manager(&target)
+}
+
+fn reveal_target(path: &str) -> Result<std::path::PathBuf, String> {
+    if path.trim().is_empty() {
+        return Err("reveal path is empty".to_string());
+    }
+    let target = std::path::PathBuf::from(path);
+    // The only caller passes the export output directory, so reject anything
+    // that is not an existing directory rather than merely an existing path.
+    if !target.is_dir() {
+        return Err(format!("path does not exist or is not a directory: {path}"));
+    }
+    Ok(target)
+}
+
+fn open_in_file_manager(path: &std::path::Path) -> Result<(), String> {
+    // Branches are exhaustive across desktop targets: Windows, macOS, and
+    // "everything else" (Linux/BSD via xdg-open). Using not(any(...)) for the
+    // last branch keeps `program` defined on any non-Windows/macOS target.
+    #[cfg(target_os = "windows")]
+    let program = "explorer";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let program = "xdg-open";
+
+    // Fire-and-forget: the exit code is intentionally ignored. explorer.exe
+    // reliably returns 1 even when it opens the folder successfully, so only
+    // a spawn failure (program missing) is treated as an error.
+    std::process::Command::new(program)
+        .arg(path)
+        .spawn()
+        .map(|_child| ())
+        .map_err(|error| format!("failed to open file manager: {error}"))
 }
 
 fn sidecar_mode_from(value: Option<&str>) -> SidecarMode {
@@ -587,6 +631,27 @@ mod tests {
 
         let result = find_recovery_dir_from(&empty_root, None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn reveal_target_rejects_empty_or_blank_path() {
+        assert!(reveal_target("").is_err());
+        assert!(reveal_target("   ").is_err());
+    }
+
+    #[test]
+    fn reveal_target_rejects_missing_path() {
+        let missing = unique_test_dir("reveal-missing").join("does-not-exist");
+        assert!(reveal_target(&missing.to_string_lossy()).is_err());
+    }
+
+    #[test]
+    fn reveal_target_accepts_existing_directory() {
+        let dir = unique_test_dir("reveal-ok");
+
+        let resolved = reveal_target(&dir.to_string_lossy()).unwrap();
+
+        assert_eq!(resolved, dir);
     }
 
     #[test]

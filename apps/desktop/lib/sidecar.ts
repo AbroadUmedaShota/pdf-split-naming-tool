@@ -21,6 +21,11 @@ export async function invokeSidecar(request: SidecarRequest): Promise<SidecarRes
   return invoke<SidecarResponse>("run_sidecar", { request });
 }
 
+// 出力先フォルダを OS のファイルマネージャで開く。出力後に生成PDFを確認する後工程への導線。
+export async function revealPath(path: string): Promise<void> {
+  await invoke<void>("reveal_path", { path });
+}
+
 export type AppAffixDef = {
   key: string;
   label: string;

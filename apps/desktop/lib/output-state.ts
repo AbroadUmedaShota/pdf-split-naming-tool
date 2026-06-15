@@ -10,6 +10,12 @@ export function isOutputCheckOk(check: OutputCheckLike): boolean {
   return check.ok && (!isExportItem(check) || check.status !== "failed");
 }
 
+// 出力実行が完了し、このファイルが実際に作成済みの行か。
+// 出力前チェック段階の ok 行（まだ未出力）と区別し、完了を可視化するための判定。
+export function isOutputItemCreated(check: OutputCheckLike): boolean {
+  return isExportItem(check) && check.status === "created";
+}
+
 // バッチ内で同名のファイル名が要求され、予約採番（_2 など）で別名に変わった行か。
 // ok のまま黙って別名出力される行をユーザーへ可視化するための判定。
 export function isOutputCheckRenamed(check: OutputCheckLike): boolean {
@@ -38,6 +44,9 @@ function formatMessage(msg: string): string {
 }
 
 export function outputListStateText(check: OutputCheckLike): string {
+  if (isOutputItemCreated(check)) {
+    return isOutputCheckRenamed(check) ? "作成済み（別名採番）" : "作成済み";
+  }
   if (isOutputCheckOk(check)) {
     return isOutputCheckRenamed(check) ? "同名のため別名採番" : "出力可能";
   }
@@ -48,6 +57,9 @@ export function outputListStateText(check: OutputCheckLike): string {
 }
 
 export function outputDetailStateText(check: OutputCheckLike): string {
+  if (isOutputItemCreated(check)) {
+    return isOutputCheckRenamed(check) ? `作成済み（別名「${check.filename}」で採番）` : "作成済み";
+  }
   if (isOutputCheckOk(check)) {
     return isOutputCheckRenamed(check) ? `バッチ内で同名のため「${check.filename}」を採番` : "出力可能";
   }
