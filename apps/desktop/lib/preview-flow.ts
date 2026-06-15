@@ -34,7 +34,10 @@ export type LoadPagePreviewOptions = {
 // ブラウザはどちらの data URL も描画できるため、形式は限定せず「想定プレフィックス＋本体あり」だけ検証する。
 const previewImageDataUrlPrefixes = ["data:image/jpeg;base64,", "data:image/png;base64,"];
 
-function hasPreviewImageData(value: string): boolean {
+// プレビュー/サムネイル共通の data URL 検証。サイドカーの返す画像形式(現状JPEG)に
+// フロント側の想定がズレると全画像が表示されなくなる過去の不具合を、両経路で同じ判定に
+// 寄せて再発防止する。export して page_thumbnail 取得側からも使う。
+export function hasPreviewImageData(value: string): boolean {
   return previewImageDataUrlPrefixes.some(
     (prefix) => value.startsWith(prefix) && value.length > prefix.length
   );

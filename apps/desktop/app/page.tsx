@@ -67,7 +67,7 @@ import {
   outputIssueCount,
   outputListStateText
 } from "../lib/output-state";
-import { loadPagePreview } from "../lib/preview-flow";
+import { hasPreviewImageData, loadPagePreview } from "../lib/preview-flow";
 import { createPreviewRequestGate, previewCache } from "../lib/preview-cache";
 import {
   buildSegments,
@@ -1122,8 +1122,11 @@ export default function Page() {
         for (const response of responses) {
           if (response) {
             const key = `${response.pdf_path}#${response.page_no}`;
-            batch[key] = response.image_data_url;
+            // 取得試行済みとして記録（無限リトライ防止）。ただし不正な data URL はキャッシュしない。
             loadedThumbnailKeysRef.current.add(key);
+            if (hasPreviewImageData(response.image_data_url)) {
+              batch[key] = response.image_data_url;
+            }
           }
         }
         if (Object.keys(batch).length) {
