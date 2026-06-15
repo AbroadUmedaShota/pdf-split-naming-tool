@@ -2226,7 +2226,9 @@ export default function Page() {
   }
 
   async function runPreflight(): Promise<void> {
-    if (preflightInFlightRef.current) {
+    // 出力実行中の再チェックを禁止する。並走すると preflight 応答が後勝ちで
+    // 出力結果(exportResult/作成済み行)を上書きしてしまうため。
+    if (preflightInFlightRef.current || exportInFlightRef.current) {
       return;
     }
     preflightInFlightRef.current = true;
@@ -3410,6 +3412,8 @@ export default function Page() {
               <p className="export-recovery-hint">
                 失敗した行は、出力フォルダ内の既存ファイルを確認・削除してから「再チェック」→「出力実行」で再出力できます。
               </p>
+            ) : exportResult.summary.created > 0 ? (
+              <p className="export-recovery-hint">同じ内容をもう一度出力する場合は「再チェック」を押してください。</p>
             ) : null}
           </div>
         ) : null}
@@ -3445,7 +3449,7 @@ export default function Page() {
           </EmptyState>
         )}
         <div className="workbench-footer">
-          <button disabled={!canRunPreflight || isPreflighting} onClick={runPreflight} type="button">
+          <button disabled={!canRunPreflight || isPreflighting || isExporting} onClick={runPreflight} type="button">
             <IconLabel icon={ClipboardCheck}>{isPreflighting ? "チェック中…" : "再チェック"}</IconLabel>
           </button>
           <button disabled={!outputDir} onClick={() => void openOutputDir()} type="button">
