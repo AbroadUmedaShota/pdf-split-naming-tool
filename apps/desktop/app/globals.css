@@ -2390,6 +2390,21 @@ button.split-marker:hover:not(:disabled) {
   color: var(--text);
 }
 
+/* 部分失敗の復旧操作（失敗分のみ再出力ボタン＋手順ガイド）。 */
+.export-recovery {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+.export-recovery > button {
+  justify-self: start;
+}
+
+.export-recovery .export-recovery-hint {
+  margin: 0;
+}
+
 .status-check {
   align-items: flex-start;
   gap: var(--space-2);

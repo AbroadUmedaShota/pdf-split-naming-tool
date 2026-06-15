@@ -63,6 +63,7 @@ import {
   isOutputCheckOk,
   isOutputCheckRenamed,
   isOutputItemCreated,
+  mergeRetriedExport,
   outputDetailStateText,
   outputIssueCount,
   outputListStateText
@@ -2320,6 +2321,68 @@ export default function Page() {
     }
   }
 
+  // 部分失敗からの復旧。成功済みは触らず、失敗したセグメントだけを再出力して結果をマージする。
+  // セグメントと出力items は順序が1:1で対応する（編集すると clearOutputState で exportResult が
+  // 消えるため、exportResult が残っている＝構成不変）。この対応を使い失敗indexだけ再送する。
+  async function runExportFailedOnly(): Promise<void> {
+    if (exportInFlightRef.current) {
+      return;
+    }
+    if (!exportResult || exportResult.summary.failed === 0) {
+      return;
+    }
+    const segments = requestSegments();
+    const baseItems = exportResult.items;
+    // 想定外のズレ（構成変更）は安全側で全再チェックへ誘導し、誤った行を再出力しない。
+    if (segments.length !== baseItems.length) {
+      clearOutputState();
+      setStatus("内容が変わっている可能性があります。再チェックしてください。", "warning");
+      return;
+    }
+    const failedIndices = baseItems
+      .map((item, index) => (item.status === "failed" ? index : -1))
+      .filter((index) => index >= 0);
+    if (!failedIndices.length) {
+      return;
+    }
+    const retrySegments = failedIndices.map((index) => segments[index]);
+
+    exportInFlightRef.current = true;
+    setIsExporting(true);
+    setStatus(`失敗した ${failedIndices.length}件を再出力しています…`);
+    try {
+      const response = await invokeSidecar({
+        command: "export",
+        output_dir: outputDir,
+        segments: retrySegments,
+        affix_defs: affixDefs,
+        seq_digits: seqDigits
+      });
+      if (response.command !== "export" || !("summary" in response) || !("items" in response)) {
+        throw new Error(response.ok ? "再出力に失敗しました。" : sidecarError(response));
+      }
+      const retry = response as SidecarExportResponse;
+      // 再出力した件数と返ってきた件数が合わない（想定外）場合は、誤マージを避けて中断する。
+      if (retry.items.length !== failedIndices.length) {
+        setStatus("再出力の結果が不正です。再チェックしてやり直してください。", "danger");
+        return;
+      }
+      const merged = mergeRetriedExport(exportResult, retry, failedIndices);
+      setExportResult(merged);
+      setPreflightChecks(merged.items);
+      if (merged.summary.failed > 0) {
+        setStatus(`まだ ${merged.summary.failed}件が失敗しています。失敗理由を確認してください。`, "warning");
+      } else {
+        setStatus("失敗分の再出力が完了しました。", "ok");
+      }
+    } catch (error) {
+      setStatus(`再出力エラー: ${String(error)}`, "danger");
+    } finally {
+      exportInFlightRef.current = false;
+      setIsExporting(false);
+    }
+  }
+
   // ステッパーからのステップ移動。出力実行中は移動を止め、編集による「出力済み≠表示内容」のズレを防ぐ。
   function requestStepChange(stepId: StepId): void {
     if (devPreviewEnabled) {
@@ -3412,9 +3475,16 @@ export default function Page() {
               </ul>
             ) : null}
             {exportHasFailure ? (
-              <p className="export-recovery-hint">
-                失敗した行は、出力フォルダ内の既存ファイルを確認・削除してから「再チェック」→「出力実行」で再出力できます。
-              </p>
+              <div className="export-recovery">
+                <button disabled={isExporting} onClick={() => void runExportFailedOnly()} type="button">
+                  <IconLabel icon={Download}>
+                    {isExporting ? "再出力中…" : `失敗した${exportResult.summary.failed}件を再出力`}
+                  </IconLabel>
+                </button>
+                <p className="export-recovery-hint">
+                  成功済みは再出力しません。権限・ロック・空き容量など失敗理由を解消してから押してください。直らない場合は出力先や項目を見直し「再チェック」を。
+                </p>
+              </div>
             ) : exportResult.summary.created > 0 ? (
               <p className="export-recovery-hint">同じ内容をもう一度出力する場合は「再チェック」を押してください。</p>
             ) : null}
