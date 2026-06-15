@@ -33,7 +33,14 @@ const previewFlowModule = loadTsModule(previewFlowPath, (specifier) => {
 });
 
 const { createPreviewCache, createPreviewRequestGate } = previewCacheModule;
-const { loadPagePreview } = previewFlowModule;
+const { loadPagePreview, hasPreviewImageData } = previewFlowModule;
+
+// プレビュー/サムネイル共通の data URL 検証（page_thumbnail 取得側でも使用）。
+assert.equal(hasPreviewImageData("data:image/jpeg;base64,abc"), true);
+assert.equal(hasPreviewImageData("data:image/png;base64,abc"), true);
+assert.equal(hasPreviewImageData("data:image/jpeg;base64,"), false); // 本体なしは不可
+assert.equal(hasPreviewImageData("data:image/gif;base64,abc"), false); // 想定外形式は不可
+assert.equal(hasPreviewImageData(""), false);
 
 function createDeferred() {
   let resolve;
