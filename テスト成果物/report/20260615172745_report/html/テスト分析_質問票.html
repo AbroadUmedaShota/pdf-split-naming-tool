@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>テスト分析質問票</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+<h2>テスト分析 質問票</h2>
+<p>計画第11節 Q1-Q8 を分析観点へ紐付けて引き継ぎ、本分析で新たに顕在化した未確定点を追加した。参照資料に根拠のない組織的・環境的事実は前提化せず質問として残す（捏造回避）。後続のテスト設計・テストケース・実行で前提が必要になる順に優先度を付与する。</p>
+<h3>1. 質問一覧</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>質問ID</th><th>関連テスト観点ID</th><th>関連テストアプローチID</th><th>質問</th><th>回答が必要な理由</th><th>回答者候補</th><th>優先度</th></tr></thead>
+<tbody>
+<tr><td>Q1</td><td>TV057,TV072</td><td>TA011</td><td>リリース可否のサインオフ手順・承認者・合格しきい値（カバレッジ率・許容Fail数・性能の数値目標）は何か</td><td>終了条件の数値基準が未定。性能観点（TV063）を体感確認にとどめるか数値計測へ昇格するかが決まらない。参照資料に組織ルールの定義がない</td><td>PM/リリース判断者</td><td>高</td></tr>
+<tr><td>Q2</td><td>TV058</td><td>TA011</td><td>Rust <code>cargo test</code> の実行環境はどこか。lib.rs のコード確認では <code>#[test]</code> 定義は27件だが、計画/ISS-014記載は13件。最新の正しい本数と実行可否は</td><td>計画第9節の参考値（13件）とコード実体（27件）が乖離。cargo 未実行のため本数・パス状況を確定できない</td><td>ビルド機担当/SRE</td><td>高</td></tr>
+<tr><td>Q3</td><td>TV043-TV050,TV056,TV068,TV069</td><td>TA009</td><td>Playwright の導入有無・設定の所在は。現状 E2E ゼロで、本フローで invoke モック範囲の E2E を新規整備する前提でよいか</td><td>E2E 実行基盤を新規に立てるかどうかでテストケース（コード化）の生成方針が変わる</td><td>建設部/QA部</td><td>高</td></tr>
+<tr><td>Q4</td><td>TV059-TV067,TV071</td><td>TA012,TA013,TA015</td><td>手動受入の実施担当・実機環境（OSバージョン・対象PC幅の実機・1366px実機の割当）は誰がどこで行うか</td><td>実機受入（プレビュー実描画・実機Tauri・幅確認）の実施体制が未定。未実施が緑化されないための実行主体が必要</td><td>QA部/運用担当</td><td>高</td></tr>
+<tr><td>Q5</td><td>TV060,TV061</td><td>TA012</td><td>サンプルPDF・現場PDF・スキャンPDF・日本語パスPDFの実テストデータはどこにあるか。テキスト層あり/なしの両系統が揃うか</td><td>手動受入とスモーク（sample-pdf-smoke.ps1）に必要な入力データの準備状況が不明</td><td>運用担当/上西</td><td>高</td></tr>
+<tr><td>Q6</td><td>TV070,TV071</td><td>TA002,TA013</td><td>OPEN既知課題 ISS-027（リリースビルドでの環境変数オーバーライド無効化）/ ISS-028（残メモ群）のリリース時扱いは（修正/受容/次タスク）</td><td>リリース判断材料。セキュリティ表層観点（TV070/071）の合否基準に影響</td><td>PM/security</td><td>中</td></tr>
+<tr><td>Q7</td><td>TV064</td><td>TA014</td><td>updater 実機検証に必要な旧バージョン配布物（v0.1.1 等）は用意できるか。RELEASE.md は存在確認済み</td><td>TA014（updater一気通し）の実施前提。旧版配布物がないと更新検出→インストール→再起動の一気通しを確認できない</td><td>SRE/リリース担当</td><td>中</td></tr>
+<tr><td>Q8</td><td>TV032,TV067</td><td>TA007,TA015</td><td>DEFERRED課題（ISS-014常駐結合・ISS-020フロント単体テスト空白・ISS-021/029残項目）の本リリーススコープ内/外は</td><td>スコープ確定。フロント純ロジックのテスト空白は R004/R006 に関係し、観点をどこまで自動化するかが決まる</td><td>PM</td><td>中</td></tr>
+<tr><td>Q9</td><td>TV032</td><td>TA007</td><td>分割取り消し時に旧キーから原値を復元する挙動（ISS-003②/ISS-029）はセッション内の意図仕様か。check-segment-state.mjs は意図仕様としてテスト中だが、修正済み値より旧値が優先されるケースの是非はプロダクト判断とされている</td><td>同一セグメントで「修正後の値」と「分割取消で復活した旧値」のどちらが正かが未確定だと、TV032 の期待結果（合否判定点）を設計で固定できない</td><td>PM/建設部</td><td>中</td></tr>
+<tr><td>Q10</td><td>TV054</td><td>TA010</td><td>blank_candidates の白紙閾値 0.985 の妥当性と境界テストの要否（NF-C2 は DEFERRED）。閾値前後の期待挙動（白紙でないものを白紙としない偽陰性側の許容度）は文書化されているか</td><td>閾値境界（TV054）の期待結果が未文書。偽陰性側に倒す設計意図はコードコメントにあるが、許容境界の正式基準がない</td><td>建設部/PM</td><td>低</td></tr>
+<tr><td>Q11</td><td>TV067</td><td>TA015</td><td>分割マーカー（<code>span[role=button]</code> が親 button 内にネストする invalid HTML 構造・ISS-029残項目）はキーボード操作のみ対応済みで構造は将来リファクタとされている。本リリースでアクセシビリティ観点の合否に含めるか</td><td>TV067（アクセシビリティ表層）の合否範囲。invalid HTML を Fail とするか既知制約として受容するかで判定が変わる</td><td>美術部/PM</td><td>低</td></tr>
+</tbody></table></div>
+</body>
+</html>

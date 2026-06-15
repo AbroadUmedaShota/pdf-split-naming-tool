@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>テストコードレビュー</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+<h2>テストコードレビュー結果</h2>
+<h3>1. レビュー対象</h3>
+<ul>
+<li>テストコード: <code>recovery/tests/test_tc_cb_codebase.py</code>（pytest、TC-CB 由来120関数）</li>
+<li>実装報告: <code>テスト成果物/テストコード実装結果.md</code></li>
+<li>未実装一覧: <code>テスト成果物/未実装テストケース_コードベース.md</code></li>
+<li>元テストケース: <code>テスト成果物/テストケース_コードベース.md</code>（TC-CB-001〜144）、<code>テスト成果物/テストケース_質問待ち.md</code>（TC-CB-146〜151）</li>
+<li>対象コード: <code>recovery/pdf_splitter_tool/</code>（domain.py / sidecar.py / state_schema.py / state.py / pdf_service.py / processor.py）</li>
+<li>実行コマンド: <code>cd recovery &amp;&amp; .venv/Scripts/python.exe -m pytest tests/test_tc_cb_codebase.py -q</code></li>
+</ul>
+<h3>2. 参照資料</h3>
+<ul>
+<li>テスト設計 <code>テスト成果物/テスト設計.md</code>（TD001〜072）、テスト分析・テスト計画（TV/TA/R）</li>
+<li>既存 pytest 19ファイル（<code>recovery/tests/</code>）、既存 node 8スクリプト（<code>apps/desktop/scripts/</code>）</li>
+<li>製品ソース（命名・状態保存・検索/白紙・export・契約）</li>
+</ul>
+<h3>3. レビュー観点</h3>
+<p>トレーサビリティ／テストケース網羅／未実装管理／実対象検証（コピーロジックでないこと）／期待値の根拠／アサーション強度／独立性／決定性／テストレベル妥当性／保守性／実行容易性／失敗診断／テストデータ妥当性／結合・脆性／安全性。</p>
+<h3>4. レビュー・修正サマリー</h3>
+<h4>パス1（静的レビュー＋実行）</h4>
+<p>実行結果ベースライン: <code>120 passed</code>（修正前）。全120関数を読み、観点別に精査。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>優先度</th><th>観点</th><th>問題</th><th>場所</th><th>影響</th><th>修正方針</th></tr></thead>
+<tbody>
+<tr><td>P2</td><td>アサーション強度／決定性</td><td>TC-CB-132（blank_candidates 部分結果）が <code>time_budget=0.0</code> で <code>partial</code>/<code>scanned_until</code> の型・非負のみを検証し、TD035 の partial 意味づけを弱く検証していた</td><td>test_tc_cb_132</td><td>budget 超過時の途中打ち切り挙動が実質未検証</td><td>既存 <code>test_blank_candidates_partial_result_when_budget_exceeded</code>（test_iss030_nf.py）と同じ条件分岐パターンに合わせ、partial 時は <code>scanned_until &lt; total</code> かつ候補が走査範囲内、非partial 時は <code>scanned_until == total</code> を検証するよう強化</td></tr>
+<tr><td>P2</td><td>実対象検証／トレーサビリティ正確性</td><td>TC-CB-095 のテスト名・docstring が「stale segment_metadata フィルタ」を検証すると示唆していたが、その挙動は Python sidecar/state_schema に存在せず（フロント segment-state.ts の reconcileSegmentMetadataForPdf＝ISS-003 が担当。node check-segment-state.mjs＝TC-CB-106/107 でカバー）、実テストは正当値の往復保全を検証していた（ラベル不一致）</td><td>test_tc_cb_095</td><td>テストの主張と実検証内容の乖離（誤解を招く）</td><td>テスト名を <code>..._segment_metadata_roundtrips_intact</code> に改め、docstring に「stale フィルタは node 層が担保、Python は往復保全のみ保証」と明記。検証内容（往復保全）は妥当なため維持</td></tr>
+</tbody></table></div>
+<p>判定理由（priority 根拠）:</p>
+<ul>
+<li>上記2件はいずれも実行は通る（runnable）が、依拠前に直すべき項目のため fix-worthy。TC-CB-132 は高リスク挙動の弱アサーション、TC-CB-095 は対象/ラベル不一致で、いずれも本スキルの P2 基準に該当。</li>
+<li>P0/P1 は検出されなかった: テストは実 API（handle_request / build_yoshida_filename_preview / normalize_state_payload / StateManager / PdfService.search_text・blank_candidates）を直接駆動しコピーロジックを検証していない。質問待ち（TC-CB-146〜151）を不正なアサーションへ変換した箇所はなく、未実装一覧へ正しく退避。export/state は実ファイルシステムで検証し、失敗注入は scoped monkeypatch（Path.replace/write_text・PdfProcessor.split_pdf）で行い後始末も pytest 管理下。</li>
+</ul>
+<h4>パス2（修正後 再実行・再レビュー）</h4>
+<p>修正2件を適用後に再実行: <code>120 passed in 2.16s</code>。再レビューで P0/P1/P2 の残存なしを確認。TC-CB-132 は決定不能な実時間依存を踏まえ「プロジェクト既存テストと同等の条件分岐検証」を上限とした（より強い決定的検証はテストシーム未整備のため不可。これは弱化ではなく既存方針との整合）。</p>
+<h3>5. 最終レビュー結果</h3>
+<ul>
+<li>**残 P0: なし／残 P1: なし／残 P2: なし。**</li>
+<li>修正で更新したファイル: <code>recovery/tests/test_tc_cb_codebase.py</code>（TC-CB-132 アサーション強化、TC-CB-095 名称・docstring 是正）。実装報告・未実装一覧は内容に変更なし（件数・対象不変）。</li>
+<li>トレーサビリティ: 全120関数がテスト名に TC-CB-ID を含み、docstring に TC/TD/TV/TA/Risk を保持。</li>
+<li>網羅: TC-CB-001〜144 のうち pytest 120件を実装、node/ps1 区分A 24件＋質問待ち区分B 6件を <code>未実装テストケース_コードベース.md</code> に退避。隠蔽なし。</li>
+<li>安全性: 外部ネットワーク・破壊的 FS 操作・隠れ依存導入なし。全 I/O は pytest <code>tmp_path</code> 内に限定。</li>
+</ul>
+<h3>6. 実行結果</h3>
+<pre><code>cd recovery &amp;&amp; .venv/Scripts/python.exe -m pytest tests/test_tc_cb_codebase.py -q
+→ 120 passed in 2.16s</code></pre>
+<p>最終: 実装120件（全 PASS）／未実装 区分A 24件・区分B 6件。</p>
+<h3>7. 残課題</h3>
+<ul>
+<li>P3（任意・未対応）: 予約名検証（TC-CB-043〜049）で <code>from pdf_splitter_tool.domain import sanitize_filename_with_warnings</code> をファイル中段でインポートしている（先頭集約が望ましい体裁）。動作・トレースに影響なしのため未修整。</li>
+<li>環境前提: 本フェーズで venv に pytest 9.1.0 を導入（pyproject 宣言済みの test extra）。PyMuPDF 導入済みを利用。新規製品依存の追加はなし。</li>
+<li>既存スイートのベースラインに1件の既存失敗（<code>test_desktop_shell_contract.py::test_desktop_tauri_exposes_python_sidecar_bridge</code>）あり。本フェーズ追加分ではなく既存テストの陳腐化。実行フェーズ（execute-codebase-tests）の発見 issue で扱う。</li>
+</ul>
+</body>
+</html>

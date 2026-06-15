@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>テスト設計</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+<h2>テスト設計</h2>
+<p>対象プロダクト: PDF分割命名ツール（apps/desktop の Tauri + Next.js デスクトップアプリ ＋ recovery/pdf_splitter_tool の Python sidecar）</p>
+<p>作成日: セッション内作成</p>
+<p>位置づけ: テスト分析（<code>テスト成果物/テスト分析.md</code>）の観点 TV001-TV075 を「どう検証するか」の設計パターン（TDxxx）へ分解する。詳細手順・クリック単位は記載せず、後続のテストケース生成が機械的に展開できる粒度にとどめる。期待結果は判定観点（合否判定点）として記述する。</p>
+<p>正本仕様: <code>docs/01_要件定義書.md</code></p>
+<h3>1. 設計対象</h3>
+<p>テスト分析の観点 TV001-TV075（75観点）と Source Structure Inventory SSI001-SSI020、テスト計画のリスク R001-R014・アプローチ TA001-TA015・ユースケース UC1-UC10 を入力とする。各観点を設計パターンへ展開し、消費すべき有限集合・境界（命名禁止文字9種・予約名・affix 0-3件・seq 桁数1-9・ページ範囲端・検索上限200・白紙閾値0.985・8秒予算）を設計に可視化する。</p>
+<h4>1.1 実行レーン（設計上のケース種別の振り分け基準）</h4>
+<p>各 TD は1つの主たる実行レーンを持つ。レーンは以下の3区分。後続のテストケースはこのレーン区分に従って <code>テストケース_コードベース.md</code> / <code>テストケース_E2E自動.md</code> / <code>テストケース_人間実行.md</code> へ振り分ける。</p>
+<ul>
+<li>レーン①自動コードベース: <code>pytest</code>（recovery/tests/）・<code>node check-*.mjs</code>（apps/desktop/scripts/）・Rust 単体（cargo・実行可否は Q2）。sidecar 純ロジック・命名パリティ・preflight/export 判定・状態往復/耐障害・page.tsx 純ロジック。<code>テストレベル/タイプ</code> は <code>Unit</code> / <code>Integration</code> / <code>Regression</code>。</li>
+<li>レーン②自動E2E: Playwright（Tauri invoke をモック応答で駆動する範囲）。UI 状態・4工程ナビ・ステッパー誘導・busy/二重実行ガードの可視状態・確認ダイアログ発火・トーン/attention 表示・ハイライト残留などの UI 挙動。実 sidecar・実 PDF レンダリングは扱わない。<code>テストレベル/タイプ</code> は <code>E2E</code>。**Playwright 導入有無は未確定（質問票 DQ03＝分析 Q3）。** E2E レーンの TD は導入前提が確定するまで <code>状態=質問待ち</code> とし、未導入の場合は同等観点を手動受入（探索的 UI 確認）へ退避できるよう判定観点を記述する。</li>
+<li>レーン③人間実行（手動受入）: 実 PDF の実描画・実分割・実出力・既存衝突回避の実フォルダ確認・実機 Tauri 12項目・updater 一気通し・幅確認・スキャン/日本語パス PDF。sidecar 実体・PyMuPDF 依存・OS ダイアログ・実機ビルド依存のため自動化不可。<code>テストレベル/タイプ</code> は <code>Manual</code>。未実施を緑化しない判定観点を記述する。</li>
+</ul>
+<h4>1.2 期待結果が未確定の扱い</h4>
+<p>参照資料で合否判定点が確定できないもの（性能サインオフ基準 Q1／stale 復活のセッション内仕様 Q9／白紙閾値境界の正式許容度 Q10／分割マーカー HTML 構造の合否範囲 Q11／cargo 実行環境・本数 Q2／Playwright 導入 Q3／手動受入実施体制 Q4／実テストデータ Q5／OPEN課題扱い Q6／updater 旧版配布物 Q7／DEFERRED スコープ Q8）は推測で固定せず、該当 TD を <code>状態=質問待ち</code>・該当フィールドを <code>要確認</code> とし、<code>## 4. 質問待ち項目</code> と設計質問票へ相互リンクする。</p>
+<h3>2. 参照資料</h3>
+<ul>
+<li><code>テスト成果物/テスト分析.md</code>（TV001-075・SSI001-020・展開方針・下流分割ヒント・三パス導出）</li>
+<li><code>テスト成果物/テスト分析_質問票.md</code>（Q1-Q11）</li>
+<li><code>テスト成果物/テスト分析レビュー結果.md</code>（P0/P1/P2 残ゼロ・必要十分性要約）</li>
+<li><code>テスト成果物/テスト計画書.md</code>（R001-R014・TA001-TA015・UC1-UC10・後続深さ第10節・未決 Q1-Q8）</li>
+<li><code>docs/01_要件定義書.md</code>（正本・受入条件18項目・命名仕様第8節・状態保存第9節）</li>
+<li><code>docs/05_実装状況.md</code>・<code>docs/issues/issues.md</code>（ISS-001〜030・NF-*・実機確認チェックリスト12項目）</li>
+<li><code>recovery/pdf_splitter_tool/</code>（sidecar.py / domain.py / state_schema.py / pdf_service.py / state.py）</li>
+<li><code>apps/desktop/lib/filename-policy.ts</code>・<code>apps/desktop/scripts/check-*.mjs</code>（8ファイル：check-all 集約＋filename-policy/output-state/preview-cache/restore-state/segment-state/step-layout/step-render）・<code>apps/desktop/src-tauri/src/lib.rs</code></li>
+<li><code>apps/desktop/app/page.tsx</code>・<code>apps/desktop/RELEASE.md</code>（存在確認済み）</li>
+<li><code>recovery/tests/</code>（pytest 19ファイル：sidecar/sidecar_contract/sidecar_serve/state_*/export_*/domain/workflow/output_name_parity/iss030_nf/pdf_service ほか）</li>
+</ul>
+<h3>3. テスト設計</h3>
+<p><code>テストレベル/タイプ</code> でグルーピングする。各グループで同一のトレーサビリティ表ヘッダを繰り返す。</p>
+<h4>3.1 Unit（sidecar コマンド単体・契約）— レーン①</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストパターン</th><th>条件/入力</th><th>実施方法</th><th>期待結果/判定観点</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TD001</td><td>TV001</td><td>TA001</td><td>Unit</td><td>高</td><td>同値分割（正常系・有限リスト全件）</td><td>sidecar 12コマンド各1（pdf_info/page_preview/page_thumbnail/page_text/search_text/search_highlights/index_candidates/blank_candidates/preflight/export/state_load/state_save）を正常リクエストで実行</td><td>pytest（test_sidecar.py / test_sidecar_contract.py）</td><td>各コマンドが ok=true と当該コマンドの必須フィールド（summary/checks/items/page 等）を含む応答を返す。コマンド単位で独立に Pass/Fail</td><td>要件4、sidecar.py、SSI001</td><td>R001,R006</td><td>設計済み</td></tr>
+<tr><td>TD002</td><td>TV002</td><td>TA001</td><td>Unit</td><td>高</td><td>境界値分析（ページ範囲外・4関数）</td><td>page_no = 0 / 1未満（負値） / page_count / page_count+1 を page_preview・page_thumbnail・page_text・search_highlights に与える</td><td>pytest（test_sidecar.py / test_pdf_service.py）</td><td>範囲外（0・負値・page_count+1）で ValueError 系エラー応答、境界内（1・page_count）で正常応答。各境界クラスが別々の判定点</td><td>sidecar.py page_preview ほか、SSI001 境界</td><td>R001</td><td>設計済み</td></tr>
+<tr><td>TD003</td><td>TV003</td><td>TA001</td><td>Unit</td><td>高</td><td>同値分割（型不正・必須欠落）</td><td>pdf_paths が非配列 / state が非dict / JSON が非object / 必須引数欠落 の4種を各々与える</td><td>pytest（test_sidecar_contract.py）</td><td>TypeError 系のエラー応答を返し、プロセスが落ちない。入力種別ごとに別判定（4区分）</td><td>sidecar.py handle_request/search_text/state_save</td><td>R006</td><td>設計済み</td></tr>
+<tr><td>TD004</td><td>TV004</td><td>TA001</td><td>Unit</td><td>中</td><td>異常系（未対応コマンド）</td><td>未定義コマンド名でリクエスト</td><td>pytest（test_sidecar.py）</td><td><code>Unsupported sidecar command</code> エラー応答を返し、プロセスが落ちない</td><td>sidecar.py handle_request 末尾、SSI001</td><td>R006</td><td>設計済み</td></tr>
+<tr><td>TD005</td><td>TV005</td><td>TA001</td><td>Integration</td><td>中</td><td>状態遷移（serve ループ継続性）</td><td>serve（JSON Lines）に 不正1行 / 空行 / envelope 欠落行 を流し、後続に正常リクエスト</td><td>pytest（test_sidecar_serve.py）</td><td>不正行でプロトコル層エラー応答を返し、後続の正常リクエストを処理し続ける（1行不正後の継続性）。不正種別ごとに判定</td><td>sidecar.py serve</td><td>R006</td><td>設計済み</td></tr>
+</tbody></table></div>
+<h4>3.2 Unit（命名ロジック・パリティ）— レーン①</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストパターン</th><th>条件/入力</th><th>実施方法</th><th>期待結果/判定観点</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TD006</td><td>TV006</td><td>TA002</td><td>Unit</td><td>高</td><td>代表値（正常命名）</td><td>box_no=2桁・binder_no=2桁・seq=既定3桁</td><td>pytest（test_domain.py）</td><td><code>{box:0&gt;2}_{binder:0&gt;2}_{seq:0&gt;3}.pdf</code> 形式で生成される</td><td>要件8、domain.py</td><td>R002</td><td>設計済み</td></tr>
+<tr><td>TD007</td><td>TV007</td><td>TA002</td><td>Unit</td><td>高</td><td>境界値分析（seq 桁数・SSI004 全件）</td><td>seq 桁数設定 = 直前0 / 最小1 / 既定3 / 最大9 / 最大超10</td><td>pytest（test_domain.py）</td><td>範囲内（1/3/9）は当該桁でゼロ埋め、範囲外（0/10）・非数値は拒否または既定にクランプ。境界クラスごとに別判定（5区分）</td><td>domain.py MIN/MAX_SEQ_DIGITS、SSI004</td><td>R002</td><td>設計済み</td></tr>
+<tr><td>TD008</td><td>TV008</td><td>TA002</td><td>Unit</td><td>高</td><td>境界値＋異常系（空白・空）</td><td><code>&quot; 1&quot;</code>（前後空白）/ <code>&quot;&quot;</code>（空文字）/ <code>&quot;   &quot;</code>（空白のみ） を box_no/binder_no/seq に与える</td><td>pytest（test_domain.py）</td><td>前後空白は strip 後ゼロ埋め（<code>&quot; 1&quot;</code>→<code>01</code>）、全空・空白のみは missingMetadata 扱い。空白strip と全空missing を別判定</td><td>ISS-007、domain.py</td><td>R002</td><td>設計済み</td></tr>
+<tr><td>TD009</td><td>TV009</td><td>TA002</td><td>Unit</td><td>高</td><td>異常系（禁止文字・SSI006 全件）</td><td>禁止文字9種 `&lt; &gt; : &quot; / \</td><td>? *` を各々命名値に含める</td><td>pytest（test_domain.py）</td><td>各禁止文字が <code>_</code> に正規化される。文字種ごとに判定（9文字を下流ケース分割単位とする）</td><td>要件8、domain.py INVALID_FILENAME_CHARS、SSI006</td><td>R002</td><td>設計済み</td></tr>
+<tr><td>TD010</td><td>TV010</td><td>TA002</td><td>Unit</td><td>高</td><td>異常系（予約名・SSI006 全件）</td><td>予約名ステム CON/PRN/AUX/NUL/COM1-9/LPT1-9（代表＋境界）と、正規化後に空になる入力</td><td>pytest（test_domain.py）</td><td>予約名は <code>_</code> プレフィックスで正規化、正規化後に空になる場合は <code>output.pdf</code>。予約名群（CON/PRN/AUX/NUL／COM1/COM9／LPT1/LPT9 の代表＋数値境界）と「正規化後空→既定名」を別判定</td><td>要件8、domain.py WINDOWS_RESERVED_STEMS、SSI006</td><td>R002</td><td>設計済み</td></tr>
+<tr><td>TD011</td><td>TV011</td><td>TA002</td><td>Unit</td><td>高</td><td>同値分割（affix 配置・SSI005 全件）</td><td>prefix単独 / suffix単独 / prefix+suffix両方 / 空値混在 / 同位置2件（定義順）</td><td>pytest（test_domain.py）</td><td>固定3項目の前/後ろへ <code>_</code> 区切りで挿入、同位置複数は定義順、空値（key/label空）は除外。配置パターンごとに別判定（5区分）</td><td>要件8、domain.py、SSI005</td><td>R002,R012</td><td>設計済み</td></tr>
+<tr><td>TD012</td><td>TV012</td><td>TA002</td><td>Unit</td><td>高</td><td>境界値分析（affix 件数・SSI005 境界）</td><td>affix 0件 / 1件 / 2件 / 3件目（MAX_AFFIX_COUNT=2 で切り詰め）</td><td>pytest（test_domain.py）</td><td>0件は従来 <code>01_02_003.pdf</code>（後方互換）、1/2件は挿入、3件目は切り詰め。件数ごとに別判定（4区分）</td><td>要件8、domain.py MAX_AFFIX_COUNT、SSI005</td><td>R002</td><td>設計済み</td></tr>
+<tr><td>TD013</td><td>TV013</td><td>TA003</td><td>Unit</td><td>高</td><td>計算（FE/BE パリティ・双方向）</td><td>同一入力（正常・空白・禁止/予約文字・affix）をフロント previewFilename と Python build_yoshida_filename_preview に与える</td><td>pytest（test_output_name_parity.py）＋ node（check-filename-policy.mjs）</td><td>双方が同一ファイル名を生成（パリティ）。pytest 側と node 側の両方で判定</td><td>ISS-007、test_output_name_parity.py、check-filename-policy.mjs</td><td>R002</td><td>設計済み</td></tr>
+<tr><td>TD014</td><td>TV014</td><td>TA003</td><td>Unit</td><td>高</td><td>計算（三者一致・SSI005）</td><td>affix 正規化を domain（2件切り詰め）/ state_schema（MAX_AFFIX_COUNT 切り詰め）/ フロント（MAX_AFFIX_COUNT）で突合</td><td>pytest（test_iss030_nf.py）</td><td>三者の affix 正規化結果が一致し、NF-D1 の state 経由でプレビュー≠出力が再発しない</td><td>ISS-030 NF-D1、state_schema.py、SSI005</td><td>R002</td><td>設計済み</td></tr>
+<tr><td>TD015</td><td>TV015</td><td>TA003</td><td>Integration</td><td>高</td><td>状態遷移（state 経由命名一致）</td><td>affix/予約名/空白を含む state を state_save→state_load 往復し、復元後プレビュー名と実出力名を突合</td><td>pytest（test_iss030_nf.py / test_output_name_parity.py）</td><td>往復後にプレビュー名と実出力名が一致する。state 経由でのみ出る不一致を検出</td><td>ISS-030 NF-D1、state_schema.py</td><td>R002,R004</td><td>設計済み</td></tr>
+</tbody></table></div>
+<h4>3.3 Unit / Integration（preflight・export 判定）— レーン①</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストパターン</th><th>条件/入力</th><th>実施方法</th><th>期待結果/判定観点</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TD016</td><td>TV016</td><td>TA004</td><td>Unit</td><td>高</td><td>デシジョンテーブル（preflight 判定・SSI007）</td><td>出力先未指定 / セグメントなし</td><td>pytest（test_export_policy.py / test_workflow.py）</td><td>出力先未指定で missing_output_dir、セグメントなしで no_segments を返し can_run=false。分岐ごとに別判定</td><td>要件7.4、sidecar.py preflight、SSI007</td><td>R006</td><td>設計済み</td></tr>
+<tr><td>TD017</td><td>TV017</td><td>TA004</td><td>Unit</td><td>高</td><td>境界値分析（既存衝突一意名）</td><td>出力先に同名既存ファイル 0件 / 1件 / 2件</td><td>pytest（test_export_edge_cases.py）</td><td>既存0件は元名、1件で <code>_2</code>、2件で <code>_3</code> を採番し既存を上書きしない。既存件数ごとに別判定</td><td>要件10安全性・受入11、sidecar.py export、SSI007</td><td>R003</td><td>設計済み</td></tr>
+<tr><td>TD018</td><td>TV018</td><td>TA004</td><td>Unit</td><td>高</td><td>異常系（preflight 不合格ブロック）</td><td>preflight 不合格セグメントを含む export</td><td>pytest（test_export_policy.py）</td><td>preflight_blocked/preflight_failed で全件 failed、1ファイルも生成しない</td><td>sidecar.py export invalid_checks、SSI007</td><td>R006</td><td>設計済み</td></tr>
+<tr><td>TD019</td><td>TV019</td><td>TA004</td><td>Integration</td><td>高</td><td>異常系（部分失敗 summary・SSI007）</td><td>export 中の個別失敗（出力パス欠落 / split_pdf 例外＝ソース削除/ロック）を 全成功 / 部分失敗 / 全失敗 で発生させる</td><td>pytest（test_export_service.py / test_export_edge_cases.py）</td><td>全成功は ok=true、部分失敗（created&gt;0 かつ failed&gt;0）は export_incomplete で ok=false、全失敗は ok=false。3区分で messages・ok の差分を判定</td><td>ISS-008/025、sidecar.py export、SSI007</td><td>R006</td><td>設計済み</td></tr>
+<tr><td>TD020</td><td>TV020</td><td>TA004</td><td>Unit</td><td>中</td><td>観測性（sha256・確定パス）</td><td>export 成功ファイルの items を検査</td><td>pytest（test_export_service.py）</td><td>成功ファイルの sha256 が算出され、items に確定 output_path が反映される</td><td>sidecar.py export</td><td>R003</td><td>設計済み</td></tr>
+</tbody></table></div>
+<h4>3.4 Unit / Integration（状態保存・復元・スキーマ）— レーン①</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストパターン</th><th>条件/入力</th><th>実施方法</th><th>期待結果/判定観点</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TD021</td><td>TV021</td><td>TA005</td><td>Integration</td><td>高</td><td>状態遷移（8フィールド往復・SSI008 全件）</td><td>主要8フィールド（input_paths/output_dir/split_points_by_pdf/common_metadata/segment_metadata/affix_defs/current_pdf/current_page）を保存→復元</td><td>pytest（test_state_recovery.py / test_state_schema.py）</td><td>各フィールドが往復で値保持される。フィールド単位で往復判定（8区分を下流ケース分割単位とする）</td><td>要件9、state_schema.py、SSI008</td><td>R004</td><td>設計済み</td></tr>
+<tr><td>TD022</td><td>TV022</td><td>TA005</td><td>Unit</td><td>高</td><td>異常系（スキーマ検証）</td><td>型不整合 / 壊れた命名値 / 不正 position を含む state</td><td>pytest（test_state_schema.py）</td><td>normalize_state_payload が不正値を復元結果へ混入させない。不正種別ごとに別判定</td><td>要件9保存方針、state_schema.py</td><td>R004</td><td>設計済み</td></tr>
+<tr><td>TD023</td><td>TV023</td><td>TA005</td><td>Integration</td><td>高</td><td>異常系（部分復元・欠損列挙）</td><td>一部 input_paths が欠損（移動/削除）した state</td><td>pytest（test_state_recovery.py）</td><td>missing_input_paths が欠損分を列挙し、残りは復元される（all-or-nothing にしない）</td><td>ISS-005、state_load missing_input_paths</td><td>R004</td><td>設計済み</td></tr>
+<tr><td>TD024</td><td>TV024</td><td>TA005</td><td>Unit</td><td>中</td><td>境界値分析（current_page クランプ）</td><td>current_page = 復元先 PDF のページ数内 / ちょうど / 超過</td><td>pytest（test_state_recovery.py / test_state_compat.py）</td><td>範囲外でクランプされ復元エラーにしない。境界クラスごとに別判定（3区分）</td><td>ISS-005、page.tsx 復元</td><td>R004</td><td>設計済み</td></tr>
+<tr><td>TD025</td><td>TV025</td><td>TA005</td><td>Unit</td><td>高</td><td>状態遷移（stale フィルタ）</td><td>現行セグメントキー集合外の segment_metadata を含む state を保存</td><td>pytest（test_state_schema.py）</td><td>現行キー外の segment_metadata がフィルタされ、stale 値が永続化されない</td><td>ISS-003、state_schema.py</td><td>R004</td><td>設計済み</td></tr>
+</tbody></table></div>
+<h4>3.5 Unit / Integration（状態ファイル耐障害）— レーン①</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストパターン</th><th>条件/入力</th><th>実施方法</th><th>期待結果/判定観点</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TD026</td><td>TV026</td><td>TA006</td><td>Integration</td><td>高</td><td>異常系/回復（破損退避・SSI009）</td><td>破損した state ファイル＋読込可能な tmp/bak</td><td>pytest（test_state_recovery_failures.py）</td><td>破損 state が <code>.corrupt</code> で退避され、tmp/bak から復元される</td><td>ISS-011、state.py、SSI009</td><td>R005</td><td>設計済み</td></tr>
+<tr><td>TD027</td><td>TV027</td><td>TA006</td><td>Integration</td><td>高</td><td>状態遷移（tmp 優先・mtime 比較）</td><td>tmp→state コミット窓でのクラッシュ後、検証済み tmp と bak が併存</td><td>pytest（test_state_recovery_failures.py）</td><td>検証済み tmp が bak より mtime 優先で復元される（bak が最新tmpを差し置いて昇格しない）</td><td>ISS-011、state.py load優先順位、SSI009</td><td>R005</td><td>設計済み</td></tr>
+<tr><td>TD028</td><td>TV028</td><td>TA006</td><td>Integration</td><td>高</td><td>並行（多重起動 pid 衝突）</td><td>多重起動で複数インスタンスが pid 付き tmp を書く</td><td>pytest（test_state_recovery_failures.py）</td><td>pid 付き tmp で write-write レースを避け、別インスタンスの状態を誤報告しない</td><td>ISS-011、state.py pid付きtmp、SSI009</td><td>R005</td><td>設計済み</td></tr>
+<tr><td>TD029</td><td>TV029</td><td>TA006</td><td>Integration</td><td>高</td><td>状態遷移（残骸昇格防止）</td><td>コミット済み state より古い他プロセス残骸 tmp、bak 不在</td><td>pytest（test_state_recovery_failures.py）</td><td>古い残骸 tmp が掃除され、bak 不在時に古い残骸が最終手段昇格しない</td><td>ISS-023、state.py 残骸掃除、SSI009</td><td>R005</td><td>設計済み</td></tr>
+<tr><td>TD030</td><td>TV030</td><td>TA006</td><td>Integration</td><td>高</td><td>異常系（保存失敗の破損耐性）</td><td>保存処理が途中失敗（書込不可・容量不足相当）</td><td>pytest（test_state_recovery_failures.py）</td><td>保存失敗時に既存の state/bak を壊さない</td><td>要件9保存方針、state.py</td><td>R005</td><td>設計済み</td></tr>
+</tbody></table></div>
+<h4>3.6 Unit（page.tsx 由来純ロジック・nodeロジック検査）— レーン①</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストパターン</th><th>条件/入力</th><th>実施方法</th><th>期待結果/判定観点</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TD031</td><td>TV031</td><td>TA007</td><td>Unit</td><td>高</td><td>計算（segmentKey/buildSegments）</td><td>分割点集合から segmentKey・buildSegments を算出</td><td>node（check-segment-state.mjs）</td><td>分割点から正しいセグメント集合・キーが生成される</td><td>ISS-003、check-segment-state.mjs</td><td>R004,R011</td><td>設計済み</td></tr>
+<tr><td>TD032</td><td>TV032</td><td>TA007</td><td>Unit</td><td>高</td><td>状態遷移（分割取消・stale 復活）</td><td>分割点変更で現行キー外メタデータ削除、分割取り消しで旧キー復元経路を発火</td><td>node（check-segment-state.mjs）</td><td>現行キー外の segmentMetadata が削除され、保存時フィルタで世代越え stale が遮断される。**分割取消で旧値が復活する経路の合否判定点は要確認（DQ09）**</td><td>ISS-003/029、check-segment-state.mjs</td><td>R004,R011</td><td>質問待ち</td></tr>
+<tr><td>TD033</td><td>TV033</td><td>TA007</td><td>Unit</td><td>中</td><td>状態遷移（再採番）</td><td>resequenceSegmentMetadata を 手動入力済み連番あり / なし で実行</td><td>node（check-segment-state.mjs）</td><td>連番が採番し直され、手動入力済み連番の扱いが意図どおり。手動あり/なしで別判定</td><td>ISS-010、check-segment-state.mjs</td><td>R012</td><td>設計済み</td></tr>
+<tr><td>TD034</td><td>TV034</td><td>TA007</td><td>Unit</td><td>高</td><td>状態遷移（プレビューキャッシュ）</td><td>LRU・<code>パス#ページ</code>キー・リクエストゲート・世代越え旧応答</td><td>node（check-preview-cache.mjs）</td><td>世代越えの古い応答を破棄し、LRU と stale 検出が機能する</td><td>ISS-006、check-preview-cache.mjs</td><td>R006</td><td>設計済み</td></tr>
+<tr><td>TD035</td><td>TV035</td><td>TA007</td><td>Unit</td><td>中</td><td>状態遷移（restore-state）</td><td>restorableInputPaths/missingPdfStatus を 全存在 / 一部欠損 / 全欠損 で実行</td><td>node（check-restore-state.mjs）</td><td>欠損 PDF を判定し復元可能分を抽出する。存在状況ごとに別判定</td><td>ISS-005、check-restore-state.mjs</td><td>R004</td><td>設計済み</td></tr>
+<tr><td>TD036</td><td>TV036</td><td>TA007</td><td>Unit</td><td>中</td><td>計算（output-state）</td><td>isOutputCheckOk/outputIssueCount/mergeRetriedExport を 正常 / issue あり / 再出力マージ で実行</td><td>node（check-output-state.mjs）</td><td>出力状態遷移と再出力マージを正しく判定する。状態ごとに別判定</td><td>ISS-008、check-output-state.mjs</td><td>R006</td><td>設計済み</td></tr>
+<tr><td>TD037</td><td>TV037</td><td>TA007</td><td>Unit</td><td>高</td><td>状態遷移（step 判定・SSI002）</td><td>取込条件（PDF1件以上＋出力先指定）の充足/未充足を含む各ステップ完了・遷移条件</td><td>node（check-step-render.mjs / check-step-layout.mjs）</td><td>各ステップ完了・次へ進む条件が正しく遷移する。ステップ別＋遷移境界で別判定</td><td>要件6/7.1、check-step-render/step-layout.mjs、SSI002</td><td>R014</td><td>設計済み</td></tr>
+</tbody></table></div>
+<h4>3.7 Unit（検索・候補・白紙 sidecar 単体・契約）— レーン①</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストパターン</th><th>条件/入力</th><th>実施方法</th><th>期待結果/判定観点</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TD051</td><td>TV051</td><td>TA010</td><td>Unit</td><td>中</td><td>同値分割（複数用語1パス・スコープ）</td><td>search_text に 単一用語 / 複数用語（queries）、scope=current_pdf</td><td>pytest（test_pdf_service.py / test_iss030_nf.py）</td><td>複数用語を1パス走査し、現在PDF固定で結果を返す。単一/複数で別判定</td><td>ISS-030 NF-B1、pdf_service.py search_text、SSI011</td><td>R010</td><td>設計済み</td></tr>
+<tr><td>TD052</td><td>TV052</td><td>TA010</td><td>Unit</td><td>中</td><td>境界値分析（検索上限200・SSI011）</td><td>検索ヒット数 0件 / 1件 / 200件ちょうど / 201件</td><td>pytest（test_pdf_service.py / test_iss030_nf.py）</td><td>上限200で truncated=true、上限内は truncated=false。件数境界ごとに別判定（4区分）</td><td>ISS-030 NF-B3、pdf_service.py SEARCH_TEXT_MAX_RESULTS、SSI011</td><td>R010</td><td>設計済み</td></tr>
+<tr><td>TD053</td><td>TV053</td><td>TA010</td><td>Unit</td><td>中</td><td>境界値分析（白紙8秒予算・SSI010）</td><td>blank_candidates を 予算内完了 / 予算超過（partial=true）/ start_page 継続 で実行</td><td>pytest（test_pdf_service.py / test_iss030_nf.py）</td><td>8秒予算で打ち切り partial=true・scanned_until を返し、start_page で継続取得できる。予算内/予算超/継続で別判定</td><td>ISS-030 NF-C1、pdf_service.py BLANK_CANDIDATES_TIME_BUDGET_SECONDS、SSI010</td><td>R010</td><td>設計済み</td></tr>
+<tr><td>TD054</td><td>TV054</td><td>TA010</td><td>Unit</td><td>低</td><td>境界値分析（白紙閾値0.985）</td><td>輝度98.5%前後（閾値直前/閾値/閾値直後）の合成入力</td><td>pytest（test_pdf_service.py）</td><td>閾値0.985 前後で偽陰性側（白紙でないものを白紙としない）に倒れる。**許容境界の正式基準は要確認（DQ10・NF-C2 DEFERRED）**</td><td>ISS-030 NF-C2、pdf_service.py threshold</td><td>R010</td><td>質問待ち</td></tr>
+</tbody></table></div>
+<h4>3.8 Unit / Regression（既存回帰資産・観測性）— レーン①</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストパターン</th><th>条件/入力</th><th>実施方法</th><th>期待結果/判定観点</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TD057</td><td>TV057</td><td>TA011</td><td>Regression</td><td>高</td><td>回帰（既存資産存在・全件パス・SSI017）</td><td>pytest 19ファイル / check-all 6検査＋step-render/step-layout / verify.ps1 / sample-pdf-smoke.ps1 の存在と実行</td><td>pytest 一括・<code>npm run test:desktop</code>・verify.ps1</td><td>各資産が存在し全件パスする。資産単位で存在・実行結果を別判定</td><td>docs/05検証コマンド、scripts/verify.ps1、SSI017</td><td>R001,R003,R004,R014</td><td>設計済み</td></tr>
+<tr><td>TD058</td><td>TV058</td><td>TA011</td><td>Regression</td><td>中</td><td>回帰（Rust 単体 cargo）</td><td>lib.rs の <code>#[test]</code>（コード確認27件）を cargo test 実行</td><td>cargo test（ビルド機・**実行環境/本数は要確認 DQ02**）</td><td>cargo 実行で全件パス、または未実行なら残リスクとして記録。本数27件の確定を含む</td><td>ISS-014、lib.rs、SSI017</td><td>R014</td><td>質問待ち</td></tr>
+<tr><td>TD072</td><td>TV072</td><td>TA011</td><td>Integration</td><td>中</td><td>観測性（結果可視化の証跡）</td><td>部分失敗の失敗ファイル列挙・missing_input_paths・出力ログ・チェック結果を発生させる</td><td>pytest（test_export_service.py / test_state_recovery.py）</td><td>失敗ファイル列挙・missing_input_paths・出力ログが応答に証跡として残る</td><td>ISS-008、要件7.4、sidecar.py、SSI019</td><td>R006,R014</td><td>設計済み</td></tr>
+</tbody></table></div>
+<h4>3.9 Unit（sidecar エラー応答ガード・契約）— レーン①</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストパターン</th><th>条件/入力</th><th>実施方法</th><th>期待結果/判定観点</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TD047a</td><td>TV047</td><td>TA009</td><td>Unit</td><td>高</td><td>契約（エラー応答形状・SSI019）</td><td>sidecar エラー応答 <code>{ok:false, command, error, error_type}</code>（summary/checks/items 欠落）</td><td>pytest（test_sidecar_contract.py）</td><td>エラー応答が必須フィールド欠落形状で返る。正常応答/エラー応答/欠落応答で別判定（フロント型ガードの入力前提を契約側で固定）</td><td>ISS-025、sidecar.py _error_response、SSI019</td><td>R006</td><td>設計済み</td></tr>
+</tbody></table></div>
+<p>&gt; 注: TV047 はフロント型ガード側の UI 非クラッシュ確認（TD047b・レーン②）と sidecar 契約側のエラー応答形状確認（TD047a・レーン①）に分割した。実行レーンが異なるため分離する。</p>
+<h4>3.10 E2E（Playwright・Tauri invoke モック）— レーン②</h4>
+<p>&gt; 本グループは Playwright 導入が前提（DQ03＝分析 Q3 未確定）。導入が確定するまで全行 <code>状態=質問待ち</code>。未導入確定の場合は同等観点を 3.12 手動受入の探索的 UI 確認へ退避する（判定観点は同一）。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストパターン</th><th>条件/入力</th><th>実施方法</th><th>期待結果/判定観点</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TD043</td><td>TV043</td><td>TA009</td><td>E2E</td><td>高</td><td>状態遷移（busy 可視ガード）</td><td>sidecar 実行中を invoke モックで再現</td><td>Playwright（invoke モック）／未導入時は手動</td><td>実行中は関連ボタンが無効化され処理中表示になる</td><td>ISS-001、page.tsx busy、SSI012</td><td>R006,R007</td><td>質問待ち</td></tr>
+<tr><td>TD044</td><td>TV044</td><td>TA009</td><td>E2E</td><td>高</td><td>状態遷移（export 後再チェック必須）</td><td>export 完了後に再出力を試行</td><td>Playwright（invoke モック）／未導入時は手動</td><td>export 後に preflight 結果がクリアされ canExport=false、再チェックなしで再出力できない</td><td>ISS-001、page.tsx</td><td>R006</td><td>質問待ち</td></tr>
+<tr><td>TD045</td><td>TV045</td><td>TA009</td><td>E2E</td><td>高</td><td>状態遷移（旧応答破棄・世代カウンタ）</td><td>応答待ち中に編集（分割/メタ入力/再採番/出力先変更）→旧応答到着</td><td>Playwright（invoke モック）／未導入時は手動</td><td>旧応答が破棄され「再チェックしてください」warning が出る。未チェックで canExport=true にならない</td><td>ISS-024、page.tsx 世代カウンタ</td><td>R006,R007</td><td>質問待ち</td></tr>
+<tr><td>TD046</td><td>TV046</td><td>TA009</td><td>E2E</td><td>高</td><td>異常系（部分失敗 attention 表示）</td><td>部分失敗 summary をモック応答で返す</td><td>Playwright（invoke モック）／未導入時は手動</td><td>attention 表示・警告トーンになり失敗ファイルが列挙され、緑バッジ化しない</td><td>ISS-008、page.tsx stepState</td><td>R006</td><td>質問待ち</td></tr>
+<tr><td>TD047b</td><td>TV047</td><td>TA009</td><td>E2E</td><td>高</td><td>異常系（型ガード非クラッシュ）</td><td>summary/checks 欠落のエラー応答をモックで返す</td><td>Playwright（invoke モック）／未導入時は手動</td><td>フロント型ガードが弾き、レンダリングがクラッシュしない</td><td>ISS-025、page.tsx runPreflight/runExport ガード、SSI019</td><td>R006</td><td>質問待ち</td></tr>
+<tr><td>TD048</td><td>TV048</td><td>TA009</td><td>E2E</td><td>中</td><td>状態遷移（確認ダイアログ発火）</td><td>全クリア / PDF除外 / 再採番 / 作業中データあり復元 を実行</td><td>Playwright（invoke モック）／未導入時は手動</td><td>入力済みデータが消える各経路で確認ダイアログが出る。経路ごとに別判定（4区分）</td><td>ISS-009/010、page.tsx</td><td>R004</td><td>質問待ち</td></tr>
+<tr><td>TD049</td><td>TV049</td><td>TA009</td><td>E2E</td><td>高</td><td>状態遷移（ハイライト残留・NF-U5）</td><td>検索ハイライト表示中にページ移動</td><td>Playwright（invoke モック）／未導入時は手動</td><td>ページ移動後に前ページの検索ハイライトが残らない（別ページ誤分割誘発なし）</td><td>ISS-030 NF-U5、page.tsx</td><td>R011</td><td>質問待ち</td></tr>
+<tr><td>TD050</td><td>TV050</td><td>TA009</td><td>E2E</td><td>中</td><td>ナビゲーション（ステッパー誘導・SSI002）</td><td>未完了ステップへの直行 / 空状態</td><td>Playwright（invoke モック）／未導入時は手動</td><td>未完了ステップへの直行抑止・空状態の不足項目提示が機能する</td><td>ISS-015、要件6、SSI002</td><td>R014</td><td>質問待ち</td></tr>
+<tr><td>TD056</td><td>TV056</td><td>TA010</td><td>E2E</td><td>中</td><td>状態遷移（検索系ガード・PDF切替）</td><td>search_text/index_candidates/blank_candidates に request gate・連打・PDF切替</td><td>Playwright（invoke モック）／未導入時は手動</td><td>各関数に request gate・実行中表示・連打ガードがあり、PDF切替で旧結果が残らない。3関数を別判定</td><td>ISS-030 NF-B2/U4/U6/U12、page.tsx、SSI012</td><td>R010,R011</td><td>質問待ち</td></tr>
+<tr><td>TD068</td><td>TV068</td><td>TA009</td><td>E2E</td><td>中</td><td>状態遷移（連番空欄・NF-U16）</td><td>連番を空に→再採番</td><td>Playwright（invoke モック）／未導入時は手動</td><td>連番を空にしても手動扱いで固定されず、再採番で再び埋まる</td><td>ISS-030 NF-U16、page.tsx</td><td>R012</td><td>質問待ち</td></tr>
+<tr><td>TD069</td><td>TV069</td><td>TA009</td><td>E2E</td><td>中</td><td>状態遷移（affix 削除再追加・NF-U14）</td><td>追加項目を削除→再追加</td><td>Playwright（invoke モック）／未導入時は手動</td><td>削除→再追加しても旧入力値が全セグメントに復活しない（誤命名出力なし）</td><td>ISS-030 NF-U14、page.tsx</td><td>R012</td><td>質問待ち</td></tr>
+</tbody></table></div>
+<h4>3.11 Security（命名正規化セキュリティ表層）— レーン①</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストパターン</th><th>条件/入力</th><th>実施方法</th><th>期待結果/判定観点</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TD070</td><td>TV070</td><td>TA002</td><td>Security</td><td>高</td><td>セキュリティ表層（パストラバーサル相当）</td><td>命名値にパストラバーサル相当文字 <code>/</code> <code>\</code> <code>:</code> を含める</td><td>pytest（test_domain.py）</td><td>禁止文字/予約名正規化により <code>/</code> <code>\</code> <code>:</code> がファイル名へ混入しても出力先外へ書き込めない。文字種ごとに判定</td><td>要件8、domain.py、ISS-019</td><td>R002,R003</td><td>設計済み</td></tr>
+</tbody></table></div>
+<h4>3.12 Manual（人間実行・手動受入）— レーン③</h4>
+<p>&gt; sidecar 実体・実 PDF・実機 Tauri・updater・実機幅を伴う。自動化不可。未実施は「未実施」として記録し緑化しない。実施担当・実機環境（DQ04）・実テストデータ（DQ05）の確定が実行前提。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストパターン</th><th>条件/入力</th><th>実施方法</th><th>期待結果/判定観点</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TD038</td><td>TV038</td><td>TA008</td><td>Manual</td><td>高</td><td>シナリオ（UC1 中核通し）</td><td>実 PDF 1件を取込→分割→命名→上書きせず出力</td><td>手動受入（実機・実 PDF・**実データ DQ05/体制 DQ04 要確認**）</td><td>通しで出力でき、画面の出力名と実ファイル名が一致する。プレビュー全滅バグの直接経路を実描画で確認</td><td>要件5-8・受入1-4/9/11-12、page.tsx</td><td>R001,R002,R003</td><td>質問待ち</td></tr>
+<tr><td>TD039</td><td>TV039</td><td>TA008</td><td>Manual</td><td>高</td><td>シナリオ（UC2 複数PDF一括）</td><td>複数 PDF を取込み、PDF 単位で分割・命名し一括出力</td><td>手動受入（実機・実 PDF・**DQ04/05 要確認**）</td><td>複数 PDF を PDF 単位で分割・命名し一括出力でき、検索/分割が現在PDF固定</td><td>受入1/6/12、要件7.2</td><td>R002,R003,R006</td><td>質問待ち</td></tr>
+<tr><td>TD040</td><td>TV040</td><td>TA008</td><td>Manual</td><td>高</td><td>シナリオ（UC8 出力前停止）</td><td>必須未入力 / 出力先未指定 / 対象なし で出力試行</td><td>手動受入（実機）／補助: TD016 で判定ロジック自動確認</td><td>出力前に検出して止める。3条件で別判定</td><td>受入10、要件7.4</td><td>R006</td><td>質問待ち</td></tr>
+<tr><td>TD041</td><td>TV041</td><td>TA008</td><td>Manual</td><td>高</td><td>シナリオ（UC4 中断・再開）</td><td>作業状態を保存→アプリ再起動→復元（activeStep 含む）</td><td>手動受入（実機 relaunch）／補助: TD021 で往復ロジック自動確認</td><td>再起動後に復元して継続でき activeStep も復元される</td><td>受入13、ISS-009</td><td>R004,R005</td><td>質問待ち</td></tr>
+<tr><td>TD042</td><td>TV042</td><td>TA008</td><td>Manual</td><td>中</td><td>シナリオ（UC5 一部PDF欠損復元）</td><td>保存後に PDF を移動/削除→復元</td><td>手動受入（実機）／補助: TD023/TD035 で欠損列挙自動確認</td><td>残りを復元し欠損を把握できる</td><td>受入13、ISS-005/022</td><td>R004</td><td>質問待ち</td></tr>
+<tr><td>TD073</td><td>TV073</td><td>TA008</td><td>Manual</td><td>高</td><td>シナリオ（UC3 既存衝突）</td><td>出力先に同名既存がある実フォルダへ出力</td><td>手動受入（実フォルダ衝突）／補助: TD017 で採番ロジック自動確認</td><td>上書きせず一意名で出力でき、確定出力名（<code>_2</code> 等）が画面に併記される</td><td>受入11、ISS-016</td><td>R003</td><td>質問待ち</td></tr>
+<tr><td>TD074</td><td>TV074</td><td>TA008</td><td>Manual</td><td>中</td><td>シナリオ（UC7 追加項目命名通し）</td><td>箱/バインダー/連番＋追加項目を先頭/末尾へ挿入し通し出力</td><td>手動受入（実機）／補助: TD011/TD012 で命名ロジック自動確認</td><td>追加項目つき出力名を通しで作れる</td><td>受入7-9、要件8</td><td>R002,R012</td><td>質問待ち</td></tr>
+<tr><td>TD075</td><td>TV075</td><td>TA010</td><td>Manual</td><td>中</td><td>シナリオ（UC6 検索支援分割）</td><td>テキスト層ありPDFで検索→該当ページ移動→ハイライト/候補/白紙確認→手動分割</td><td>手動受入（実機・テキスト層ありPDF・**DQ05 要確認**）</td><td>検索結果クリックで該当ページへ移動、ハイライト・候補・白紙を確認し手動で分割位置を決められる（自動分割しない）</td><td>受入16-17、要件7.2</td><td>R010,R011</td><td>質問待ち</td></tr>
+<tr><td>TD055</td><td>TV055</td><td>TA010</td><td>Manual</td><td>中</td><td>異常系（スキャンPDF案内文言）</td><td>テキスト層なし/スキャン PDF で検索・候補・白紙を実行</td><td>手動受入（スキャンPDF・**DQ05 要確認**）</td><td>無音失敗せず、検索不能 vs 0件・候補未実行 vs 0件の区別の案内文言が出る</td><td>ISS-030 NF-U7/U8/U9/U10、page.tsx</td><td>R010</td><td>質問待ち</td></tr>
+<tr><td>TD059</td><td>TV059</td><td>TA012</td><td>Manual</td><td>高</td><td>互換性（実描画 PNG/JPEG）</td><td>実 PDF を各 STEP2 で表示</td><td>手動受入（実機・実 PDF）／補助: sample-pdf-smoke.ps1 でレンダリング経路機械確認</td><td>各 STEP2 で1ページ以上が実際に表示される（data:URL の実視認）。プレビュー全滅バグの直接経路</td><td>R001 根拠、要件7.2、ISS-013</td><td>R001</td><td>質問待ち</td></tr>
+<tr><td>TD060</td><td>TV060</td><td>TA012</td><td>Manual</td><td>高</td><td>互換性（実分割・実出力・日本語パス）</td><td>実 PDF で分割・出力（日本語パス含む）</td><td>手動受入（実機・**DQ05 要確認**）／補助: sample-pdf-smoke.ps1</td><td>実体で成功し、出力名一致・上書きなしが現場運用で確認される</td><td>受入1-13/16-17、docs/05</td><td>R001,R002,R003</td><td>質問待ち</td></tr>
+<tr><td>TD061</td><td>TV061</td><td>TA012</td><td>Manual</td><td>中</td><td>互換性（スキャン/日本語パス疎通）</td><td>スキャン画像PDF・テキスト層なしPDF・日本語パスPDF</td><td>手動受入（**実データ DQ05 要確認**）</td><td>検索/候補/白紙・UTF-8パイプ疎通が成立する。PDF種別ごとに別判定</td><td>要件7.2、docs/05</td><td>R010</td><td>質問待ち</td></tr>
+<tr><td>TD062</td><td>TV062</td><td>TA013</td><td>Manual</td><td>高</td><td>互換性（実機チェックリスト12項目・SSI014）</td><td>実機 Tauri 12項目（CSP白画面なし/data:URL画像/ダイアログ/relaunch/常駐サイドカー ライフサイクル/oneshot退避/日本語パス/中間幅 ほか）</td><td>手動受入（実機ビルド・**体制 DQ04 要確認**）</td><td>12項目を各々 Pass/Fail/未実施で記録。各項目独立判定（12区分）</td><td>ISS-012/014/024、issues.md チェックリスト、SSI014</td><td>R001,R007,R009</td><td>質問待ち</td></tr>
+<tr><td>TD063</td><td>TV063</td><td>TA013</td><td>Manual</td><td>中</td><td>性能（常駐サイドカー体感）</td><td>初回 spawn 後の2回目以降ページ送り、アプリ終了後プロセス残留、kill 後復旧</td><td>手動受入（実機）／**数値基準は要確認 DQ01**</td><td>2回目以降ページ送りが体感即時、終了後 python 残留なし、kill 後自動復旧。**合格しきい値（性能数値）は要確認**</td><td>ISS-014、issues.md チェックリスト9</td><td>R007,R009</td><td>質問待ち</td></tr>
+<tr><td>TD064</td><td>TV064</td><td>TA014</td><td>Manual</td><td>高</td><td>イベント（updater 一気通し・SSI016）</td><td>旧版（v0.1.1 等）からの更新検出→インストール→relaunch→再起動後バージョン表示</td><td>手動受入（実機・**旧版配布物 DQ07 要確認**）</td><td>各段階（検出/インストール/再起動表示）を Pass/Fail/未実施で記録。URL確認のみでは完了扱いにしない。段階ごとに別判定</td><td>受入18、RELEASE.md、要件10、SSI016</td><td>R008</td><td>質問待ち</td></tr>
+<tr><td>TD065</td><td>TV065</td><td>TA015</td><td>Manual</td><td>中</td><td>互換性（実機幅・SSI015）</td><td>1366px前後（重点）/ 1024px下限 / 中間幅900-1100px の実機</td><td>手動受入（実機幅・**体制 DQ04 要確認**）</td><td>各幅で主要操作が見切れず成立する。幅区分ごとに別判定（3区分）</td><td>受入14、要件3、ISS-009、SSI015</td><td>R013</td><td>質問待ち</td></tr>
+<tr><td>TD066</td><td>TV066</td><td>TA015</td><td>Manual</td><td>低</td><td>互換性（スマホ幅 best-effort）</td><td>スマホ相当幅</td><td>手動受入（実機/エミュレート）</td><td>致命的な表示崩れ・横方向ページ全体崩れがない（実作業最適化は対象外）</td><td>受入15、要件3</td><td>R013</td><td>質問待ち</td></tr>
+<tr><td>TD071</td><td>TV071</td><td>TA013</td><td>Manual</td><td>高</td><td>セキュリティ表層（実機CSP/relaunch）</td><td>実機ビルドで白画面有無・更新機能・process 権限 relaunch 限定</td><td>手動受入（実機ビルド・**ISS-027/028 扱い DQ06 要確認**）</td><td>白画面なし・更新機能が動作する（XSS連鎖の表層確認）</td><td>ISS-012/019、tauri.conf.json</td><td>R009</td><td>質問待ち</td></tr>
+</tbody></table></div>
+<h4>3.13 Accessibility（表層）— レーン②/③ 併用</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストパターン</th><th>条件/入力</th><th>実施方法</th><th>期待結果/判定観点</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TD067</td><td>TV067</td><td>TA015</td><td>Accessibility</td><td>中</td><td>アクセシビリティ表層</td><td>フォーカスリングのコントラスト / img alt / ライブリージョン / キーボード操作（分割マーカー span/button ネスト）</td><td>手動受入（実機・キーボード）＋ E2E（DOM 属性確認・導入時）</td><td>フォーカスコントラスト・alt・ライブリージョン・キーボード操作が成立。**分割マーカーの invalid HTML 構造を Fail とするか受容するかは要確認（DQ11）**</td><td>ISS-018/029、要件3</td><td>R013</td><td>質問待ち</td></tr>
+</tbody></table></div>
+<h3>4. 質問待ち項目</h3>
+<p>設計の合否判定点・実行前提が参照資料で確定できないため <code>状態=質問待ち</code> とした行。各行は設計質問票 <code>テスト成果物/テスト設計_質問票.md</code> の DQ と相互リンクする。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>質問待ちID（設計質問票）</th><th>関連テスト設計ID</th><th>未確定の内容</th><th>影響</th></tr></thead>
+<tbody>
+<tr><td>DQ01</td><td>TD063</td><td>性能の合格しきい値（体感→数値計測の昇格要否・許容応答時間）</td><td>TD063 の合否判定点が数値で固定できない</td></tr>
+<tr><td>DQ02</td><td>TD058</td><td>cargo test 実行環境と Rust 単体本数（コード確認27件 vs 記載13件）</td><td>TD058 の実行可否と期待本数が未確定</td></tr>
+<tr><td>DQ03</td><td>TD043-TD050,TD056,TD068,TD069,TD047b</td><td>Playwright 導入有無・設定所在（現状 E2E ゼロ）</td><td>E2E レーン全行の実行基盤。未導入なら手動退避</td></tr>
+<tr><td>DQ04</td><td>TD038-TD042,TD059-TD066,TD071,TD073-TD075,TD055,TD061</td><td>手動受入の実施担当・実機環境（OS/幅実機）の割当</td><td>手動受入の実行主体。未実施が緑化されない前提</td></tr>
+<tr><td>DQ05</td><td>TD038-TD039,TD055,TD060,TD061,TD075</td><td>サンプル/現場/スキャン/日本語パス PDF の実テストデータ所在</td><td>手動受入・スモークの入力データ</td></tr>
+<tr><td>DQ06</td><td>TD071,TD070</td><td>OPEN課題 ISS-027/028 のリリース時扱い（修正/受容/次タスク）</td><td>セキュリティ表層の合否基準</td></tr>
+<tr><td>DQ07</td><td>TD064</td><td>updater 旧版配布物（v0.1.1 等）の用意</td><td>TD064 一気通しの実施前提</td></tr>
+<tr><td>DQ08</td><td>TD032,TD067</td><td>DEFERRED 課題（ISS-014/020/021/029残）の本リリーススコープ内/外</td><td>自動化範囲・合否範囲</td></tr>
+<tr><td>DQ09</td><td>TD032</td><td>分割取消で旧値復活のセッション内挙動の正解（修正後値 vs 復活旧値のどちらが正）</td><td>TD032 の合否判定点</td></tr>
+<tr><td>DQ10</td><td>TD054</td><td>白紙閾値0.985 の許容境界の正式基準（NF-C2 DEFERRED）</td><td>TD054 の期待結果</td></tr>
+<tr><td>DQ11</td><td>TD067</td><td>分割マーカー invalid HTML 構造を a11y で Fail とするか受容するか</td><td>TD067 の合否範囲</td></tr>
+</tbody></table></div>
+<h3>5. 上流成果物への追記・更新</h3>
+<p>本設計で上流（テスト分析・分析質問票・テスト計画）への追記・修正が必要な欠落は見つからなかった。理由は以下。</p>
+<ul>
+<li>TV001-TV075 すべてが1つ以上の TD へ展開され、TA001-TA015・UC1-UC10・SSI001-SSI020 のトレースが維持されている（第6節）。新規観点・新規アプローチ・新規 SSI を要する欠落はなかった。</li>
+<li>設計で顕在化した未確定（性能数値・cargo環境・Playwright導入・実機体制・実データ・ISS-027/028扱い・updater旧版・DEFERREDスコープ・stale復活・白紙閾値・分割マーカー構造）はすべて分析質問票 Q1-Q11 に既出であり、設計質問票 DQ01-DQ11 として1対1で引き継いだ（新規質問の追加なし）。</li>
+</ul>
+<p>設計上の構造的判断として、TV047（エラー応答ガード）を実行レーンの違いから TD047a（sidecar 契約・レーン①）と TD047b（フロント型ガード非クラッシュ・レーン②）へ分割した。これは観点の追加ではなく1観点の実施方法分離であり、上流の TV/TA 構造は不変。</p>
+<h3>6. カバレッジ確認</h3>
+<ul>
+<li>テスト観点網羅（TV→TD）: TV001-TV075 の全75観点が TD へ展開済み。</li>
+<li>TV001-005→TD001-005、TV006-015→TD006-015、TV016-020→TD016-020、TV021-025→TD021-025、TV026-030→TD026-030、TV031-037→TD031-037、TV038-042→TD038-042、TV043-050→TD043-050、TV051-056→TD051-056、TV057-058→TD057-058、TV059-067→TD059-067、TV068-069→TD068-069、TV070→TD070、TV071→TD071、TV072→TD072、TV073-075→TD073-075。</li>
+<li>TV047 は TD047a＋TD047b の2行（レーン分離）。他は原則 1TV→1TD（一部は内部で複数下流ケース分割単位を保持）。</li>
+<li>テストアプローチ網羅（TA→TD）: TA001→TD001-005、TA002→TD006-012/070、TA003→TD013-015、TA004→TD016-020、TA005→TD021-025、TA006→TD026-030、TA007→TD031-037、TA008→TD038-042/073-074、TA009→TD043-050/068-069/047b、TA010→TD051-056/075、TA011→TD057-058/072、TA012→TD059-061、TA013→TD062-063/071、TA014→TD064、TA015→TD065-067。TA001-TA015 すべて1つ以上の TD あり。</li>
+<li>ユースケース網羅（UC→TD）: UC1→TD038、UC2→TD039、UC3→TD073/TD017、UC4→TD041/TD021、UC5→TD042/TD023/TD035、UC6→TD075/TD051-056、UC7→TD074/TD011-012、UC8→TD040/TD016、UC9→TD064、UC10→TD065。UC1-UC10 すべて対応 TD あり。</li>
+<li>Source Structure Inventory 消費（SSI→TD）: SSI001→TD001-005、SSI002→TD037/TD050、SSI003→TD008、SSI004→TD007、SSI005→TD011/TD012/TD014、SSI006→TD009/TD010、SSI007→TD016-019、SSI008→TD021、SSI009→TD026-030、SSI010→TD053、SSI011→TD051/TD052、SSI012→TD043/TD056、SSI013→TD032/TD033/TD049/TD069、SSI014→TD062、SSI015→TD065、SSI016→TD064、SSI017→TD057/TD058、SSI018→TD006/TD011/TD033/TD034（既定値は SSI003-006 の境界 TD で別途網羅、代表表示は通し TD で確認）、SSI019→TD047a/TD072、SSI020→対象外（観点を立てない・Q8 でスコープ確認）。SSI001-019 すべて1つ以上の TD で消費、SSI020 は意図的に対象外。</li>
+<li>実行レーン振り分け: レーン①（コードベース）= TD001-037/051-054/057-058/070/072/047a。レーン②（E2E）= TD043-050/056/068/069/047b（全 <code>質問待ち</code>・導入未確定）。レーン③（手動受入）= TD038-042/055/059-066/071/073-075。TD067 はレーン②/③併用。実 sidecar・実 PDF・実機・updater はすべてレーン③へ振り分け、未実施を緑化しない判定観点を付与済み。</li>
+<li>高リスク設計密度:</li>
+<li>R001（度20）: 自動 TD001/TD002（正常・境界）＋ 手動 TD038/TD059/TD060/TD062（実描画・実出力・実機）で多層化。プレビュー全滅バグの直接経路を TD059 で実描画固定。</li>
+<li>R002（度15）: TD006-014（正常/桁数境界/空白/禁止文字/予約名/affix配置/affix件数/パリティ/三者一致）＋ TD015（state経由）＋ TD070（セキュリティ表層）で網羅。禁止文字9種・予約名・affix 0-3件・seq桁数1-9を全件/境界展開。</li>
+<li>R014（度16）: TD057/TD058/TD072（回帰・cargo・観測性）＋ 手動 TD059-066 を <code>質問待ち</code> で「未実施を緑化しない」判定観点付き。自動/手動境界をレーン区分で明示。</li>
+<li>R004/R005: TD021-030/032/035（往復・スキーマ・部分復元・クランプ・stale・破損退避・クラッシュ窓・多重起動・残骸昇格防止）で異常系/回復を深掘り。</li>
+<li>ケース分解候補の消費: 分析 <code>備考</code> の <code>ケース分解候補</code>（seq 直前0/最小1/既定3/最大9/最大超10→TD007、page_no 0/1/page_count/+1→TD002、affix 配置5種→TD011・件数4種→TD012、予約名各種→TD010、既存0/1/2件→TD017、検索0/1/200/201→TD052、白紙予算内/超/継続→TD053、current_page 内/ちょうど/超→TD024）を各 TD の <code>条件/入力</code> に可視化済み。</li>
+<li>由来の保持: <code>由来: 仕様準拠</code> は要件・受入条件・ISS 参照を <code>仕様</code> 列で保持。<code>由来: 汎用QA</code>（TV020/067/070/071/072）は観測性・a11y・セキュリティ表層の target 適合パターンへ翻訳（TD020/067/070/071/072）。<code>由来: 追加観点検討</code>（TV015/054/058/068/069/073-075）は対応 TD で保持。</li>
+</ul>
+<h3>7. Expected Case Yield（期待ケース数）</h3>
+<p>各 TD の下流 <code>TC-*</code> 期待数を分割元構造から算出する。<code>質問待ち</code> 行は期待数を仮置きし、確定は該当 DQ の回答後。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>分割元構造ID</th><th>分割方針</th><th>期待TC数</th><th>集約可否</th><th>集約判定ルール/代表抽出理由</th><th>備考</th></tr></thead>
+<tbody>
+<tr><td>TD001</td><td>SSI001</td><td>全件展開</td><td>12</td><td>不可</td><td>各コマンド独立に Pass/Fail</td><td>12コマンド各1</td></tr>
+<tr><td>TD002</td><td>SSI001境界,TV002</td><td>境界展開</td><td>4</td><td>不可</td><td>0/1/page_count/page_count+1 を独立判定</td><td>4関数共通の境界クラス4。関数別に増える場合は下流で乗算</td></tr>
+<tr><td>TD003</td><td>TV003</td><td>組み合わせ展開</td><td>4</td><td>不可</td><td>非配列/非dict/非object/欠落の型不正種別を各独立判定</td><td>pdf_paths非配列・state非dict・JSON非object・必須欠落</td></tr>
+<tr><td>TD004</td><td>SSI001</td><td>集約</td><td>1</td><td>可</td><td>未対応コマンドは単一判定で十分</td><td>未対応コマンド1件</td></tr>
+<tr><td>TD005</td><td>TV005</td><td>全件展開</td><td>3</td><td>不可</td><td>不正1行/空行/envelope欠落を独立判定</td><td>継続性は各種別後の後続処理成功で判定</td></tr>
+<tr><td>TD006</td><td>TV006</td><td>代表抽出</td><td>1</td><td>可</td><td>正常命名の代表1（境界は TD007-012 で別途）</td><td>-</td></tr>
+<tr><td>TD007</td><td>SSI004</td><td>境界展開</td><td>5</td><td>不可</td><td>直前0/最小1/既定3/最大9/最大超10</td><td>seq桁数の有限境界全件</td></tr>
+<tr><td>TD008</td><td>SSI003,TV008</td><td>境界展開</td><td>3</td><td>不可</td><td>前後空白strip/空文字/空白のみ を独立判定</td><td>空白strip と全空missing の差分</td></tr>
+<tr><td>TD009</td><td>SSI006</td><td>全件展開</td><td>9</td><td>不可</td><td>禁止文字9種を各独立判定</td><td><code>&lt;&gt;:&quot;/\|?*</code></td></tr>
+<tr><td>TD010</td><td>SSI006</td><td>全件展開</td><td>7</td><td>不可</td><td>CON/PRN/AUX/NUL＋COM1/COM9/LPT1/LPT9 の代表＋正規化後空</td><td>予約名群は代表6＋空→既定名1。COM/LPT は1-9境界を代表抽出（同一正規化規則）</td></tr>
+<tr><td>TD011</td><td>SSI005</td><td>全件展開</td><td>5</td><td>不可</td><td>prefix単独/suffix単独/両方/空値混在/同位置2件</td><td>配置パターン全件</td></tr>
+<tr><td>TD012</td><td>SSI005</td><td>境界展開</td><td>4</td><td>不可</td><td>0/1/2/3件（3件目切り詰め）</td><td>件数境界全件</td></tr>
+<tr><td>TD013</td><td>TV013</td><td>組み合わせ展開</td><td>4</td><td>不可</td><td>正常/空白/禁止予約/affix の入力クラス×双方向（pytest＋node）</td><td>入力クラス4を双方向で確認。代表4</td></tr>
+<tr><td>TD014</td><td>SSI005</td><td>集約</td><td>1</td><td>可</td><td>三者一致は単一突合で判定（affix代表入力）</td><td>NF-D1 再発防止</td></tr>
+<tr><td>TD015</td><td>TV015</td><td>組み合わせ展開</td><td>3</td><td>不可</td><td>affix/予約名/空白 を含む state 往復で各判定</td><td>state経由不一致経路</td></tr>
+<tr><td>TD016</td><td>SSI007</td><td>全件展開</td><td>2</td><td>不可</td><td>missing_output_dir/no_segments</td><td>preflight 分岐2</td></tr>
+<tr><td>TD017</td><td>SSI007</td><td>境界展開</td><td>3</td><td>不可</td><td>既存0/1/2件で 元名/<code>_2</code>/<code>_3</code></td><td>一意名採番境界</td></tr>
+<tr><td>TD018</td><td>SSI007</td><td>全件展開</td><td>2</td><td>不可</td><td>preflight_blocked/preflight_failed</td><td>全件failed・無生成</td></tr>
+<tr><td>TD019</td><td>SSI007</td><td>全件展開</td><td>3</td><td>不可</td><td>全成功/部分失敗/全失敗 の ok・messages 差分</td><td>export_incomplete 含む</td></tr>
+<tr><td>TD020</td><td>TV020</td><td>集約</td><td>1</td><td>可</td><td>sha256＋確定パスは単一判定</td><td>観測性</td></tr>
+<tr><td>TD021</td><td>SSI008</td><td>全件展開</td><td>8</td><td>不可</td><td>8フィールド各往復</td><td>input_paths/output_dir/split_points_by_pdf/common_metadata/segment_metadata/affix_defs/current_pdf/current_page</td></tr>
+<tr><td>TD022</td><td>TV022</td><td>組み合わせ展開</td><td>3</td><td>不可</td><td>型不整合/壊れた命名値/不正position</td><td>不正種別3</td></tr>
+<tr><td>TD023</td><td>TV023</td><td>境界展開</td><td>3</td><td>不可</td><td>全欠損/一部欠損/欠損なし</td><td>missing列挙＋残復元</td></tr>
+<tr><td>TD024</td><td>TV024</td><td>境界展開</td><td>3</td><td>不可</td><td>ページ数内/ちょうど/超過</td><td>クランプ境界</td></tr>
+<tr><td>TD025</td><td>TV025</td><td>代表抽出</td><td>1</td><td>可</td><td>現行キー外フィルタの代表1</td><td>stale永続化防止</td></tr>
+<tr><td>TD026</td><td>SSI009</td><td>全件展開</td><td>2</td><td>不可</td><td>破損state＋tmp復元/破損state＋bak復元</td><td><code>.corrupt</code>退避</td></tr>
+<tr><td>TD027</td><td>SSI009</td><td>全件展開</td><td>2</td><td>不可</td><td>tmp新&gt;bak/bak新&gt;tmp の mtime優先</td><td>bak昇格防止</td></tr>
+<tr><td>TD028</td><td>SSI009</td><td>組み合わせ展開</td><td>2</td><td>不可</td><td>多重起動pid衝突の write-write/誤報告防止</td><td>pid付きtmp</td></tr>
+<tr><td>TD029</td><td>SSI009</td><td>全件展開</td><td>2</td><td>不可</td><td>残骸掃除/bak不在時の非昇格</td><td>最終手段昇格防止</td></tr>
+<tr><td>TD030</td><td>TV030</td><td>代表抽出</td><td>1</td><td>可</td><td>保存失敗での state/bak 不破壊の代表1</td><td>破損耐性</td></tr>
+<tr><td>TD031</td><td>TV031</td><td>代表抽出</td><td>2</td><td>不可</td><td>segmentKey 算出/buildSegments 集合</td><td>純ロジック2</td></tr>
+<tr><td>TD032</td><td>SSI013,TV032</td><td>質問待ち</td><td>2</td><td>質問待ち</td><td>削除フィルタ判定＋復活経路（合否は DQ09 確定後）</td><td>削除は確定、復活合否は要確認</td></tr>
+<tr><td>TD033</td><td>TV033</td><td>全件展開</td><td>2</td><td>不可</td><td>手動入力済みあり/なしの再採番</td><td>連番採番</td></tr>
+<tr><td>TD034</td><td>TV034</td><td>組み合わせ展開</td><td>3</td><td>不可</td><td>LRU退避/stale検出/リクエストゲート</td><td>世代越え破棄</td></tr>
+<tr><td>TD035</td><td>TV035</td><td>境界展開</td><td>3</td><td>不可</td><td>全存在/一部欠損/全欠損</td><td>restorable抽出</td></tr>
+<tr><td>TD036</td><td>TV036</td><td>全件展開</td><td>3</td><td>不可</td><td>正常/issueあり/再出力マージ</td><td>出力状態判定</td></tr>
+<tr><td>TD037</td><td>SSI002</td><td>全件展開</td><td>5</td><td>不可</td><td>STEP1-4 各完了判定＋取込→分割の遷移境界</td><td>ステップ別＋遷移1</td></tr>
+<tr><td>TD047a</td><td>SSI019</td><td>全件展開</td><td>3</td><td>不可</td><td>正常応答/エラー応答/必須欠落応答</td><td>契約形状</td></tr>
+<tr><td>TD051</td><td>SSI011</td><td>全件展開</td><td>2</td><td>不可</td><td>単一用語/複数用語1パス（scope=current_pdf 固定）</td><td>NF-B1</td></tr>
+<tr><td>TD052</td><td>SSI011</td><td>境界展開</td><td>4</td><td>不可</td><td>0/1/200/201件</td><td>truncated境界</td></tr>
+<tr><td>TD053</td><td>SSI010</td><td>境界展開</td><td>3</td><td>不可</td><td>予算内/予算超partial/start_page継続</td><td>8秒予算</td></tr>
+<tr><td>TD054</td><td>TV054</td><td>質問待ち</td><td>3</td><td>質問待ち</td><td>閾値直前/閾値/直後（許容基準は DQ10 確定後）</td><td>偽陰性側</td></tr>
+<tr><td>TD057</td><td>SSI017</td><td>全件展開</td><td>4</td><td>不可</td><td>pytest群/check-all群/verify.ps1/sample-smoke の各存在・実行</td><td>資産単位4。pytest/check は一括実行で集約報告可だが資産種別単位で判定</td></tr>
+<tr><td>TD058</td><td>SSI017</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>cargo実行可否＋本数確定（DQ02）</td><td>未実行なら残リスク記録</td></tr>
+<tr><td>TD072</td><td>SSI019,TV072</td><td>代表抽出</td><td>2</td><td>不可</td><td>失敗ファイル列挙/missing_input_paths の証跡</td><td>観測性代表2</td></tr>
+<tr><td>TD070</td><td>TV070</td><td>全件展開</td><td>3</td><td>不可</td><td><code>/</code> <code>\</code> <code>:</code> のパストラバーサル相当</td><td>出力先外書込不可</td></tr>
+<tr><td>TD043</td><td>SSI012,TV043</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>busy可視ガード（DQ03 導入後・未導入時は手動退避）</td><td>E2E/手動</td></tr>
+<tr><td>TD044</td><td>TV044</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>export後 canExport=false（DQ03）</td><td>E2E/手動</td></tr>
+<tr><td>TD045</td><td>TV045</td><td>質問待ち</td><td>2</td><td>質問待ち</td><td>旧応答破棄＋warning（編集種別代表2・DQ03）</td><td>E2E/手動</td></tr>
+<tr><td>TD046</td><td>TV046</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>部分失敗attention（DQ03）</td><td>E2E/手動</td></tr>
+<tr><td>TD047b</td><td>SSI019,TV047</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>欠落応答で非クラッシュ（DQ03）</td><td>E2E/手動</td></tr>
+<tr><td>TD048</td><td>TV048</td><td>質問待ち</td><td>4</td><td>質問待ち</td><td>全クリア/PDF除外/再採番/復元 の確認発火（DQ03）</td><td>E2E/手動</td></tr>
+<tr><td>TD049</td><td>TV049</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>ハイライト残留なし（DQ03）</td><td>E2E/手動</td></tr>
+<tr><td>TD050</td><td>SSI002,TV050</td><td>質問待ち</td><td>2</td><td>質問待ち</td><td>未完了直行抑止/空状態提示（DQ03）</td><td>E2E/手動</td></tr>
+<tr><td>TD056</td><td>SSI012,TV056</td><td>質問待ち</td><td>3</td><td>質問待ち</td><td>search_text/index_candidates/blank_candidates の切替時残留なし（DQ03）</td><td>3関数別</td></tr>
+<tr><td>TD068</td><td>TV068</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>連番空→再採番で再充足（DQ03）</td><td>E2E/手動</td></tr>
+<tr><td>TD069</td><td>TV069</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>affix削除再追加で旧値非復活（DQ03）</td><td>E2E/手動</td></tr>
+<tr><td>TD038</td><td>TV038</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>UC1 通し（実描画・実出力・DQ04/05）</td><td>手動受入</td></tr>
+<tr><td>TD039</td><td>TV039</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>UC2 複数一括（DQ04/05）</td><td>手動受入</td></tr>
+<tr><td>TD040</td><td>TV040</td><td>質問待ち</td><td>3</td><td>質問待ち</td><td>必須未入力/出力先未指定/対象なし（DQ04）</td><td>手動3条件</td></tr>
+<tr><td>TD041</td><td>TV041</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>UC4 中断再開（実機relaunch・DQ04）</td><td>手動受入</td></tr>
+<tr><td>TD042</td><td>TV042</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>UC5 欠損復元（DQ04）</td><td>手動受入</td></tr>
+<tr><td>TD073</td><td>TV073</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>UC3 既存衝突（実フォルダ・DQ04）</td><td>手動受入</td></tr>
+<tr><td>TD074</td><td>TV074</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>UC7 追加項目通し（DQ04）</td><td>手動受入</td></tr>
+<tr><td>TD075</td><td>TV075</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>UC6 検索支援分割（テキスト層ありPDF・DQ04/05）</td><td>手動受入</td></tr>
+<tr><td>TD055</td><td>TV055</td><td>質問待ち</td><td>2</td><td>質問待ち</td><td>検索不能 vs 0件・候補未実行 vs 0件の案内（DQ04/05）</td><td>スキャンPDF</td></tr>
+<tr><td>TD059</td><td>TV059</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>実描画 各STEP2で1ページ以上（DQ04/05）</td><td>プレビュー全滅直接経路</td></tr>
+<tr><td>TD060</td><td>TV060</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>実分割実出力・名一致・上書きなし（DQ04/05）</td><td>日本語パス含む</td></tr>
+<tr><td>TD061</td><td>TV061</td><td>質問待ち</td><td>3</td><td>質問待ち</td><td>スキャン/テキスト層なし/日本語パス（DQ05）</td><td>PDF種別3</td></tr>
+<tr><td>TD062</td><td>SSI014</td><td>質問待ち</td><td>12</td><td>質問待ち</td><td>実機12項目を各 Pass/Fail/未実施（DQ04）</td><td>各項目独立</td></tr>
+<tr><td>TD063</td><td>TV063</td><td>質問待ち</td><td>3</td><td>質問待ち</td><td>ページ送り体感/残留なし/kill復旧（数値基準 DQ01）</td><td>3観察点</td></tr>
+<tr><td>TD064</td><td>SSI016</td><td>質問待ち</td><td>3</td><td>質問待ち</td><td>検出/インストール/再起動表示（旧版 DQ07）</td><td>段階別</td></tr>
+<tr><td>TD065</td><td>SSI015</td><td>質問待ち</td><td>3</td><td>質問待ち</td><td>1366/1024/中間幅（DQ04）</td><td>幅区分3</td></tr>
+<tr><td>TD066</td><td>TV066</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>スマホ幅 致命崩れなし（best-effort）</td><td>対象外確認</td></tr>
+<tr><td>TD071</td><td>TV071</td><td>質問待ち</td><td>1</td><td>質問待ち</td><td>実機CSP/relaunch（ISS-027/028 DQ06）</td><td>セキュリティ表層</td></tr>
+<tr><td>TD067</td><td>TV067</td><td>質問待ち</td><td>4</td><td>質問待ち</td><td>フォーカスコントラスト/alt/ライブリージョン/キーボード（分割マーカー合否 DQ11）</td><td>a11y表層4</td></tr>
+</tbody></table></div>
+<p>期待TC数 合計（仮置き含む）: 確定レーン①分（質問待ち除く）= TD001-031/033-037/047a/051-053/057/070/072 の合計 約144。質問待ち分（E2E＋手動＋cargo＋閾値＋stale）= 約86。総計 約230（DQ01-DQ11 回答で確定）。</p>
+</body>
+</html>

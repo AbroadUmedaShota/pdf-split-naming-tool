@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>テスト分析レビュー</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+<h2>テスト分析レビュー結果</h2>
+<h3>1. レビュー対象</h3>
+<ul>
+<li>レビュー対象: <code>テスト成果物/テスト分析.md</code>（PDF分割命名ツール / apps/desktop Tauri+Next.js ＋ recovery/pdf_splitter_tool Python sidecar）</li>
+<li>関連質問票: <code>テスト成果物/テスト分析_質問票.md</code></li>
+<li>本レビュー結果: <code>テスト成果物/テスト分析レビュー結果.md</code></li>
+</ul>
+<h3>2. 参照資料</h3>
+<ul>
+<li><code>テスト成果物/テスト計画書.md</code>（リスク R001-R014・アプローチ TA001-TA015・UC1-UC10・後続深さ第10節・未決 Q1-Q8）</li>
+<li><code>テスト成果物/テスト計画レビュー結果.md</code></li>
+<li><code>docs/01_要件定義書.md</code>（正本仕様・受入条件18項目・命名仕様第8節・状態保存第9節）</li>
+<li><code>docs/05_実装状況.md</code>・<code>docs/issues/issues.md</code>（ISS-001〜030・NF-*・実機確認チェックリスト12項目）</li>
+<li><code>recovery/pdf_splitter_tool/</code>（sidecar.py / domain.py / state_schema.py / pdf_service.py / state.py）</li>
+<li><code>apps/desktop/lib/filename-policy.ts</code>・<code>apps/desktop/scripts/check-*.mjs</code>・<code>apps/desktop/src-tauri/src/lib.rs</code></li>
+<li><code>recovery/tests/</code>（pytest 19ファイル）</li>
+</ul>
+<h3>3. レビュー観点</h3>
+<p>テスト計画整合 / 仕様トレーサビリティ / Source Structure Inventory 完全性 / 展開方針品質 / 代表抽出統制 / 観点粒度 / 観点カテゴリ網羅 / リスクベース深さ（高リスク観点密度）/ 必要十分性 / 汎用QAカタログ整合 / 境界・異常系の分解可能性 / 期待処理の分離 / 質問形式観点の明確化 / バグ逃し想定 / 下流設計準備性 / 質問票妥当性 / テスト計画更新判断 / 実行可能性 / 重複・欠落・矛盾 / プロダクト固有懸念（プレビュー表示・データ破壊・命名一致・E2Eゼロ・実機/手動境界・updater）。</p>
+<h3>4. レビュー・修正サマリー</h3>
+<h4>第1パス（指摘）</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>優先度</th><th>観点</th><th>問題</th><th>場所</th><th>影響</th><th>修正方針</th></tr></thead>
+<tbody>
+<tr><td>P2</td><td>仕様トレーサビリティ（ユースケース）</td><td>UC1/UC2/UC4/UC5/UC8 は観点で明示トレースされるが、UC3（既存衝突）・UC6（検索支援分割）・UC7（追加項目命名）が観点表に独立してトレースされず、カバレッジ確認でも UC 単位の対応表がなかった</td><td>第4節 テスト観点 / 第6節 カバレッジ確認</td><td>下流設計が UC3/UC6/UC7 のシナリオを観点から再発見する必要があり、計画の受入条件7-9/11/16-17 のシナリオ誘導が抜けうる</td><td>UC3=TV073、UC7=TV074、UC6=TV075 を追加し、第6節に UC1-UC10→TVの対応行を追記</td></tr>
+<tr><td>P3</td><td>体裁</td><td>カバレッジ確認の TA→TV 一覧が観点追加で要更新</td><td>第6節</td><td>なし（内容影響なし）</td><td>観点追加に合わせて TA→TV・Pass3結論を同期</td></tr>
+</tbody></table></div>
+<h4>第1パス（修正）</h4>
+<ul>
+<li>TV073（UC3 既存衝突・確定出力名併記）、TV074（UC7 追加項目つき命名の通し）、TV075（UC6 検索支援分割・自動分割しない）を追加。いずれも要件・受入条件・ISS に根拠を持たせ、<code>由来: 追加観点検討</code> と UC トレースを備考に明記。</li>
+<li>第6節カバレッジ確認に「ユースケース網羅」行を追加し、UC1-UC10 すべてが TV へトレースされる状態にした。TA008→TV038-042/073-074、TA010→TV051-056/075 に同期。Pass 3 結論の観点ID範囲を TV073-075 まで拡張。</li>
+</ul>
+<h4>第2パス（再レビュー）</h4>
+<ul>
+<li>ユースケース・トレーサビリティ: UC1-UC10 すべてに対応 TV あり。受入条件7-9/11/16-17 のシナリオが観点へ落ちた。P2 解消。</li>
+<li>Source Structure Inventory: SSI001-SSI020 各行に具体的な <code>展開方針</code> あり。有限リスト（SSI001/005/006）は <code>全件展開</code>、境界（SSI003/004/010/011）は <code>境界展開</code> で <code>直前/最小/既定/最大/最大超</code> の分割ヒント保持、環境マトリクス（SSI014/015/016）は各環境独立 Pass/Fail を明記。<code>代表抽出</code>（SSI015/018）は低リスク・同種判定の理由と残留リスクを記載。<code>質問待ち</code>（SSI020 除外）は対象外確認のみ。欠落・無根拠の代表抽出なし。新規 P0/P1 なし。</li>
+<li>高リスク観点密度: R001（度20）= 正常/異常境界＋実描画/実出力の手動受入で多層化。R002（度15）= 正常/境界/異常/計算/状態遷移/セキュリティ表層＋パリティ/三者一致/state経由。R014（度16）= 自動/手動境界を観点備考で明示し緑化しない方針を担保。いずれも単一正常系観点に留まらず、P1 相当の薄さなし。</li>
+<li>期待処理の分離: TV008（空白strip vs 全空missing）・TV019（全失敗/部分失敗/全成功のmessages差分）・TV022 で処理差分を明記。混在による誤誘導なし。</li>
+<li>質問形式観点: 「扱えるか確認」型の未分類観点なし。不確実点は <code>仕様=要確認</code> 相当ではなく質問票 Q1-Q11 へ分類。</li>
+<li>質問票: Q1-Q11 が観点ID・アプローチIDに紐付き、優先度付与済み。ダミー placeholder 行なし。</li>
+<li>残る P0/P1/P2 の fix-worthy 指摘なし。</li>
+</ul>
+<h3>5. 最終レビュー結果</h3>
+<p>P0・P1・P2 の fix-worthy 指摘は残っていない。</p>
+<p>必要十分性の要約:</p>
+<ul>
+<li>高リスク観点密度: R001（プレビュー表示）/R002（命名一致）/R014（自動・手動境界）を最優先に多層化。R001 は実描画（TV059）・実出力（TV060）・実機（TV062）を手動受入として明示し、自動で確定できない範囲を観点側でも緑化しない設計。R002 はパリティ（TV013）・三者一致（TV014）・state経由不一致（TV015）まで分解。R004/R005 は部分復元・クランプ・破損退避・クラッシュ窓・多重起動・残骸昇格防止まで異常系/回復を深掘り。</li>
+<li>バグ逃し想定: 中核バグ「プレビュー全表示不能（PNG/JPEG不一致）」を TV038/TV059/TV062 で直接経路として手動受入に固定。NF-D1（state経由でプレビュー≠出力）= TV015、NF-U5（ハイライト残留誤分割）= TV049、ISS-024（未チェックで canExport=true）= TV045、bak が最新tmpを差し置いて昇格 = TV027、古い残骸昇格 = TV029、NF-U16/U14（連番空欄固定・affix復活）= TV068/069 をバグ逃し観点として明示。</li>
+<li>Source Structure Inventory: SSI001-SSI020 完備。各行に具体構造・展開方針・関連リスク・下流分割ヒント。代表抽出は SSI015（レスポンシブ幅）/SSI018（既定値）のみで理由・残留リスク記載。質問待ちは SSI020（MVP対象外）。命名の有限集合（禁止文字9種・予約名・affix最大2件・seq桁数1-9）と sidecar 12コマンドを全件展開で保持し、下流設計が再発見不要。</li>
+<li>汎用QAカタログ整合: 入力/境界・状態遷移・永続化/整合性・異常系/回復・並行/タイミング・互換性・セキュリティ表層・アクセシビリティ表層・観測性を対象タイプ（デスクトップUI＋IPC sidecar＋ファイル出力＋永続化JSON＋自動更新）に即して考慮。性能の数値計測は仕様に閾値定義がないため体感確認（TV063）にとどめ、数値基準は質問票 Q1 へ回した（機械的羅列を回避）。</li>
+<li>テスト計画更新判断: 新規リスク・新規アプローチの追加は不要と判断（観点はすべて TA001-TA015 にトレース可能）。ただし Rust 単体テスト本数の事実差異（計画/ISS-014記載13件 ↔ lib.rs コード実体27件・cargo未実行）を第5節に記録し、質問票 Q2 を補強。計画の数値確定は cargo 実行時（TV058）に委ねる。</li>
+</ul>
+<p>確認済み観点（チェック実施）:</p>
+<ul>
+<li>テスト計画整合（TA/UC網羅）: 済</li>
+<li>Source Structure Inventory 完全性・展開方針: 済</li>
+<li>高リスク観点密度・必要十分性: 済</li>
+<li>期待処理分離・質問形式観点分類: 済</li>
+<li>質問票妥当性（紐付け・ダミー行なし）: 済</li>
+<li>実行可能性（自動/手動境界の振り分け）: 済</li>
+</ul>
+<h3>6. 残課題</h3>
+<p>P0/P1/P2: なし。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>優先度</th><th>項目</th><th>推奨アクション</th></tr></thead>
+<tbody>
+<tr><td>P3</td><td>質問票 Q1-Q11 の未確定（サインオフ基準・cargo環境/本数・Playwright導入・実機受入体制・テストデータ・OPEN課題ISS-027/028・updater旧版配布物・DEFERREDスコープ・stale復活のセッション内仕様・白紙閾値境界・分割マーカーHTML構造）</td><td>参照資料に根拠のない組織的・環境的事実のため本フローでは埋めない（捏造回避）。テスト設計着手前にユーザー/PMへ確認し、確定値を設計の合否判定点へ反映する。特に Q1（サインオフ・性能基準）・Q3（Playwright導入）・Q9（stale復活の正解）は設計の期待結果固定に影響する</td></tr>
+<tr><td>P3</td><td>Rust 単体テスト本数の確定</td><td>ビルド機での cargo test 実行時に本数（コード確認27件）を確定し、計画第9節とテスト分析第5節へ反映</td></tr>
+</tbody></table></div>
+<p>質問票の <code>要確認</code> 項目は、参照資料に根拠が存在しない組織的・環境的事実、またはプロダクト判断が未確定の挙動であり、分析者が自作すると捏造になるため未確定のまま可視化している。これらは分析の使用を妨げる P0/P1/P2 ではなく、テスト設計の期待結果を固定する前にユーザー確認で埋めるべき P3 として扱う。</p>
+<p>本レビューで実施した修正: テスト分析へ TV073-075（UC3/UC6/UC7 トレース）を追加、第6節にユースケース網羅対応表を追記。質問票・テスト計画への変更は行っていない（計画更新は不要と判断、事実差異 Q2 は質問票で既出）。</p>
+</body>
+</html>

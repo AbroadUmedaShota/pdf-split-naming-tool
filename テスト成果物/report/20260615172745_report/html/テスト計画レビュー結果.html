@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>テスト計画レビュー</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+<h2>テスト計画レビュー結果</h2>
+<h3>1. レビュー対象</h3>
+<ul>
+<li>レビュー対象: <code>テスト成果物/テスト計画書.md</code>（PDF分割命名ツール / apps/desktop Tauri+Next.js ＋ recovery/pdf_splitter_tool Python sidecar）</li>
+<li>本レビュー結果: <code>テスト成果物/テスト計画レビュー結果.md</code></li>
+</ul>
+<h3>2. 参照資料</h3>
+<ul>
+<li><code>docs/01_要件定義書.md</code>（正本仕様・受入条件18項目）</li>
+<li><code>docs/05_実装状況.md</code>（実装済み範囲・未受入項目・検証コマンド）</li>
+<li><code>docs/issues/issues.md</code>（ISS-001〜030・実機確認チェックリスト12項目）</li>
+<li><code>apps/desktop/app/page.tsx</code>（UI実体・約4089行）</li>
+<li><code>recovery/pdf_splitter_tool/sidecar.py</code>（sidecar実体・約411行）ほか同ディレクトリ</li>
+<li><code>apps/desktop/scripts/check-*.mjs</code>（nodeロジック検査・check-all 集約）</li>
+<li><code>recovery/tests/</code>（pytest 19ファイル・test関数 約223件）</li>
+<li><code>apps/desktop/src-tauri/src/lib.rs</code>（Rust 単体テスト定義）</li>
+<li><code>apps/desktop/package.json</code>（npm スクリプト・実行ルート）</li>
+<li><code>apps/desktop/RELEASE.md</code>・<code>recovery/pdf_splitter_tool/state.py</code>・<code>domain.py</code>・<code>apps/desktop/lib/filename-policy.ts</code>（存在確認済み）</li>
+</ul>
+<h3>3. レビュー観点</h3>
+<p>目的妥当性 / 仕様トレーサビリティ / リスク分析妥当性 / スコープ明確性 / 正式・回帰資産の扱い / テストアプローチ適切性 / ユースケース・シナリオ戦略 / 汎用QA網羅 / 後続深さ誘導 / 終了条件の測定可能性 / 成果物品質ゲート / 未解決項目管理 / 除外・残リスクの扱い / 実行ルート・証跡計画 / 実行可能性 / プロダクト固有の懸念（プレビュー表示・データ破壊・updater・E2Eゼロ・実機依存）。</p>
+<h3>4. レビュー・修正サマリー</h3>
+<h4>第1パス（指摘）</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>優先度</th><th>観点</th><th>問題</th><th>場所</th><th>影響</th><th>修正方針</th></tr></thead>
+<tbody>
+<tr><td>P1</td><td>正式・回帰資産の扱い</td><td>文書記載資産（pytest/check/verify/sample-smoke/RELEASE.md）がディスクに存在すると暗黙に仮定しており、存在確認・欠落リスク化の方針が未記載</td><td>第9節</td><td>資産不在時に証跡が成立せず終了条件が判定不能になりうる</td><td>第9節に存在確認方針を追記し、確認済み資産と未実行資産（cargo）を区別</td></tr>
+<tr><td>P1</td><td>ユースケース戦略</td><td>UC群がリスクIDには紐付くが、受入条件18項目への対応が不完全（受入14/15のレスポンシブ成立に対応するUCが欠落）</td><td>第8節</td><td>重点受入のシナリオ誘導が後続分析で抜け落ちる恐れ</td><td>UC10（受入14/15）を追加し、全UCに受入条件番号を付与</td></tr>
+<tr><td>P2</td><td>仕様トレーサビリティ</td><td>RELEASE.md を「要参照確認」と曖昧表記。実在を確認可能</td><td>第2/11節</td><td>軽微</td><td>存在確認のうえ「存在確認済み」へ更新、Q7を旧版配布物の用意に絞る</td></tr>
+<tr><td>P3</td><td>体裁</td><td>表のパイプ前後スペース（MD060）lint 警告</td><td>全表</td><td>なし（描画影響なし）</td><td>内容に影響しないため修正対象外</td></tr>
+</tbody></table></div>
+<h4>第1パス（修正）</h4>
+<ul>
+<li>第9節に「資産存在の確認方針」を追記。pytest 群・check-*.mjs・verify.ps1・sample-pdf-smoke.ps1・RELEASE.md の存在/実行可否を本フローで確認し、欠落は R014 または未決事項として記録する方針を明記。RELEASE.md・state.py・domain.py・filename-policy.ts は作成時点で存在確認済み、Rust テストは cargo 未実行と明記。</li>
+<li>第8節に UC10（業務PC幅での操作成立・受入14/15）を追加し、全UCへ受入条件番号列を付与。受入1-18 が UC1-UC10 のいずれかにトレースされる状態にした。</li>
+<li>第2節の RELEASE.md を「存在確認済み」へ更新。第11節 Q7 を「旧バージョン配布物の用意」に絞り、手順書の存在は確定済みとした。</li>
+</ul>
+<h4>第2パス（再レビュー）</h4>
+<ul>
+<li>正式・回帰資産: 存在確認方針が明記され、確認済み/未実行が区別された。P1 解消。</li>
+<li>ユースケース戦略: 受入条件18項目すべてが UC にトレースされ、受入14/15 も UC10 で被覆。P1 解消。</li>
+<li>他観点（リスク分析・スコープ・アプローチ・終了条件・未決管理・除外/残リスク・実行ルート）は第1パスで既に基準を満たしており新規 P0/P1 なし。</li>
+</ul>
+<h3>5. 最終レビュー結果</h3>
+<p>P0・P1 の fix-worthy 指摘は残っていない。</p>
+<p>必要十分性の要約:</p>
+<ul>
+<li>ユースケース/シナリオ戦略: UC1-UC10 を計画レベルで定義し、アクター・ゴール・主リスク・受入条件・優先度を提示。詳細フロー分解は後続分析/設計へ委譲（過剰展開なし）。受入条件18項目すべてに対応UCあり。</li>
+<li>高リスクの後続深さ期待: R001（プレビュー表示）/R002（命名一致）/R014（自動・手動境界）を最高位に置き、第10節で境界網羅・リグレッション観点・FE/BE一致観点・異常系/回復観点・手動受入手順の具体化を後続へ指示。</li>
+<li>汎用QA網羅: 入力/境界（命名・ページ範囲）、状態遷移（busy/世代/再チェック）、永続化（状態保存/復元/破損/多重起動）、異常系・部分失敗、検索/候補/白紙の重処理・無音失敗、セキュリティ表層（CSP/権限/予約名）、互換/アクセシビリティ表層（幅・フォーカス・alt）、観測性（出力ログ・結果可視化）を計画レベルで考慮。製品文脈に合わない項目の機械的羅列は回避。</li>
+<li>正式・回帰資産: pytest 19ファイル・check-all 6検査・Rust 単体・verify.ps1・sample-pdf-smoke.ps1 を回帰資産として扱い、存在確認方針と未実行（cargo）・不在（E2E）の扱いを明記。</li>
+<li>未解決項目: 第11節「未決事項」Q1-Q8 に集約（サインオフ基準・cargo環境・Playwright導入・実機受入体制・テストデータ・OPEN課題扱い・updater配布物・DEFERREDスコープ）。</li>
+<li>除外・残リスク: 第4.2節で自動化外7項目に理由・残リスク・代替確認（手動受入/スモーク/実機チェックリスト）を明記。E2Eゼロ・cargo未実行・sidecar実体未自動化を R014 として可視化し、未実施を緑化しない終了条件を第5節に明記。</li>
+<li>実行ルート・証跡: verify.ps1 / npm スクリプト / pytest / sample-pdf-smoke を計画レベルで反映。</li>
+</ul>
+<p>確認済み観点（チェック実施）:</p>
+<ul>
+<li>正式/回帰資産の扱い: 済</li>
+<li>未解決項目の集約: 済（第11節）</li>
+<li>除外/残リスクの扱い: 済（第4.2節・第5.3節）</li>
+<li>実行/証跡ルート: 済（第2・9節）</li>
+</ul>
+<h3>6. 残課題</h3>
+<p>P0/P1: なし。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>優先度</th><th>項目</th><th>推奨アクション</th></tr></thead>
+<tbody>
+<tr><td>P2</td><td>未決事項 Q1-Q8（サインオフ基準・cargo実行・Playwright導入・実機受入体制・テストデータ・OPEN課題ISS-027/028・updater旧版配布物・DEFERREDスコープ）</td><td>計画上は第11節に集約済み。リリース判断前にユーザー/PMへ確認し、確定値を反映する。情報未取得のため本フローでは埋めない（捏造回避）。</td></tr>
+<tr><td>P3</td><td>表のパイプ前後スペース（MD060 lint 警告）</td><td>内容に影響なし。体裁統一が必要なら一括整形で解消可能。</td></tr>
+<tr><td>P3</td><td>Rust 単体テスト本数の確定</td><td>ビルド機での cargo test 実行時に本数を確定し計画第9節へ反映（現状 ISS-014 記載の13件を参考値として <code>要確認</code>）。</td></tr>
+</tbody></table></div>
+<p>第11節の <code>要確認</code> 項目（Q1-Q8）は、参照資料に根拠が存在しない組織的・環境的事実であり、レビュアが自作すると捏造になるため未確定のまま可視化している。これらは計画の使用を妨げる P0/P1 ではなく、リリース判断前にユーザー確認で埋めるべき P2 として扱う。</p>
+</body>
+</html>

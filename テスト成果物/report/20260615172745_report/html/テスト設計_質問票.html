@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>テスト設計質問票</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+<h2>テスト設計 質問票</h2>
+<p>テスト設計（<code>テスト成果物/テスト設計.md</code>）の合否判定点・実行前提・実行レーン確定に影響する未確定点を集約する。分析質問票 Q1-Q11（<code>テスト成果物/テスト分析_質問票.md</code>）を設計 TD へ紐付けて引き継ぎ、設計質問票 DQ01-DQ11 として1対1で対応させた。参照資料に根拠のない組織的・環境的事実・プロダクト判断未確定の挙動は前提化せず質問として残す（捏造回避）。</p>
+<p>各 DQ は設計の <code>状態=質問待ち</code> 行・<code>## 4. 質問待ち項目</code> と相互リンクする。</p>
+<h3>1. 質問一覧</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>質問ID</th><th>関連テスト設計ID</th><th>関連テスト観点ID</th><th>関連テストアプローチID</th><th>質問</th><th>回答が必要な理由</th><th>回答者候補</th><th>優先度</th></tr></thead>
+<tbody>
+<tr><td>DQ01</td><td>TD063</td><td>TV063</td><td>TA013</td><td>性能の合格しきい値（ページ送りの許容応答時間・体感確認のままでよいか数値計測へ昇格するか・許容Fail数）は何か。リリース可否のサインオフ手順・承認者は</td><td>TD063 の合否判定点が数値で固定できない。性能観点を体感確認にとどめるか数値計測へ昇格するかで実施方法が変わる。参照資料に組織のしきい値定義がない（分析 Q1）</td><td>PM/リリース判断者</td><td>高</td></tr>
+<tr><td>DQ02</td><td>TD058</td><td>TV058</td><td>TA011</td><td>Rust <code>cargo test</code> の実行環境はどこか。lib.rs コード確認では <code>#[test]</code> 定義27件だが計画/ISS-014記載は13件。正しい本数と実行可否は</td><td>TD058 の実行可否・期待本数（TC数）が未確定。cargo 未実行のためパス状況も確定できない（分析 Q2）</td><td>ビルド機担当/SRE</td><td>高</td></tr>
+<tr><td>DQ03</td><td>TD043,TD044,TD045,TD046,TD047b,TD048,TD049,TD050,TD056,TD068,TD069</td><td>TV043-050,TV056,TV068,TV069,TV047</td><td>TA009,TA010</td><td>Playwright の導入有無・設定の所在は。現状 E2E ゼロで、invoke モック範囲の E2E を新規整備する前提でよいか。未導入の場合これら観点を手動受入（探索的 UI 確認）へ退避してよいか</td><td>E2E レーンの TD（11行）の実行基盤が決まらないと、コードベース化（Playwright）か手動退避かのレーンが確定せず、テストケース生成方針が変わる（分析 Q3）</td><td>建設部/QA部</td><td>高</td></tr>
+<tr><td>DQ04</td><td>TD038,TD039,TD040,TD041,TD042,TD055,TD059,TD060,TD061,TD062,TD063,TD064,TD065,TD066,TD071,TD073,TD074,TD075</td><td>TV038-042,TV055,TV059-067,TV071,TV073-075</td><td>TA008,TA012,TA013,TA014,TA015</td><td>手動受入の実施担当・実機環境（OSバージョン・1366px等の対象幅実機の割当）は誰がどこで行うか</td><td>手動受入（実描画・実機Tauri・幅確認・updater）の実施体制が未定。未実施が緑化されないための実行主体が必要（分析 Q4）</td><td>QA部/運用担当</td><td>高</td></tr>
+<tr><td>DQ05</td><td>TD038,TD039,TD055,TD060,TD061,TD075</td><td>TV038,TV039,TV055,TV060,TV061,TV075</td><td>TA008,TA010,TA012</td><td>サンプルPDF・現場PDF・スキャンPDF・日本語パスPDFの実テストデータはどこにあるか。テキスト層あり/なしの両系統が揃うか</td><td>手動受入とスモーク（sample-pdf-smoke.ps1）に必要な入力データの準備状況が不明（分析 Q5）</td><td>運用担当/上西</td><td>高</td></tr>
+<tr><td>DQ06</td><td>TD070,TD071</td><td>TV070,TV071</td><td>TA002,TA013</td><td>OPEN既知課題 ISS-027（リリースビルドでの環境変数オーバーライド無効化）/ ISS-028（残メモ群）のリリース時扱いは（修正/受容/次タスク）</td><td>TD071（実機セキュリティ表層）の合否基準に影響。リリース判断材料（分析 Q6）</td><td>PM/security</td><td>中</td></tr>
+<tr><td>DQ07</td><td>TD064</td><td>TV064</td><td>TA014</td><td>updater 実機検証に必要な旧バージョン配布物（v0.1.1 等）は用意できるか。RELEASE.md は存在確認済み</td><td>TD064（updater一気通し）の実施前提。旧版配布物がないと検出→インストール→再起動の一気通しを確認できない（分析 Q7）</td><td>SRE/リリース担当</td><td>中</td></tr>
+<tr><td>DQ08</td><td>TD032,TD067</td><td>TV032,TV067</td><td>TA007,TA015</td><td>DEFERRED課題（ISS-014常駐結合・ISS-020フロント単体テスト空白・ISS-021/029残項目）の本リリーススコープ内/外は</td><td>スコープ確定。フロント純ロジックのテスト空白は R004/R006 に関係し、TD032/TD067 の合否範囲・自動化範囲が決まる（分析 Q8）</td><td>PM</td><td>中</td></tr>
+<tr><td>DQ09</td><td>TD032</td><td>TV032</td><td>TA007</td><td>分割取り消し時に旧キーから原値を復元する挙動（ISS-003②/ISS-029）はセッション内の意図仕様か。修正済み値より旧値が優先されるケースの是非はプロダクト判断とされている</td><td>同一セグメントで「修正後の値」と「分割取消で復活した旧値」のどちらが正かが未確定だと、TD032 の期待結果（合否判定点）を設計で固定できない（分析 Q9）</td><td>PM/建設部</td><td>中</td></tr>
+<tr><td>DQ10</td><td>TD054</td><td>TV054</td><td>TA010</td><td>blank_candidates の白紙閾値 0.985 の妥当性と境界テストの要否（NF-C2 は DEFERRED）。閾値前後の期待挙動（白紙でないものを白紙としない偽陰性側の許容度）は文書化されているか</td><td>TD054 の期待結果が未文書。偽陰性側に倒す設計意図はコードコメントにあるが、許容境界の正式基準がない（分析 Q10）</td><td>建設部/PM</td><td>低</td></tr>
+<tr><td>DQ11</td><td>TD067</td><td>TV067</td><td>TA015</td><td>分割マーカー（<code>span[role=button]</code> が親 button 内にネストする invalid HTML 構造・ISS-029残項目）はキーボード操作のみ対応済みで構造は将来リファクタとされている。本リリースでアクセシビリティ観点の合否に含めるか（Fail とするか既知制約として受容するか）</td><td>TD067 の合否範囲。invalid HTML を Fail とするか受容するかで判定が変わる（分析 Q11）</td><td>美術部/PM</td><td>低</td></tr>
+</tbody></table></div>
+<h3>2. 補足</h3>
+<ul>
+<li>DQ01-DQ11 はいずれも参照資料（要件定義書・実装状況・issues・コード）に確定根拠がない。テスト設計の合否判定点・実行前提・実行レーン確定に直結するため、テストケース生成・実装ゲートに進む前にユーザー/PM 確認で埋め、確定値を該当 TD の期待結果・実施方法へ反映する。</li>
+<li>設計上は確定できる範囲（コードベース・レーン①の TD001-031/033-037/047a/051-053/057/070/072）を <code>設計済み</code> とし、未確定に依存する TD のみ <code>質問待ち</code> とした。<code>質問待ち</code> でも下流ケース化のための分割方針・期待TC数（仮置き）は記載済みで、回答後に判定点を確定できる構造にしている。</li>
+</ul>
+</body>
+</html>
