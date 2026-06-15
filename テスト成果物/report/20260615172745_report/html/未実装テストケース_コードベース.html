@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>未実装テストケース（コードベース）</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+<h2>未実装テストケース（コードベース）</h2>
+<h3>1. 対象</h3>
+<p><code>テストケース_コードベース.md</code>（TC-CB-001〜144）および <code>テストケース_質問待ち.md</code>（TC-CB-146〜151）のうち、本フェーズ（create-test-code）で新規テストコードとして実装しなかったケースを退避・可視化する。</p>
+<p>「未実装」には次の2区分がある。</p>
+<ul>
+<li>区分A: 既存の自動テスト資産（node check-*.mjs / PowerShell スクリプト）で実行されるため、pytest 新規実装の対象外。実行は既存スクリプトで担保される（＝カバー済み・トレース記録のみ）。</li>
+<li>区分B: DQ（設計質問）未確定により期待結果が <code>要確認</code> のため実装不可（質問待ち）。</li>
+</ul>
+<h3>2. 参照資料</h3>
+<ul>
+<li><code>テスト成果物/テストケース_コードベース.md</code>（TC-CB-001〜144）</li>
+<li><code>テスト成果物/テストケース_質問待ち.md</code>（TC-CB-146〜151・DQ02/08/09/10）</li>
+<li><code>テスト成果物/テスト設計.md</code>（TD032/TD054/TD058 ほか）</li>
+<li><code>apps/desktop/scripts/check-*.mjs</code>（node 検査スクリプト群）</li>
+<li><code>scripts/verify.ps1</code>、<code>scripts/sample-pdf-smoke.ps1</code></li>
+<li><code>apps/desktop/src-tauri/src/lib.rs</code>、<code>Cargo.toml</code>（Rust）</li>
+</ul>
+<h3>3. 未実装テストケース</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>テストケースID</th><th>元テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストケース名</th><th>未実装理由</th><th>実装に必要な確認・対応</th><th>関連質問ID</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TC-CB-060</td><td>TD013</td><td>TV013</td><td>TA003</td><td>Unit</td><td>高</td><td>フロント previewFilename と Python build 結果が一致（node）</td><td>区分A: 既存 node スクリプトで実行（pytest 対象外）</td><td><code>node apps/desktop/scripts/check-filename-policy.mjs</code> を実行レポートで証跡化</td><td>なし</td><td>check-filename-policy.mjs</td><td>R002</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-106</td><td>TD031</td><td>TV031</td><td>TA007</td><td>Unit</td><td>高</td><td>分割点集合から segmentKey が正しく算出される</td><td>区分A: 既存 node スクリプトで実行</td><td><code>node apps/desktop/scripts/check-segment-state.mjs</code></td><td>なし</td><td>check-segment-state.mjs</td><td>R004,R011</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-107</td><td>TD031</td><td>TV031</td><td>TA007</td><td>Unit</td><td>高</td><td>buildSegments が正しいセグメント集合を生成する</td><td>区分A: 既存 node スクリプトで実行</td><td>check-segment-state.mjs</td><td>なし</td><td>check-segment-state.mjs</td><td>R004,R011</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-108</td><td>TD033</td><td>TV033</td><td>TA007</td><td>Unit</td><td>中</td><td>resequenceSegmentMetadata が連番を採番し直す</td><td>区分A: 既存 node スクリプトで実行</td><td>check-segment-state.mjs</td><td>なし</td><td>check-segment-state.mjs</td><td>R012</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-109</td><td>TD033</td><td>TV033</td><td>TA007</td><td>Unit</td><td>中</td><td>手動入力済み連番を意図どおりに扱う</td><td>区分A: 既存 node スクリプトで実行</td><td>check-segment-state.mjs</td><td>なし</td><td>check-segment-state.mjs</td><td>R012</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-110</td><td>TD034</td><td>TV034</td><td>TA007</td><td>Unit</td><td>高</td><td>プレビューキャッシュ LRU 退避</td><td>区分A: 既存 node スクリプトで実行</td><td>check-preview-cache.mjs</td><td>なし</td><td>check-preview-cache.mjs</td><td>R006</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-111</td><td>TD034</td><td>TV034</td><td>TA007</td><td>Unit</td><td>高</td><td>世代越えの古い応答を破棄</td><td>区分A: 既存 node スクリプトで実行</td><td>check-preview-cache.mjs</td><td>なし</td><td>check-preview-cache.mjs</td><td>R006</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-112</td><td>TD034</td><td>TV034</td><td>TA007</td><td>Unit</td><td>高</td><td>リクエストゲートが重複をブロック</td><td>区分A: 既存 node スクリプトで実行</td><td>check-preview-cache.mjs</td><td>なし</td><td>check-preview-cache.mjs</td><td>R006</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-113</td><td>TD035</td><td>TV035</td><td>TA007</td><td>Unit</td><td>中</td><td>restorableInputPaths 全件返却</td><td>区分A: 既存 node スクリプトで実行</td><td>check-restore-state.mjs</td><td>なし</td><td>check-restore-state.mjs</td><td>R004</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-114</td><td>TD035</td><td>TV035</td><td>TA007</td><td>Unit</td><td>中</td><td>restorableInputPaths 存在分のみ＋欠損報告</td><td>区分A: 既存 node スクリプトで実行</td><td>check-restore-state.mjs</td><td>なし</td><td>check-restore-state.mjs</td><td>R004</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-115</td><td>TD035</td><td>TV035</td><td>TA007</td><td>Unit</td><td>中</td><td>restorableInputPaths 全欠損で空＋全件報告</td><td>区分A: 既存 node スクリプトで実行</td><td>check-restore-state.mjs</td><td>なし</td><td>check-restore-state.mjs</td><td>R004</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-116</td><td>TD036</td><td>TV036</td><td>TA007</td><td>Unit</td><td>中</td><td>isOutputCheckOk が true</td><td>区分A: 既存 node スクリプトで実行</td><td>check-output-state.mjs</td><td>なし</td><td>check-output-state.mjs</td><td>R006</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-117</td><td>TD036</td><td>TV036</td><td>TA007</td><td>Unit</td><td>中</td><td>isOutputCheckOk が false＋issue数一致</td><td>区分A: 既存 node スクリプトで実行</td><td>check-output-state.mjs</td><td>なし</td><td>check-output-state.mjs</td><td>R006</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-118</td><td>TD036</td><td>TV036</td><td>TA007</td><td>Unit</td><td>中</td><td>mergeRetriedExport がマージ</td><td>区分A: 既存 node スクリプトで実行</td><td>check-output-state.mjs</td><td>なし</td><td>check-output-state.mjs</td><td>R006</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-119</td><td>TD037</td><td>TV037</td><td>TA007</td><td>Unit</td><td>高</td><td>STEP1 完了判定 true</td><td>区分A: 既存 node スクリプトで実行</td><td>check-step-render.mjs</td><td>なし</td><td>check-step-render.mjs</td><td>R014</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-120</td><td>TD037</td><td>TV037</td><td>TA007</td><td>Unit</td><td>高</td><td>STEP1 完了判定 false</td><td>区分A: 既存 node スクリプトで実行</td><td>check-step-layout.mjs</td><td>なし</td><td>check-step-layout.mjs</td><td>R014</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-121</td><td>TD037</td><td>TV037</td><td>TA007</td><td>Unit</td><td>高</td><td>STEP2 完了判定</td><td>区分A: 既存 node スクリプトで実行</td><td>check-step-render.mjs</td><td>なし</td><td>check-step-render.mjs</td><td>R014</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-122</td><td>TD037</td><td>TV037</td><td>TA007</td><td>Unit</td><td>高</td><td>STEP3 完了判定</td><td>区分A: 既存 node スクリプトで実行</td><td>check-step-render.mjs</td><td>なし</td><td>check-step-render.mjs</td><td>R014</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-123</td><td>TD037</td><td>TV037</td><td>TA007</td><td>Unit</td><td>高</td><td>STEP4 完了判定</td><td>区分A: 既存 node スクリプトで実行</td><td>check-step-render.mjs</td><td>なし</td><td>check-step-render.mjs</td><td>R014</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-124</td><td>TD037</td><td>TV037</td><td>TA007</td><td>Unit</td><td>高</td><td>STEP 遷移条件</td><td>区分A: 既存 node スクリプトで実行</td><td>check-step-layout.mjs</td><td>なし</td><td>check-step-layout.mjs</td><td>R014</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-134</td><td>TD057</td><td>TV057</td><td>TA011</td><td>Regression</td><td>高</td><td>pytest 19ファイル全件パス</td><td>区分A: 既存 pytest スイート全実行で担保（個別新規実装ではない）</td><td><code>pytest recovery/tests/</code> 実行レポートで証跡化</td><td>なし</td><td>docs/05、SSI017</td><td>R001,R003,R004,R014</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-135</td><td>TD057</td><td>TV057</td><td>TA011</td><td>Regression</td><td>高</td><td>check-all.mjs 全6検査＋step-render/layout パス</td><td>区分A: 既存 node スクリプトで実行</td><td><code>node apps/desktop/scripts/check-all.mjs</code> ほか</td><td>なし</td><td>docs/05、SSI017</td><td>R001,R003,R004,R014</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-136</td><td>TD057</td><td>TV057</td><td>TA011</td><td>Regression</td><td>高</td><td>verify.ps1 が存在し実行できる</td><td>区分A: PowerShell スクリプト（pytest 対象外）。実機 sidecar 起動を伴うため実行フェーズで証跡化</td><td><code>.\scripts\verify.ps1</code> 実行・終了コード確認</td><td>なし</td><td>scripts/verify.ps1、SSI017</td><td>R001,R003,R004,R014</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-137</td><td>TD057</td><td>TV057</td><td>TA011</td><td>Regression</td><td>高</td><td>sample-pdf-smoke.ps1 が存在し実行できる</td><td>区分A: PowerShell スクリプト（pytest 対象外）</td><td><code>.\scripts\sample-pdf-smoke.ps1</code> 実行・終了コード確認</td><td>なし</td><td>scripts/sample-pdf-smoke.ps1、SSI017</td><td>R001,R003,R004,R014</td><td>作成済み（既存資産でカバー）</td></tr>
+<tr><td>TC-CB-146</td><td>TD032</td><td>TV032</td><td>TA007</td><td>Unit</td><td>高</td><td>分割点追加後削除でキー外 segmentMetadata 削除</td><td>区分B: 質問待ち（削除フィルタ動作仕様が未確定）</td><td>DQ08 回答後に期待値確定→実装</td><td>DQ08</td><td>segmentMetadata削除フィルタ仕様</td><td>R004,R011</td><td>質問待ち</td></tr>
+<tr><td>TC-CB-147</td><td>TD032</td><td>TV032</td><td>TA007</td><td>Unit</td><td>高</td><td>分割取り消しで旧キーから元値が復活する経路の合否</td><td>区分B: 質問待ち（復活経路の有無が未確定で期待結果＝要確認）</td><td>DQ09 回答後に期待値確定→実装</td><td>DQ09</td><td>segmentMetadata復元経路仕様</td><td>R004,R011</td><td>質問待ち</td></tr>
+<tr><td>TC-CB-148</td><td>TD054</td><td>TV054</td><td>TA010</td><td>Unit</td><td>低</td><td>白紙閾値直前（98.4%）で白紙候補に含まれない</td><td>区分B: 質問待ち（閾値0.985直前の合否基準が未確定）</td><td>DQ10 回答後に境界期待値確定→実装</td><td>DQ10</td><td>blank_candidates閾値仕様</td><td>R010</td><td>質問待ち</td></tr>
+<tr><td>TC-CB-149</td><td>TD054</td><td>TV054</td><td>TA010</td><td>Unit</td><td>低</td><td>白紙閾値ちょうど（98.5%）の判定</td><td>区分B: 質問待ち（閾値ちょうどの境界動作が未確定）</td><td>DQ10 回答後に境界期待値確定→実装</td><td>DQ10</td><td>blank_candidates閾値仕様</td><td>R010</td><td>質問待ち</td></tr>
+<tr><td>TC-CB-150</td><td>TD054</td><td>TV054</td><td>TA010</td><td>Unit</td><td>低</td><td>白紙閾値直後（98.6%）で白紙候補に含まれる</td><td>区分B: 質問待ち（閾値0.985直後の合否基準が未確定）</td><td>DQ10 回答後に境界期待値確定→実装</td><td>DQ10</td><td>blank_candidates閾値仕様</td><td>R010</td><td>質問待ち</td></tr>
+<tr><td>TC-CB-151</td><td>TD058</td><td>TV058</td><td>TA011</td><td>Regression</td><td>中</td><td>cargo test（lib.rs）全件パス確認</td><td>区分B: 質問待ち（実行環境・対象本数が未確定）。実行フェーズで cargo を試行し結果を正直に記録するが、期待本数の確定は DQ02 待ち</td><td>DQ02 回答後に対象本数を確定</td><td>DQ02</td><td>lib.rsテストスイート仕様</td><td>R014</td><td>質問待ち</td></tr>
+</tbody></table></div>
+<h3>4. 実装に必要な確認・対応</h3>
+<ul>
+<li>区分A（TC-CB-060, 106〜124, 134〜137）: 新規 pytest 実装は不要。実行フェーズ（execute-codebase-tests）で対応する node コマンド／既存 pytest スイート／PowerShell スクリプトを実行し、Pass/Fail を証跡化する。<code>check-step-render.mjs</code> と <code>check-step-layout.mjs</code> は <code>check-all.mjs</code> に含まれないため個別実行が必要。</li>
+<li>区分B（TC-CB-146〜151）: DQ02/08/09/10 の回答が前提。回答後に <code>テストケース_質問待ち.md</code> §5 の反映方針で期待結果を確定し、<code>テストケース_コードベース.md</code> へ移送してから実装する。TC-CB-151（cargo）は実行フェーズで試行可能だが、既知事象として <code>py</code>（Python ランチャ）不在で一部テストが失敗する。失敗は握りつぶさず原因（環境 or 実バグ）を区別して記録する。</li>
+</ul>
+<h3>5. トレーサビリティ確認</h3>
+<ul>
+<li>内訳: pytest 新規実装121件（TC-CB-001〜059, 061〜105, 125〜133, 138〜145。TC-CB-144/145＝観測性も含む）＋本ファイル退避 区分A 24件（TC-CB-060, 106〜124＝19件, 134, 135, 136, 137）＋区分B 6件（TC-CB-146〜151）。</li>
+<li>合算: 121 ＋ 24 ＝ 145（TC-CB-001〜145 全件を網羅）。加えて質問待ち6件（TC-CB-146〜151）を区分Bとして退避。</li>
+<li>各行は元 TD/TV/TA/仕様/リスクID を保持し、TC→TD→TV→TA/R のトレースを維持する。</li>
+<li>区分B 6件は該当 DQ（DQ02/08/09/10）に紐づき、回答後の実装パスが明示されている。</li>
+</ul>
+</body>
+</html>

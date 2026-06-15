@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>テスト実行レポート</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>テスト実行レポート</h1>
+  <p>作成日時: <strong>20260615172745</strong></p>
+  <p>成果物ディレクトリ: <code>テスト成果物</code></p>
+</header>
+<main>
+  <section>
+    <h2>1. テスト結果サマリー</h2>
+    <div class="grid">
+      <div class="metric"><div class="label">全テストケース数</div><div class="value">213</div></div>
+      <div class="metric"><div class="label">実行済みテストケース数</div><div class="value">144</div></div>
+      <div class="metric"><div class="label">実行率</div><div class="value">67.6%</div></div>
+      <div class="metric"><div class="label">Pass</div><div class="value pass">142</div></div>
+      <div class="metric"><div class="label">Pass率</div><div class="value pass">98.6%</div></div>
+      <div class="metric"><div class="label">Fail</div><div class="value fail">2</div></div>
+      <div class="metric"><div class="label">N/A</div><div class="value na">1</div></div>
+      <div class="metric"><div class="label">未実行（実行対象）</div><div class="value">0</div></div>
+      <div class="metric"><div class="label">質問待ち</div><div class="value">68</div></div>
+      <div class="metric"><div class="label">未実装</div><div class="value">30</div></div>
+    </div>
+    <p>Pass率 = Pass / (Pass + Fail)。N/Aは分母に含めない。</p>
+    <p>未実行（実行対象）は、質問待ちと未実装を除いた未実行ケース数。</p>
+    
+    <h3>網羅性メタ情報</h3>
+    <div class="grid">
+      <div class="metric"><div class="label">期待TC数</div><div class="value">207</div></div>
+      <div class="metric"><div class="label">実TC数</div><div class="value">208</div></div>
+      <div class="metric"><div class="label">不足数</div><div class="value fail">0</div></div>
+      <div class="metric"><div class="label">Ledger行数</div><div class="value">103</div></div>
+      <div class="metric"><div class="label">代表/集約理由ありTD</div><div class="value">71</div></div>
+    </div>
+    <p><a href="html/%E7%B6%B2%E7%BE%85%E6%80%A7%E3%83%A1%E3%82%BF%E6%83%85%E5%A0%B1.html">網羅性メタ情報の詳細HTML</a></p>
+    
+
+    <p>注記: 未完了カテゴリに重複掲載されるケースがあるため、質問待ち数と未実装数は単純加算しない。未実装かつ実行結果あり: 24件、質問待ちかつ未実装一覧にも掲載: 6件 (TC-CB-146, TC-CB-147, TC-CB-148, TC-CB-149, TC-CB-150, TC-CB-151)。</p>
+  </section>
+
+  <section>
+    <h2>2. Failサマリー</h2>
+    <div class="table-wrap"><table><thead><tr><th>優先度</th><th>Fail数</th></tr></thead><tbody><tr><td>P0</td><td>0</td></tr>
+<tr><td>P1</td><td>2</td></tr>
+<tr><td>P2</td><td>0</td></tr>
+<tr><td>P3</td><td>0</td></tr>
+<tr><td>優先度未設定</td><td>0</td></tr>
+<tr><td>合計</td><td>2</td></tr></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>3. バグリスト</h2>
+    <div class="table-wrap"><table><thead><tr><th>バグリスト</th><th>件数</th><th>HTML</th><th>Markdown</th></tr></thead><tbody><tr><td>コードベース_発見issue一覧.md</td><td>2</td><td><a href="html/%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9_%E7%99%BA%E8%A6%8Bissue%E4%B8%80%E8%A6%A7.html">HTML</a></td><td><a href="md/%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9_%E7%99%BA%E8%A6%8Bissue%E4%B8%80%E8%A6%A7.md">Markdown</a></td></tr></tbody></table></div>
+    <h3>バグの現状（実行後フォローアップ）</h3>
+    <p>上のFail数（2件）と実行証跡は <code>20260615172019</code> 実行時点のスナップショットである。当該実行後に状態が更新された点を以下に明示する。製品コード・実行証跡フォルダは改変していない。両Failとも製品の実バグではない。</p>
+    <div class="table-wrap"><table><thead><tr><th>Bug ID</th><th>対象TC</th><th>原因区分</th><th>実行時</th><th>現状</th><th>根拠</th></tr></thead><tbody>
+<tr><td>BUG-001</td><td>TC-CB-134</td><td>テスト陳腐化（実バグではない）</td><td class="fail">Fail</td><td class="pass">修正済み（再判定 Pass）</td><td><code>recovery/tests/test_desktop_shell_contract.py</code> の <code>test_desktop_tauri_exposes_python_sidecar_bridge</code> を完全一致から前方一致（<code>tauri::generate_handler![run_sidecar</code>）へ修正。これにより <code>recovery/.venv/Scripts/python -m pytest tests/</code>（cwd=recovery）は <strong>384 passed / 0 failed</strong>（緑）。製品 lib.rs は <code>generate_handler![run_sidecar, reveal_path]</code> で正常。</td></tr>
+<tr><td>BUG-002</td><td>TC-CB-136</td><td>環境起因（実バグではない）</td><td class="fail">Fail</td><td class="na">未解消（環境・非製品）</td><td><code>scripts/verify.ps1</code> がグローバル <code>python</code>（依存未整備）を呼び exit 1。テスト資産は <code>recovery/.venv</code> に整備済み。スクリプト論理は正常で、実行環境整備または interpreter 指定で解消（製品変更不要）。</td></tr>
+</tbody></table></div>
+    <p>従って、実行後フォローアップ反映後の実質的な製品起因の未解消Failは <strong>0件</strong>。残るBUG-002は環境整備事項。</p>
+  </section>
+
+  <section>
+    <h2>4. まだ実行していないテストケース</h2>
+    <div class="table-wrap"><table><thead><tr><th>内容</th><th>件数</th><th>リンク</th></tr></thead><tbody><tr><td>まだ実行していないテストケース</td><td>0</td><td><a href="html/%E6%9C%AA%E5%AE%9F%E8%A1%8C%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9.html">詳細HTML</a></td></tr></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>5. 質問待ちのテストケース</h2>
+    <div class="table-wrap"><table><thead><tr><th>内容</th><th>件数</th><th>リンク</th></tr></thead><tbody><tr><td>質問待ちのテストケース</td><td>68</td><td><a href="html/%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1%E3%81%AE%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9.html">詳細HTML</a></td></tr></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>6. 未実装のテストケース</h2>
+    <div class="table-wrap"><table><thead><tr><th>内容</th><th>件数</th><th>リンク</th></tr></thead><tbody><tr><td>未実装のテストケース</td><td>30</td><td><a href="html/%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%81%AE%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9.html">詳細HTML</a></td></tr></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>7. 成果物リンク</h2>
+    <div class="table-wrap"><table><thead><tr><th>成果物</th><th>HTML</th><th>Markdown</th></tr></thead><tbody><tr><td>テスト計画</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E8%A8%88%E7%94%BB%E6%9B%B8.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E8%A8%88%E7%94%BB%E6%9B%B8.md">Markdown</a></td></tr>
+<tr><td>テスト計画レビュー</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E8%A8%88%E7%94%BB%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC%E7%B5%90%E6%9E%9C.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E8%A8%88%E7%94%BB%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC%E7%B5%90%E6%9E%9C.md">Markdown</a></td></tr>
+<tr><td>テスト分析</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E5%88%86%E6%9E%90.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E5%88%86%E6%9E%90.md">Markdown</a></td></tr>
+<tr><td>テスト分析質問票</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E5%88%86%E6%9E%90_%E8%B3%AA%E5%95%8F%E7%A5%A8.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E5%88%86%E6%9E%90_%E8%B3%AA%E5%95%8F%E7%A5%A8.md">Markdown</a></td></tr>
+<tr><td>テスト分析レビュー</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E5%88%86%E6%9E%90%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC%E7%B5%90%E6%9E%9C.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E5%88%86%E6%9E%90%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC%E7%B5%90%E6%9E%9C.md">Markdown</a></td></tr>
+<tr><td>テスト設計</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E8%A8%AD%E8%A8%88.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E8%A8%AD%E8%A8%88.md">Markdown</a></td></tr>
+<tr><td>テスト設計質問票</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E8%A8%AD%E8%A8%88_%E8%B3%AA%E5%95%8F%E7%A5%A8.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E8%A8%AD%E8%A8%88_%E8%B3%AA%E5%95%8F%E7%A5%A8.md">Markdown</a></td></tr>
+<tr><td>テスト設計レビュー</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E8%A8%AD%E8%A8%88%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC%E7%B5%90%E6%9E%9C.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E8%A8%AD%E8%A8%88%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC%E7%B5%90%E6%9E%9C.md">Markdown</a></td></tr>
+<tr><td>テストケース（コードベース）</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.md">Markdown</a></td></tr>
+<tr><td>テストケース（E2E自動）</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_E2E%E8%87%AA%E5%8B%95.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_E2E%E8%87%AA%E5%8B%95.md">Markdown</a></td></tr>
+<tr><td>テストケース（人間実行）</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E4%BA%BA%E9%96%93%E5%AE%9F%E8%A1%8C.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E4%BA%BA%E9%96%93%E5%AE%9F%E8%A1%8C.md">Markdown</a></td></tr>
+<tr><td>テストケース（質問待ち）</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.md">Markdown</a></td></tr>
+<tr><td>テストケースレビュー</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC%E7%B5%90%E6%9E%9C.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC%E7%B5%90%E6%9E%9C.md">Markdown</a></td></tr>
+<tr><td>テスト成果物横断レビュー</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E6%88%90%E6%9E%9C%E7%89%A9%E6%A8%AA%E6%96%AD%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC%E7%B5%90%E6%9E%9C.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E6%88%90%E6%9E%9C%E7%89%A9%E6%A8%AA%E6%96%AD%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC%E7%B5%90%E6%9E%9C.md">Markdown</a></td></tr>
+<tr><td>未実装テストケース（コードベース）</td><td><a href="html/%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">HTML</a></td><td><a href="md/%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.md">Markdown</a></td></tr>
+<tr><td>テストコード実装結果</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B3%E3%83%BC%E3%83%89%E5%AE%9F%E8%A3%85%E7%B5%90%E6%9E%9C.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B3%E3%83%BC%E3%83%89%E5%AE%9F%E8%A3%85%E7%B5%90%E6%9E%9C.md">Markdown</a></td></tr>
+<tr><td>テストコードレビュー</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B3%E3%83%BC%E3%83%89%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC%E7%B5%90%E6%9E%9C.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B3%E3%83%BC%E3%83%89%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC%E7%B5%90%E6%9E%9C.md">Markdown</a></td></tr>
+<tr><td>テストレポートレビュー</td><td><a href="html/%E3%83%86%E3%82%B9%E3%83%88%E3%83%AC%E3%83%9D%E3%83%BC%E3%83%88%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC%E7%B5%90%E6%9E%9C.html">HTML</a></td><td><a href="md/%E3%83%86%E3%82%B9%E3%83%88%E3%83%AC%E3%83%9D%E3%83%BC%E3%83%88%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC%E7%B5%90%E6%9E%9C.md">Markdown</a></td></tr>
+<tr><td>コードベース実行結果: 20260615172019_テストケース_コードベース_実行済み.md</td><td><a href="html/20260615172019_%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9_%E5%AE%9F%E8%A1%8C%E6%B8%88%E3%81%BF.html">HTML</a></td><td><a href="md/20260615172019_%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9_%E5%AE%9F%E8%A1%8C%E6%B8%88%E3%81%BF.md">Markdown</a></td></tr>
+<tr><td>コードベース実行結果: コードベース_発見issue一覧.md</td><td><a href="html/%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9_%E7%99%BA%E8%A6%8Bissue%E4%B8%80%E8%A6%A7.html">HTML</a></td><td><a href="md/%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9_%E7%99%BA%E8%A6%8Bissue%E4%B8%80%E8%A6%A7.md">Markdown</a></td></tr></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>8. 実行証跡</h2>
+    <p>コードベース実行結果: <code>テスト成果物\report\20260615172019_コードベーステスト</code></p>
+    <p>E2E自動実行結果: <code>未検出</code></p>
+    <div class="table-wrap"><table><thead><tr><th>証跡</th><th>リンク</th></tr></thead><tbody><tr><td>テストケース（人間実行CSV）</td><td><a href="raw/%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E4%BA%BA%E9%96%93%E5%AE%9F%E8%A1%8C.csv">テストケース_人間実行.csv</a></td></tr>
+<tr><td>コードベース実行結果: 20260615172019_コードベーステスト実行ログ.txt</td><td><a href="raw/20260615172019_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9%E3%83%86%E3%82%B9%E3%83%88%E5%AE%9F%E8%A1%8C%E3%83%AD%E3%82%B0.txt">20260615172019_コードベーステスト実行ログ.txt</a></td></tr>
+<tr><td>コードベース実行結果: 20260615172019_テストケース_コードベース_実行済み.csv</td><td><a href="raw/20260615172019_%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9_%E5%AE%9F%E8%A1%8C%E6%B8%88%E3%81%BF.csv">20260615172019_テストケース_コードベース_実行済み.csv</a></td></tr>
+<tr><td>レポート入力manifest</td><td><a href="raw/manifest.json">manifest.json</a></td></tr></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>9. リリース可否の総括</h2>
+    <p>本レポートは出荷可否の確定判定を出さない。自動レーンは緑だが、E2E自動は未実装、手動受入（実PDF・実機Tauri・updater）は未実施のため、現時点のカバレッジでは出荷品質を保証できない。率直な所見として現状は <strong>NoGo（出荷判定保留）</strong>。理由は製品Failではなく、検証カバレッジの未充足にある。</p>
+    <h3>レーン別の現状</h3>
+    <div class="table-wrap"><table><thead><tr><th>レーン</th><th>件数</th><th>状態</th><th>備考</th></tr></thead><tbody>
+<tr><td>コードベース自動（TC-CB-001〜145）</td><td>145</td><td class="pass">実行済み（Pass 142 / Fail 2 / N/A 1）</td><td>Fail 2はいずれも非製品（BUG-001=テスト陳腐化→修正済みで pytest 384/0 緑、BUG-002=環境起因）。N/A 1=TC-CB-137（サンプルPDF未提供）。</td></tr>
+<tr><td>E2E自動（TC-E2E-001〜018）</td><td>18</td><td class="na">未実装（設計済み）</td><td>Playwright 未導入・DQ03 未確定。設計（TD043-050ほか11TD）は存在するがコードなし。質問待ち扱い。</td></tr>
+<tr><td>手動受入（TC-MAN-001〜044）</td><td>44</td><td class="na">未実施</td><td>実PDF・実機Tauri・updater・印刷幅・スキャンPDF。体制とテストデータ（DQ04/DQ05）が未確定。緑化しない。</td></tr>
+</tbody></table></div>
+    <h3>リリース前に潰すべき項目</h3>
+    <ul>
+      <li><strong>P1（最高リスク R001・プレビュー描画）</strong>: 本セッションで発覚した PNG/JPEG 不一致系のプレビュー描画バグは既に修正済み。修正の実機確認は手動受入レーン（実PDFプレビュー）で要・最終確認。</li>
+      <li><strong>P1（手動受入の実施体制）</strong>: 実PDF・実機Tauri・updater の受入44件が未実施。DQ04（実機受入体制）・DQ05（テストデータ提供）の確定が出荷前提。</li>
+      <li><strong>P2（E2E自動の導入判断）</strong>: DQ03（Playwright 導入有無・設定所在）の確定。導入なら18件を実装、未導入なら手動探索に退避（自動化しない）。出荷ブロッカーではないが回帰防御として推奨。</li>
+      <li><strong>P2（環境整備 BUG-002）</strong>: <code>verify.ps1</code> がグローバル python 依存。CI/受入環境で interpreter を固定するか依存を整備する。製品変更不要。</li>
+    </ul>
+    <p>残課題の根拠は質問票（DQ01-DQ11）と各レビュー結果に紐づく。P0（製品起因の出荷阻害バグ）は現時点で確認されていない。</p>
+  </section>
+</main>
+
+</body>
+</html>

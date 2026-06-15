@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>コードベース実行結果: コードベース_発見issue一覧.md</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+<h2>コードベース_発見issue一覧</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Bug ID</th><th>要約</th><th>優先度</th><th>何がどうなったか</th><th>期待結果</th><th>トレーサビリティ</th><th>発見日時</th><th>関連実行済みテストケース</th></tr></thead>
+<tbody>
+<tr><td>BUG-001</td><td>TC-CB-134 pytest 19ファイル全件が存在し全件パスする がFail</td><td>P1</td><td>TC-CB-134 がテスト実行でFailになった。詳細は実行ログを参照。</td><td>19ファイル全件の test_* 関数がエラーなく PASSED になり、FAILED が0件</td><td>TC-CB-134 / 元テスト設計ID: TD057 / テスト観点ID: TV057 / テストアプローチID: TA011 / 仕様: docs/05検証コマンド、SSI017 / リスクID: R001,R003,R004,R014</td><td>20260615172019</td><td>テスト成果物\report\20260615172019_コードベーステスト\20260615172019_テストケース_コードベース_実行済み.md</td></tr>
+<tr><td>BUG-002</td><td>TC-CB-136 verify.ps1 が存在し実行できる がFail</td><td>P1</td><td>TC-CB-136 がテスト実行でFailになった。詳細は実行ログを参照。</td><td>verify.ps1 が最後まで実行され、異常終了しない</td><td>TC-CB-136 / 元テスト設計ID: TD057 / テスト観点ID: TV057 / テストアプローチID: TA011 / 仕様: docs/05検証コマンド、scripts/verify.ps1、SSI017 / リスクID: R001,R003,R004,R014</td><td>20260615172019</td><td>テスト成果物\report\20260615172019_コードベーステスト\20260615172019_テストケース_コードベース_実行済み.md</td></tr>
+</tbody></table></div>
+<h3>原因区分の補足（環境 vs 実バグ）</h3>
+<p>失敗・N/A の原因を「製品コードの実バグ」と「テスト/環境起因」に切り分けて記録する。いずれも本フェーズで追加した新規テストの失敗ではない。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>ID</th><th>区分</th><th>根本原因</th><th>是正の所在</th></tr></thead>
+<tbody>
+<tr><td>BUG-001 / TC-CB-134</td><td>テスト陳腐化（実バグではない）</td><td>既存 <code>recovery/tests/test_desktop_shell_contract.py::test_desktop_tauri_exposes_python_sidecar_bridge</code> が旧文字列 <code>tauri::generate_handler![run_sidecar]</code> を完全一致でアサート。製品 lib.rs は <code>generate_handler![run_sidecar, reveal_path]</code> へ拡張済み（<code>reveal_path</code> コマンド追加）で、テスト側の期待値が未更新。製品の機能後退ではなく、テストの期待値固定化が古い。製品コードは本フェーズ対象外のため未修整（既存テストの更新は別途必要）。</td><td>既存テストの期待値更新（製品変更不要）</td></tr>
+<tr><td>BUG-002 / TC-CB-136</td><td>環境起因（実バグではない）</td><td><code>scripts/verify.ps1</code> がグローバルの <code>python</code>（PATH 上）を呼ぶ設計だが、当環境のグローバル python に pytest/PyMuPDF が無く exit 1。テスト資産は recovery/.venv に導入済み。スクリプト自体の論理は正常で、前提とする実行環境（依存入りの python on PATH）が未整備。</td><td>実行環境整備 or verify.ps1 の interpreter 指定（製品変更不要）</td></tr>
+<tr><td>TC-CB-137（N/A）</td><td>実行不能（入力未提供）</td><td><code>scripts/sample-pdf-smoke.ps1</code> は必須引数 <code>-PdfPath</code> を要求するが、リポジトリにサンプル PDF フィクスチャが無いため未起動。テスト設計上は実 PDF を伴う手動受入スコープ。</td><td>実 PDF 提供時に実行（手動レーン）</td></tr>
+</tbody></table></div>
+<h3>参考: コードベース表外の観測（TC-CB-151 質問待ち・cargo）</h3>
+<p>TC-CB-151（質問待ち DQ02）は本コードベース表に含まれないが、指示により cargo を試行した結果を残す。</p>
+<ul>
+<li>実行: <code>cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml</code> → **22 passed / 5 failed**。</li>
+<li>5 失敗は <code>tests::resident_sidecar_*</code> 系で、<code>std::process::Command::new(&quot;py&quot;)</code>（Python ランチャ <code>py -3.12</code>）が当環境に不在（<code>program not found</code>）なため。**環境起因であり製品コードの実バグではない**（reveal_target 等の本体ロジックテストは成功）。</li>
+<li>DQ02（実行環境・対象本数の確定）回答後に正式判定する。</li>
+</ul>
+</body>
+</html>

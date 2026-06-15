@@ -31,7 +31,9 @@ def test_desktop_tauri_exposes_python_sidecar_bridge() -> None:
     assert "#[tauri::command]" in lib_rs
     assert "run_sidecar" in lib_rs
     assert "pdf_splitter_tool" in lib_rs
-    assert "tauri::generate_handler![run_sidecar]" in lib_rs
+    # run_sidecar が generate_handler に登録されていることを確認する。
+    # コマンドの追加（例: reveal_path）で壊れないよう、完全一致ではなく前方一致で照合する。
+    assert "tauri::generate_handler![run_sidecar" in lib_rs
 
 
 def test_desktop_tauri_runs_resident_sidecar_with_oneshot_fallback() -> None:

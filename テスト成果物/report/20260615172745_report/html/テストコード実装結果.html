@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>テストコード実装結果</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+<h2>テストコード実装結果</h2>
+<h3>1. 実装対象</h3>
+<p><code>テストケース_コードベース.md</code>（TC-CB-001〜145）のうち、pytest で実装可能な121件を新規テストファイル <code>recovery/tests/test_tc_cb_codebase.py</code> に実装した。node 検査スクリプト／PowerShell スクリプト／Rust で実行されるケース（区分A 24件）と質問待ち（区分B 6件＝TC-CB-146〜151）は新規実装せず <code>未実装テストケース_コードベース.md</code> に退避した。</p>
+<p>対象モジュール（製品コードは変更なし。テストコードのみ追加）:</p>
+<ul>
+<li><code>recovery/pdf_splitter_tool/domain.py</code>（命名・affix・seq_digits・禁止文字/予約名正規化）</li>
+<li><code>recovery/pdf_splitter_tool/sidecar.py</code>（<code>handle_request</code> / <code>serve</code> コマンド契約・エラー応答）</li>
+<li><code>recovery/pdf_splitter_tool/state_schema.py</code>（<code>normalize_state_payload</code> 型検証・正規化）</li>
+<li><code>recovery/pdf_splitter_tool/state.py</code>（<code>StateManager</code> 復元・耐障害）</li>
+<li><code>recovery/pdf_splitter_tool/pdf_service.py</code>（<code>search_text</code> truncation・<code>blank_candidates</code> partial/start_page）</li>
+</ul>
+<h3>2. 参照資料</h3>
+<ul>
+<li><code>テスト成果物/テストケース_コードベース.md</code>、<code>テスト成果物/テストケース_質問待ち.md</code></li>
+<li><code>テスト成果物/テスト設計.md</code>、<code>テスト成果物/テスト分析.md</code>、<code>テスト成果物/テスト計画書.md</code></li>
+<li><code>docs/01_要件定義書.md</code>（命名仕様第8節・状態保存第9節・受入条件）</li>
+<li>既存 pytest 19ファイル（<code>recovery/tests/</code>）、既存 node 8スクリプト（<code>apps/desktop/scripts/</code>）</li>
+</ul>
+<h3>3. 使用テストフレームワーク</h3>
+<ul>
+<li>Python: pytest 9.1.0（<code>recovery/.venv/Scripts/python.exe -m pytest</code>）。pyproject の optional-deps <code>test = [&quot;pytest&gt;=8&quot;]</code> に宣言済みの既存テスト基盤。本フェーズで venv に pytest を導入（製品依存ではなくテストランナーの有効化）。PyMuPDF（fitz）は導入済みを利用。</li>
+<li>既存資産: node 検査スクリプト（<code>node:assert/strict</code> ベースの自作ハーネス。TypeScript を <code>typescript</code> で都度トランスパイルしてロジックを検証）、PowerShell スモークスクリプト、Rust <code>cargo test</code>。</li>
+</ul>
+<p>実装方針: TC-CB の <code>-k &lt;名&gt;</code> はテスト設計の仕様レベル名であり、既存テストファイルには同名関数が存在しない（既存テストは同等の挙動を別名でカバー）。本フェーズでは TC-CB 1件＝独立判定1テスト関数を満たすため、実 public API を直接叩く新規テストを1ファイルに集約。テスト関数名に TC-CB-ID を埋め込み、docstring に TC/TD/TV/TA/Risk を記載してトレースを担保した。</p>
+<h3>4. 実装したテスト</h3>
+<p>新規ファイル <code>recovery/tests/test_tc_cb_codebase.py</code>（pytest、120関数）。区分ごとの代表のみ記載（全120件は同ファイル内に TC-CB-ID 付き関数として存在）。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>テストケースID</th><th>テスト名</th><th>実装ファイル</th><th>対象</th><th>テストレベル/タイプ</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TC-CB-001〜012</td><td>test_tc_cb_00X_&lt;command&gt;_ok</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>sidecar.handle_request 各コマンド契約</td><td>Unit</td><td>要件4、sidecar.py</td><td>R001,R006</td><td>実装済み</td></tr>
+<tr><td>TC-CB-013〜016</td><td>test_tc_cb_01X_page_preview_boundary</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>page_preview 境界（0/-1/last/last+1）</td><td>Unit</td><td>sidecar.py、SSI001境界</td><td>R001</td><td>実装済み</td></tr>
+<tr><td>TC-CB-017〜021</td><td>test_tc_cb_0XX_contract_error</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>型不整合・envelope不正・未定義コマンド</td><td>Unit</td><td>sidecar.py handle_request</td><td>R006</td><td>実装済み</td></tr>
+<tr><td>TC-CB-022〜024</td><td>test_tc_cb_02X_serve_resilience</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>serve ループ継続（不正JSON/空行/非object）</td><td>Integration</td><td>sidecar.py serve</td><td>R006</td><td>実装済み</td></tr>
+<tr><td>TC-CB-025〜030</td><td>test_tc_cb_0XX_seq_digits</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>seq_digits 境界（0/1/3/9/10）クランプ</td><td>Unit</td><td>domain.py、SSI004</td><td>R002</td><td>実装済み</td></tr>
+<tr><td>TC-CB-031〜049</td><td>test_tc_cb_0XX_(strip/missing/invalid_char/reserved/empty)</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>命名 strip・欠損・禁止文字・予約名・空フォールバック</td><td>Unit</td><td>要件8、domain.py、SSI006</td><td>R002</td><td>実装済み</td></tr>
+<tr><td>TC-CB-050〜058</td><td>test_tc_cb_0XX_affix</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>affix prefix/suffix/順序/上限切り詰め</td><td>Unit</td><td>要件8、domain.py、SSI005</td><td>R002,R012</td><td>実装済み</td></tr>
+<tr><td>TC-CB-059,061〜067</td><td>test_tc_cb_0XX_parity/three_way/roundtrip</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>命名パリティ・三者一致・state往復</td><td>Unit/Integration</td><td>ISS-007/030、state_schema.py</td><td>R002,R004</td><td>実装済み</td></tr>
+<tr><td>TC-CB-068〜078</td><td>test_tc_cb_0XX_(preflight/export)</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>preflight 判定・export 衝突採番・全/部分失敗・sha256</td><td>Unit/Integration</td><td>要件7.4、sidecar.py、SSI007</td><td>R003,R006</td><td>実装済み</td></tr>
+<tr><td>TC-CB-079〜096</td><td>test_tc_cb_0XX_(roundtrip/schema/missing/clamp/stale)</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>state 各フィールド往復・型検証・欠損列挙・current_pageクランプ・stale除去</td><td>Unit/Integration</td><td>要件9、state_schema.py</td><td>R004</td><td>実装済み</td></tr>
+<tr><td>TC-CB-097〜105</td><td>test_tc_cb_1XX_state_fault</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>破損/tmp/bak 復元優先・多重起動pid・残骸掃除・保存失敗時保全</td><td>Integration</td><td>ISS-011/023、state.py</td><td>R005</td><td>実装済み</td></tr>
+<tr><td>TC-CB-125〜133</td><td>test_tc_cb_1XX_(search/blank)</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>search_text truncation・blank_candidates partial/start_page</td><td>Unit</td><td>ISS-030、pdf_service.py、SSI010/011</td><td>R010</td><td>実装済み</td></tr>
+<tr><td>TC-CB-138〜140</td><td>test_tc_cb_1XX_security_no_traversal</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>命名値 / \ : の正規化でトラバーサル防止</td><td>Security</td><td>要件8、domain.py、ISS-019</td><td>R002,R003</td><td>実装済み</td></tr>
+<tr><td>TC-CB-141〜143</td><td>test_tc_cb_14X_response_shape</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>正常応答必須フィールド・エラー応答形状・余分フィールド欠落</td><td>Unit</td><td>ISS-025、sidecar.py、SSI019</td><td>R006</td><td>実装済み</td></tr>
+<tr><td>TC-CB-144</td><td>test_tc_cb_144_observability_failed_files</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>部分失敗 export の失敗ファイル列挙証跡</td><td>Integration</td><td>ISS-008、要件7.4</td><td>R006,R014</td><td>実装済み</td></tr>
+<tr><td>TC-CB-145</td><td>test_tc_cb_145_state_load_response_lists_missing_input_paths</td><td>recovery/tests/test_tc_cb_codebase.py</td><td>state_load 応答の missing_input_paths 証跡</td><td>Integration</td><td>ISS-008、要件7.4、SSI019</td><td>R006,R014</td><td>実装済み</td></tr>
+</tbody></table></div>
+<h3>5. 未実装テストケース</h3>
+<p>詳細は <code>テスト成果物/未実装テストケース_コードベース.md</code> を参照。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>区分</th><th>件数</th><th>主な理由</th><th>詳細ファイル</th></tr></thead>
+<tbody>
+<tr><td>区分A: 既存 node/ps1/pytest スイートでカバー（pytest 新規実装不要）</td><td>24</td><td>node check-*.mjs / 全スイート / verify.ps1・smoke.ps1 で実行</td><td>未実装テストケース_コードベース.md</td></tr>
+<tr><td>区分B: 質問待ち（DQ未確定で期待結果＝要確認）</td><td>6</td><td>DQ02（cargo環境/本数）・DQ08/09（segment削除/復活）・DQ10（白紙閾値境界）</td><td>未実装テストケース_コードベース.md</td></tr>
+</tbody></table></div>
+<p>区分A 24件: TC-CB-060, 106〜124（19件）, 134, 135, 136, 137。</p>
+<p>区分B 6件: TC-CB-146〜151。</p>
+<p>網羅: pytest 121 ＋ 区分A 24 ＝ 145（TC-CB-001〜145 全件）。質問待ち区分B 6件（TC-CB-146〜151）は別途退避。</p>
+<h3>6. 実行結果</h3>
+<p>新規 pytest ファイル単体の実行（証跡。本格的な実行・レポート保存は execute-codebase-tests フェーズで実施）:</p>
+<pre><code>cd recovery &amp;&amp; .venv/Scripts/python.exe -m pytest tests/test_tc_cb_codebase.py -q
+→ 121 passed</code></pre>
+<p>既存スイート全体のベースライン（参考。本ファイル追加後）:</p>
+<pre><code>cd recovery &amp;&amp; .venv/Scripts/python.exe -m pytest tests/ -q
+→ 382 passed, 1 failed（既存 test_desktop_shell_contract.py::test_desktop_tauri_exposes_python_sidecar_bridge）</code></pre>
+<p>既存1件の失敗は本フェーズ追加分ではなく既存テストの陳腐化（製品が <code>generate_handler![run_sidecar, reveal_path]</code> へ拡張済みなのに、テストが旧文字列 <code>generate_handler![run_sidecar]</code> を完全一致でアサート）。詳細は実行フェーズの発見 issue で記録する。</p>
+<h3>7. トレーサビリティ確認</h3>
+<ul>
+<li>pytest 実装121件はすべてテスト関数名に TC-CB-ID を含み、docstring に TC/TD/TV/TA/Risk を記載。</li>
+<li>区分A 24件・区分B 6件は <code>未実装テストケース_コードベース.md</code> に元 TD/TV/TA/仕様/リスクID 付きで退避。</li>
+<li>TC-CB-001〜145 の網羅: pytest 121 ＋ 区分A 24 ＝ 145（全件）。質問待ち TC-CB-146〜151 は区分Bとして別途退避。</li>
+<li>質問待ち（DQ未確定）を不正なアサーションに変換していないことを確認（区分Bは実装せず退避）。</li>
+</ul>
+</body>
+</html>

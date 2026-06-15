@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>未実装のテストケース</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>未実装のテストケース</h1>
+  <p>件数: <strong>30</strong></p>
+  <p><a href="../index.html">テスト実行レポートへ戻る</a></p>
+</header>
+<main>
+  <div class="table-wrap"><table><thead><tr><th>テストケースID</th><th>区分</th><th>優先度</th><th>テストケース名</th><th>状態</th><th>未実装理由</th><th>関連質問ID</th><th>リンク</th></tr></thead><tbody><tr><td>TC-CB-060</td><td></td><td>高</td><td>フロント previewFilename と Python build 結果が一致（node）</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行（pytest 対象外）</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-106</td><td></td><td>高</td><td>分割点集合から segmentKey が正しく算出される</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-107</td><td></td><td>高</td><td>buildSegments が正しいセグメント集合を生成する</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-108</td><td></td><td>中</td><td>resequenceSegmentMetadata が連番を採番し直す</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-109</td><td></td><td>中</td><td>手動入力済み連番を意図どおりに扱う</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-110</td><td></td><td>高</td><td>プレビューキャッシュ LRU 退避</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-111</td><td></td><td>高</td><td>世代越えの古い応答を破棄</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-112</td><td></td><td>高</td><td>リクエストゲートが重複をブロック</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-113</td><td></td><td>中</td><td>restorableInputPaths 全件返却</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-114</td><td></td><td>中</td><td>restorableInputPaths 存在分のみ＋欠損報告</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-115</td><td></td><td>中</td><td>restorableInputPaths 全欠損で空＋全件報告</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-116</td><td></td><td>中</td><td>isOutputCheckOk が true</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-117</td><td></td><td>中</td><td>isOutputCheckOk が false＋issue数一致</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-118</td><td></td><td>中</td><td>mergeRetriedExport がマージ</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-119</td><td></td><td>高</td><td>STEP1 完了判定 true</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-120</td><td></td><td>高</td><td>STEP1 完了判定 false</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-121</td><td></td><td>高</td><td>STEP2 完了判定</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-122</td><td></td><td>高</td><td>STEP3 完了判定</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-123</td><td></td><td>高</td><td>STEP4 完了判定</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-124</td><td></td><td>高</td><td>STEP 遷移条件</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-134</td><td></td><td>高</td><td>pytest 19ファイル全件パス</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 pytest スイート全実行で担保（個別新規実装ではない）</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-135</td><td></td><td>高</td><td>check-all.mjs 全6検査＋step-render/layout パス</td><td>作成済み（既存資産でカバー）</td><td>区分A: 既存 node スクリプトで実行</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-136</td><td></td><td>高</td><td>verify.ps1 が存在し実行できる</td><td>作成済み（既存資産でカバー）</td><td>区分A: PowerShell スクリプト（pytest 対象外）。実機 sidecar 起動を伴うため実行フェーズで証跡化</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-137</td><td></td><td>高</td><td>sample-pdf-smoke.ps1 が存在し実行できる</td><td>作成済み（既存資産でカバー）</td><td>区分A: PowerShell スクリプト（pytest 対象外）</td><td>なし</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-146</td><td></td><td>高</td><td>分割点追加後削除でキー外 segmentMetadata 削除</td><td>質問待ち</td><td>区分B: 質問待ち（削除フィルタ動作仕様が未確定）</td><td>DQ08</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-147</td><td></td><td>高</td><td>分割取り消しで旧キーから元値が復活する経路の合否</td><td>質問待ち</td><td>区分B: 質問待ち（復活経路の有無が未確定で期待結果＝要確認）</td><td>DQ09</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-148</td><td></td><td>低</td><td>白紙閾値直前（98.4%）で白紙候補に含まれない</td><td>質問待ち</td><td>区分B: 質問待ち（閾値0.985直前の合否基準が未確定）</td><td>DQ10</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-149</td><td></td><td>低</td><td>白紙閾値ちょうど（98.5%）の判定</td><td>質問待ち</td><td>区分B: 質問待ち（閾値ちょうどの境界動作が未確定）</td><td>DQ10</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-150</td><td></td><td>低</td><td>白紙閾値直後（98.6%）で白紙候補に含まれる</td><td>質問待ち</td><td>区分B: 質問待ち（閾値0.985直後の合否基準が未確定）</td><td>DQ10</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr>
+<tr><td>TC-CB-151</td><td></td><td>中</td><td>cargo test（lib.rs）全件パス確認</td><td>質問待ち</td><td>区分B: 質問待ち（実行環境・対象本数が未確定）。実行フェーズで cargo を試行し結果を正直に記録するが、期待本数の確定は DQ02 待ち</td><td>DQ02</td><td><a href="%E6%9C%AA%E5%AE%9F%E8%A3%85%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E3%82%B3%E3%83%BC%E3%83%89%E3%83%99%E3%83%BC%E3%82%B9.html">未実装テストケース_コードベース.md</a></td></tr></tbody></table></div>
+</main>
+
+</body>
+</html>

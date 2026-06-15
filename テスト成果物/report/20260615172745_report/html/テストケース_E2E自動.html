@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>テストケース（E2E自動）</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+<h2>テストケース（E2E自動）</h2>
+<h3>1. 作成対象</h3>
+<ul>
+<li>実行区分: E2E自動</li>
+<li>対象TD: TD043, TD044, TD045, TD046, TD047b, TD048, TD049, TD050, TD056, TD068, TD069（計11TD）</li>
+<li>テストケースIDプレフィックス: TC-E2E-*</li>
+</ul>
+<h3>2. 参照資料</h3>
+<ul>
+<li>テスト成果物/テスト設計.md（3.10節 E2Eレーン、TD043-TD050, TD056, TD068, TD069, TD047b）</li>
+<li>テスト成果物/テスト設計_質問票.md（DQ03）</li>
+<li>テスト成果物/テストケース_質問待ち.md（TC-E2E-001〜TC-E2E-018 を格納）</li>
+</ul>
+<h3>3. E2E自動テストで実行するテストケース</h3>
+<p>**全行 DQ03（Playwright導入有無・設定所在が未確定）のため、テストケース_質問待ち.md へ退避済み。**</p>
+<p>Playwright導入が確定した後、テストケース_質問待ち.md の TC-E2E-* 行の状態を「作成済み」に更新し、本ファイルへ移動する。未導入が確定した場合は同等観点を人間実行（探索的UI確認）として テストケース_人間実行.md へ移送する。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>テストケースID</th><th>元テスト設計ID</th><th>テスト観点ID</th><th>テストアプローチID</th><th>実行区分</th><th>テストレベル/タイプ</th><th>優先度</th><th>テストケース名</th><th>前提条件</th><th>入力/データ</th><th>手順</th><th>期待結果</th><th>確認方法/証跡</th><th>関連質問ID</th><th>仕様</th><th>リスクID</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>（DQ03回答後に移送）</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+</tbody></table></div>
+<h3>4. 上流成果物への追記・更新</h3>
+<p>追記・更新なし。E2EレーンのTD全行は設計段階から状態=質問待ち（DQ03）として記録されている。</p>
+<h3>5. カバレッジ確認</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>対応テストケースID</th><th>実行区分</th><th>状態</th><th>出力ファイル</th><th>カバー状況</th></tr></thead>
+<tbody>
+<tr><td>TD043</td><td>TC-E2E-001</td><td>E2E自動</td><td>質問待ち</td><td>テストケース_質問待ち.md</td><td>DQ03待ち</td></tr>
+<tr><td>TD044</td><td>TC-E2E-002</td><td>E2E自動</td><td>質問待ち</td><td>テストケース_質問待ち.md</td><td>DQ03待ち</td></tr>
+<tr><td>TD045</td><td>TC-E2E-003, TC-E2E-004</td><td>E2E自動</td><td>質問待ち</td><td>テストケース_質問待ち.md</td><td>DQ03待ち</td></tr>
+<tr><td>TD046</td><td>TC-E2E-005</td><td>E2E自動</td><td>質問待ち</td><td>テストケース_質問待ち.md</td><td>DQ03待ち</td></tr>
+<tr><td>TD047b</td><td>TC-E2E-006</td><td>E2E自動</td><td>質問待ち</td><td>テストケース_質問待ち.md</td><td>DQ03待ち</td></tr>
+<tr><td>TD048</td><td>TC-E2E-007〜TC-E2E-010</td><td>E2E自動</td><td>質問待ち</td><td>テストケース_質問待ち.md</td><td>DQ03待ち</td></tr>
+<tr><td>TD049</td><td>TC-E2E-011</td><td>E2E自動</td><td>質問待ち</td><td>テストケース_質問待ち.md</td><td>DQ03待ち</td></tr>
+<tr><td>TD050</td><td>TC-E2E-012, TC-E2E-013</td><td>E2E自動</td><td>質問待ち</td><td>テストケース_質問待ち.md</td><td>DQ03待ち</td></tr>
+<tr><td>TD056</td><td>TC-E2E-014〜TC-E2E-016</td><td>E2E自動</td><td>質問待ち</td><td>テストケース_質問待ち.md</td><td>DQ03待ち</td></tr>
+<tr><td>TD068</td><td>TC-E2E-017</td><td>E2E自動</td><td>質問待ち</td><td>テストケース_質問待ち.md</td><td>DQ03待ち</td></tr>
+<tr><td>TD069</td><td>TC-E2E-018</td><td>E2E自動</td><td>質問待ち</td><td>テストケース_質問待ち.md</td><td>DQ03待ち</td></tr>
+</tbody></table></div>
+<h3>6. Case Expansion Ledger（ケース展開台帳）</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>テスト設計ID</th><th>期待TC数</th><th>実TC数</th><th>不足数</th><th>対応テストケースID</th><th>分割方針</th><th>代表抽出理由</th><th>集約判定ルール</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>TD043</td><td>1</td><td>1</td><td>0</td><td>TC-E2E-001</td><td>質問待ち</td><td>—</td><td>—</td><td>質問待ち</td></tr>
+<tr><td>TD044</td><td>1</td><td>1</td><td>0</td><td>TC-E2E-002</td><td>質問待ち</td><td>—</td><td>—</td><td>質問待ち</td></tr>
+<tr><td>TD045</td><td>2</td><td>2</td><td>0</td><td>TC-E2E-003, TC-E2E-004</td><td>旧応答破棄+warning（編集種別代表2）</td><td>—</td><td>—</td><td>質問待ち</td></tr>
+<tr><td>TD046</td><td>1</td><td>1</td><td>0</td><td>TC-E2E-005</td><td>質問待ち</td><td>—</td><td>—</td><td>質問待ち</td></tr>
+<tr><td>TD047b</td><td>1</td><td>1</td><td>0</td><td>TC-E2E-006</td><td>質問待ち</td><td>—</td><td>—</td><td>質問待ち</td></tr>
+<tr><td>TD048</td><td>4</td><td>4</td><td>0</td><td>TC-E2E-007〜TC-E2E-010</td><td>全クリア/PDF除外/再採番/復元</td><td>—</td><td>—</td><td>質問待ち</td></tr>
+<tr><td>TD049</td><td>1</td><td>1</td><td>0</td><td>TC-E2E-011</td><td>質問待ち</td><td>—</td><td>—</td><td>質問待ち</td></tr>
+<tr><td>TD050</td><td>2</td><td>2</td><td>0</td><td>TC-E2E-012, TC-E2E-013</td><td>未完了直行抑止/空状態提示</td><td>—</td><td>—</td><td>質問待ち</td></tr>
+<tr><td>TD056</td><td>3</td><td>3</td><td>0</td><td>TC-E2E-014〜TC-E2E-016</td><td>search_text/index_candidates/blank_candidatesの切替</td><td>—</td><td>—</td><td>質問待ち</td></tr>
+<tr><td>TD068</td><td>1</td><td>1</td><td>0</td><td>TC-E2E-017</td><td>質問待ち</td><td>—</td><td>—</td><td>質問待ち</td></tr>
+<tr><td>TD069</td><td>1</td><td>1</td><td>0</td><td>TC-E2E-018</td><td>質問待ち</td><td>—</td><td>—</td><td>質問待ち</td></tr>
+</tbody></table></div>
+</body>
+</html>

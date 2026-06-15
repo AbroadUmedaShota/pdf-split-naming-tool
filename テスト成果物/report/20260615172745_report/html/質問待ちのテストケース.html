@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>質問待ちのテストケース</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>質問待ちのテストケース</h1>
+  <p>件数: <strong>68</strong></p>
+  <p><a href="../index.html">テスト実行レポートへ戻る</a></p>
+</header>
+<main>
+  <div class="table-wrap"><table><thead><tr><th>テストケースID</th><th>区分</th><th>優先度</th><th>テストケース名</th><th>状態</th><th>関連質問ID</th><th>リンク</th></tr></thead><tbody><tr><td>TC-CB-146</td><td>コードベース</td><td>高</td><td>分割点追加後削除でキー外segmentMetadataが削除されること</td><td>質問待ち</td><td>DQ08</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-CB-147</td><td>コードベース</td><td>高</td><td>分割取り消しで旧キーから元値が復活する経路の合否</td><td>質問待ち</td><td>DQ09</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-CB-148</td><td>コードベース</td><td>低</td><td>blank_candidates閾値直前（輝度98.4%相当）入力で白紙候補に含まれないこと</td><td>質問待ち</td><td>DQ10</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-CB-149</td><td>コードベース</td><td>低</td><td>blank_candidates閾値ちょうど（輝度98.5%）入力での白紙候補判定</td><td>質問待ち</td><td>DQ10</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-CB-150</td><td>コードベース</td><td>低</td><td>blank_candidates閾値直後（輝度98.6%）入力で白紙候補に含まれること</td><td>質問待ち</td><td>DQ10</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-CB-151</td><td>コードベース</td><td>中</td><td>cargo test（lib.rs）全件パス確認</td><td>質問待ち</td><td>DQ02</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-001</td><td>E2E自動</td><td>高</td><td>sidecar実行中に関連ボタンが無効化・処理中表示になること</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-002</td><td>E2E自動</td><td>高</td><td>export完了後に再出力試行するとcanExport=false・preflight結果クリアで再チェックなしに再出力できないこと</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-003</td><td>E2E自動</td><td>高</td><td>応答待ち中に分割点変更→旧応答到着→旧応答破棄・警告表示確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-004</td><td>E2E自動</td><td>高</td><td>応答待ち中にメタデータ入力→旧応答到着→旧応答破棄・警告表示確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-005</td><td>E2E自動</td><td>高</td><td>部分失敗summaryをモック返却→attention表示・失敗ファイル列挙・緑バッジ非表示確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-006</td><td>E2E自動</td><td>高</td><td>summary/checks欠落エラー応答をモック返却→フロント型ガードが弾き、レンダリングクラッシュなし確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-007</td><td>E2E自動</td><td>中</td><td>全クリア操作→確認ダイアログ表示確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-008</td><td>E2E自動</td><td>中</td><td>PDF除外操作→確認ダイアログ表示確認（入力済みデータあり状態）</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-009</td><td>E2E自動</td><td>中</td><td>再採番操作→確認ダイアログ表示確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-010</td><td>E2E自動</td><td>中</td><td>作業中データあり状態で復元→確認ダイアログ表示確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-011</td><td>E2E自動</td><td>高</td><td>検索ハイライト表示中にページ移動→前ページのハイライトが残らないこと確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-012</td><td>E2E自動</td><td>中</td><td>未完了STEP2へのSTEP3からの直行試行→抑止されること確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-013</td><td>E2E自動</td><td>中</td><td>空状態で次ステップ試行→不足項目提示確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-014</td><td>E2E自動</td><td>中</td><td>search_text実行中にリクエストゲート・連打ガード・PDF切替後旧結果非残留確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-015</td><td>E2E自動</td><td>中</td><td>index_candidates実行中にリクエストゲート・連打ガード・PDF切替後旧結果非残留確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-016</td><td>E2E自動</td><td>中</td><td>blank_candidates実行中にリクエストゲート・連打ガード・PDF切替後旧結果非残留確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-017</td><td>E2E自動</td><td>中</td><td>連番入力→空欄化→再採番実行→連番が再び埋まること（手動固定扱いにならないこと）確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-E2E-018</td><td>E2E自動</td><td>中</td><td>affix追加項目を追加→削除→再追加→旧入力値が全セグメントに復活しないこと確認</td><td>質問待ち</td><td>DQ03</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-001</td><td>人間実行</td><td>高</td><td>実機で実PDF1件を取込→分割→命名→出力し、画面出力名と実ファイル名が一致すること</td><td>質問待ち</td><td>DQ04/DQ05</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-002</td><td>人間実行</td><td>高</td><td>実機で複数PDF取込→PDF単位分割・命名→一括出力し、検索・分割が現在PDF固定であること</td><td>質問待ち</td><td>DQ04/DQ05</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-003</td><td>人間実行</td><td>高</td><td>実機で必須項目未入力状態で出力試行→出力前に検出して止まること</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-004</td><td>人間実行</td><td>高</td><td>実機で出力先未指定状態で出力試行→出力前に検出して止まること</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-005</td><td>人間実行</td><td>高</td><td>実機で対象セグメントなし状態で出力試行→出力前に検出して止まること</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-006</td><td>人間実行</td><td>高</td><td>実機で作業状態保存→アプリ再起動→復元→activeStep含む継続確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-007</td><td>人間実行</td><td>中</td><td>実機で保存後PDFを移動・削除→復元→残りを復元し欠損を把握できること</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-008</td><td>人間実行</td><td>中</td><td>実機でスキャンPDFで検索実行→「検索不能」と「0件」の区別案内文言が表示されること</td><td>質問待ち</td><td>DQ04/DQ05</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-009</td><td>人間実行</td><td>中</td><td>実機でスキャンPDFで候補検索実行→「候補未実行」と「0件」の区別案内文言が表示されること</td><td>質問待ち</td><td>DQ04/DQ05</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-010</td><td>人間実行</td><td>高</td><td>実機で実PDFを各STEP2で表示→1ページ以上が実際に画面表示されること（data:URL実視認）</td><td>質問待ち</td><td>DQ04/DQ05</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-011</td><td>人間実行</td><td>高</td><td>実機で実PDF（日本語パス含む）を分割・出力→実体成功・出力名一致・上書きなし確認</td><td>質問待ち</td><td>DQ04/DQ05</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-012</td><td>人間実行</td><td>中</td><td>実機でスキャン画像PDFで検索・候補・白紙疎通確認</td><td>質問待ち</td><td>DQ05</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-013</td><td>人間実行</td><td>中</td><td>実機でテキスト層なしPDFで検索・候補・白紙疎通確認</td><td>質問待ち</td><td>DQ05</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-014</td><td>人間実行</td><td>中</td><td>実機で日本語パスPDFでUTF-8パイプ疎通確認</td><td>質問待ち</td><td>DQ05</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-015</td><td>人間実行</td><td>高</td><td>実機Tauri実行時にCSP白画面が出ないこと確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-016</td><td>人間実行</td><td>高</td><td>実機でdata:URL画像がSTEP2で表示されること確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-017</td><td>人間実行</td><td>高</td><td>実機でOSダイアログ（ファイル選択・出力先選択）が正常動作すること確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-018</td><td>人間実行</td><td>高</td><td>実機でrelaunchが正常動作（再起動後アプリ起動）すること確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-019</td><td>人間実行</td><td>高</td><td>実機で常駐サイドカーのライフサイクル（起動・常駐・終了）確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-020</td><td>人間実行</td><td>高</td><td>実機でoneshotモード退避動作確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-021</td><td>人間実行</td><td>高</td><td>実機で日本語パスPDFの疎通確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-022</td><td>人間実行</td><td>高</td><td>実機で中間幅900-1100px表示確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-023</td><td>人間実行</td><td>高</td><td>実機でアプリ終了後pythonプロセスが残留しないこと確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-024</td><td>人間実行</td><td>高</td><td>実機でkill後の自動復旧確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-025</td><td>人間実行</td><td>高</td><td>実機で2回目以降ページ送りが体感即時であること確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-026</td><td>人間実行</td><td>高</td><td>実機でその他チェックリスト残項目確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-027</td><td>人間実行</td><td>中</td><td>実機で2回目以降ページ送りが体感即時かどうか確認（合格しきい値要確認）</td><td>質問待ち</td><td>DQ01/DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-028</td><td>人間実行</td><td>中</td><td>実機でアプリ終了後pythonプロセスが残留しないこと確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-029</td><td>人間実行</td><td>中</td><td>実機でkill後の自動復旧確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-030</td><td>人間実行</td><td>高</td><td>旧版（v0.1.1等）から更新検出確認（旧版配布物が前提）</td><td>質問待ち</td><td>DQ07</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-031</td><td>人間実行</td><td>高</td><td>旧版から更新インストール確認</td><td>質問待ち</td><td>DQ07</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-032</td><td>人間実行</td><td>高</td><td>更新後relaunch→再起動後バージョン表示確認</td><td>質問待ち</td><td>DQ07</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-033</td><td>人間実行</td><td>中</td><td>実機で1366px前後幅で主要操作が見切れず成立すること確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-034</td><td>人間実行</td><td>中</td><td>実機で1024px幅で主要操作が成立すること確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-035</td><td>人間実行</td><td>中</td><td>実機で中間幅900-1100pxで主要操作が成立すること確認</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-036</td><td>人間実行</td><td>低</td><td>実機でスマホ相当幅で致命的な表示崩れ・横方向全体崩れがないこと確認（best-effort）</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-037</td><td>人間実行</td><td>中</td><td>実機でフォーカスリングのコントラストが適切であること確認</td><td>質問待ち</td><td>DQ11</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-038</td><td>人間実行</td><td>中</td><td>実機でimg要素にaltが適切に付与されていること確認</td><td>質問待ち</td><td>DQ11</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-039</td><td>人間実行</td><td>中</td><td>実機でライブリージョンが機能すること確認</td><td>質問待ち</td><td>DQ11</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-040</td><td>人間実行</td><td>中</td><td>実機でキーボード操作（分割マーカー含む）が成立すること確認（分割マーカーinvalid HTML合否は要確認）</td><td>質問待ち</td><td>DQ11</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-041</td><td>人間実行</td><td>高</td><td>実機ビルドでCSP白画面なし・更新機能動作確認（ISS-027/028扱いは要確認）</td><td>質問待ち</td><td>DQ06</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-042</td><td>人間実行</td><td>高</td><td>実機で出力先に同名既存ファイルがある実フォルダへ出力→上書きせず一意名（_2等）で出力・画面に確定出力名が併記されること</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-043</td><td>人間実行</td><td>中</td><td>実機で追加項目（prefix/suffix）込み命名を通し出力→追加項目つき出力名が生成されること</td><td>質問待ち</td><td>DQ04</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr>
+<tr><td>TC-MAN-044</td><td>人間実行</td><td>中</td><td>実機でテキスト層ありPDFを検索→該当ページ移動→ハイライト/候補/白紙確認→手動分割確認</td><td>質問待ち</td><td>DQ04/DQ05</td><td><a href="%E3%83%86%E3%82%B9%E3%83%88%E3%82%B1%E3%83%BC%E3%82%B9_%E8%B3%AA%E5%95%8F%E5%BE%85%E3%81%A1.html">テストケース_質問待ち.md</a></td></tr></tbody></table></div>
+</main>
+
+</body>
+</html>

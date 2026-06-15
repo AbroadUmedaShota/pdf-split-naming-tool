@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>テスト成果物横断レビュー</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+<h2>テスト成果物横断レビュー結果</h2>
+<h3>1. レビュー対象</h3>
+<ul>
+<li><code>テスト成果物/テスト計画書.md</code>（R001-014・TA001-015・UC1-10・スコープ・終了基準）</li>
+<li><code>テスト成果物/テスト分析.md</code>（TV001-075・SSI001-020・Source Structure Inventory）/ <code>テスト成果物/テスト分析_質問票.md</code>（Q1-11）</li>
+<li><code>テスト成果物/テスト設計.md</code>（TD001-075＋047a/047b・Expected Case Yield）/ <code>テスト成果物/テスト設計_質問票.md</code>（DQ01-11）</li>
+<li><code>テスト成果物/テストケース_コードベース.md</code>（TC-CB-001〜145）</li>
+<li><code>テスト成果物/テストケース_E2E自動.md</code>（退避明記）/ <code>テスト成果物/テストケース_人間実行.md</code>（退避明記）/ <code>テスト成果物/テストケース_人間実行.csv</code>（ヘッダのみ）</li>
+<li><code>テスト成果物/テストケース_質問待ち.md</code>（TC-CB-146〜151・TC-E2E-001〜018・TC-MAN-001〜044＝68件）</li>
+<li>本レビュー結果: <code>テスト成果物/テスト成果物横断レビュー結果.md</code></li>
+</ul>
+<h3>2. 参照資料</h3>
+<ul>
+<li><code>docs/01_要件定義書.md</code>（正本・受入18項目・命名仕様第8節・状態保存第9節）・<code>docs/05_実装状況.md</code>・<code>docs/issues/issues.md</code></li>
+<li>実体（実施方法の参照先・存在確認）: <code>recovery/tests/</code>（pytest 19）・<code>apps/desktop/scripts/check-*.mjs</code>（8）・<code>apps/desktop/RELEASE.md</code></li>
+<li>既存レビュー結果（履歴として参照）: 計画/分析/設計/ケースの各レビュー結果</li>
+</ul>
+<h3>3. レビュー観点</h3>
+<p>エンドツーエンドトレーサビリティ（R→TA→TV→TD→TC）/ Source Structure Inventory 消費 / Expected Case Yield / Case Expansion Ledger 突合 / アプローチ・観点・設計カバレッジ / リスクベース十分性 / 仕様カバレッジ / 成果物の抽象度（計画=戦略・分析=観点・設計=パターン・ケース=実行可能）/ 質問管理 / 整合性・矛盾 / 実行可能性 / 終了基準整合 / 保守性 / 実装エントリーゲート。</p>
+<h3>4. レビュー・修正サマリー</h3>
+<h4>IDマップ独立再計算（チェーン突合）</h4>
+<p>レビュー側で全テストケースファイルの <code>TC-*</code> 行から <code>元TD / TV / TA</code> を機械抽出し、上流集合と突合した。</p>
+<ul>
+<li>TA: TA001-TA015 の全15が TC 行に出現（欠落なし）。</li>
+<li>TV: TV001-TV075 の全75が TC 行に出現（欠落なし）。</li>
+<li>TD: TD001-075＋TD047a/047b の全76が TC 行に出現（欠落なし）。TD047（無印）は設計でレーン分離により TD047a/047b へ分割済みのため不在が正、stray TD047 なし。</li>
+<li>R: R001-R014 はすべて設計および質問待ち §7 リスク表で TC 群へマップ（確定＋質問待ちを横断）。</li>
+<li>SSI: SSI001-019 を設計第6節で TD へ消費、各 TD が TC へ展開。SSI020 は意図的対象外（Q8 スコープ確認）。</li>
+</ul>
+<h4>第1パス（指摘）</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>優先度</th><th>観点</th><th>問題</th><th>場所</th><th>影響</th><th>修正方針</th></tr></thead>
+<tbody>
+<tr><td>なし</td><td>—</td><td>P0/P1 の横断指摘なし。チェーンは無破断、3つの数量成果物（SSI・Expected Case Yield・Case Expansion Ledger）が存在し突合一致</td><td>—</td><td>—</td><td>—</td></tr>
+</tbody></table></div>
+<p>（注: テストケース層の P1＝TC-CB-049 テーブル破壊、P2＝stub2ファイルのID範囲誤記は直前の <code>テストケースレビュー結果.md</code> で修正済み。本横断レビュー時点では未解消の P0/P1 なし。）</p>
+<h4>第2パス（確認）</h4>
+<ul>
+<li>エンドツーエンドトレーサビリティ: R→TA→TV→TD→TC が全段で連結。孤立ID・破断リンクなし（TA15/TV75/TD76 すべて下流到達を機械確認）。</li>
+<li>Source Structure Inventory 消費: 命名禁止文字9種・予約名・affix 0-3件・seq桁数1-9・ページ範囲端・検索上限200・白紙閾値0.985・8秒予算・実機12項目・状態8フィールド・SSI009耐障害が分析の SSI で列挙され、設計 TD・ケース TC へ展開。SSI020 のみ意図的除外で理由記載。</li>
+<li>Expected Case Yield: 全 TD に <code>期待TC数</code>・分割元構造ID・分割方針・集約/代表理由が存在（設計第7節）。</li>
+<li>Case Expansion Ledger: 全 TD に <code>期待TC数/実TC数/不足数/対応TC-ID</code> が存在。実数を独立再計算し、確定レーン①145件・質問待ち68件＝総213件、全 TD で <code>不足数=0</code>。</li>
+<li>リスクベース十分性: R001（度20）は自動境界 TC-CB-001/002 系＋手動実描画/実出力/実機（TC-MAN-010/011/015/016）で多層。R002（度15）は命名境界（禁止文字9・予約名・affix・seq桁数）＋パリティ＋三者一致＋state経由＋セキュリティ表層を TC へ展開。R014（度16）は回帰＋手動を質問待ちで「未実施を緑化しない」。圧縮で高リスクを潰した箇所なし。</li>
+<li>成果物の抽象度: 計画=戦略、分析=観点、設計=パターン、ケース=実行可能（pytest コマンド/実機操作の粒度）でオートメーションコード化せず。各層の越境なし。</li>
+<li>質問管理: 分析 Q1-11 → 設計 DQ01-11 → ケース質問待ち §4 が1対1で連結。68件の質問待ち TC に DQ 紐付け、未確定の合否は <code>要確認</code>。推測で緑化した行なし。</li>
+<li>整合性: スコープ・優先度・ID・用語・ファイル名が4層で一貫。質問待ち件数（68）が設計の質問待ち TD 集合と一致。</li>
+<li>終了基準整合: 確定レーン①は実行可能。質問待ち68件は DQ確定が前提で、計画の終了基準に対する残ブロッカーとして明示（緑化されない）。</li>
+</ul>
+<p>残る P0/P1 の fix-worthy 指摘なし。</p>
+<h3>5. 最終レビュー結果</h3>
+<ul>
+<li>P0・P1 の fix-worthy 横断指摘は残っていない。</li>
+<li>チェーン最終カバレッジ（件数）:</li>
+<li>R001-R014（14）→ TA001-TA015（15）→ TV001-TV075（75）→ TD001-075＋047a/047b（76）→ TC-*（213：確定145＋質問待ち68）。</li>
+<li>例外: TD047 はレーン分離で TD047a/047b に分割（観点不変）。SSI020 は意図的対象外。</li>
+<li>更新した成果物: 本横断レビューでの修正なし（テストケース層の修正は直前の review-test-cases フェーズで完了済み。上流＝計画/分析/設計への変更は不要と判断）。</li>
+</ul>
+<h4>実装エントリーゲート結果</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>項目</th><th>値</th></tr></thead>
+<tbody>
+<tr><td>Source Structure Inventory</td><td>存在（分析 SSI001-020・各拡張方針あり）</td></tr>
+<tr><td>Expected Case Yield</td><td>存在（設計第7節・全TDに期待TC数・分割方針・集約理由）</td></tr>
+<tr><td>Case Expansion Ledger</td><td>存在（ケース4ファイル・全TDに実TC数/不足数/対応ID）</td></tr>
+<tr><td>総期待TC数</td><td>確定レーン①143＋質問待ち仮置き（DQ確定で確定）</td></tr>
+<tr><td>総実TC数</td><td>213（確定145＋質問待ち68）</td></tr>
+<tr><td>不足数</td><td>0（TD037 のみ遷移境界で+1独立展開・理由記載）</td></tr>
+<tr><td>代表抽出/集約理由</td><td>TD004/006/014/020/025/030 に集約判定ルール記載</td></tr>
+<tr><td>質問待ち件数</td><td>68（DQ01-11 に紐付け・要確認で可視化）</td></tr>
+</tbody></table></div>
+<p>**ゲート判定: 確定レーン①（コードベース TC-CB-001〜145）は実装着手可。** pytest（recovery/tests/）・node（check-*.mjs）で展開可能。質問待ち68件（コードベース6・E2E18・人間44）は該当 DQ 回答までブロックし、回答後に <code>要確認</code> を確定値へ置換のうえ各実行ファイルへ移送。E2E18件は DQ03（Playwright導入）確定が一括移送の前提。手動44件は DQ04/05 ほか体制・実データ確定が実行前提（未実施を緑化しない）。</p>
+<h3>6. 残課題</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>優先度</th><th>項目</th><th>推奨アクション</th></tr></thead>
+<tbody>
+<tr><td>P2</td><td>TC-MAN-026（TD062 12項目目の「その他チェックリスト残項目」）が集約的表現</td><td>実機チェックリストの確定項目が判明したら、TC-MAN-026 を具体項目へ分割。現状は設計 TD062 の「ほか」相当を保持しており、実機受入体制（DQ04）確定時に細分化。</td></tr>
+<tr><td>P3</td><td>DQ01-DQ11 の未確定（性能基準・cargo環境/本数・Playwright導入・実機受入体制・実テストデータ・ISS-027/028扱い・updater旧版配布物・DEFERREDスコープ・stale復活仕様・白紙閾値境界・分割マーカーHTML構造）</td><td>参照資料に根拠がないため緑化せず質問待ちで可視化。実装着手は確定レーン①のみ先行可。DQ03 を優先確認。</td></tr>
+<tr><td>P3</td><td>MD060/table-column-style lint 警告</td><td>内容に影響しない体裁。前フェーズと同様 P3。必要なら一括整形。</td></tr>
+</tbody></table></div>
+</body>
+</html>

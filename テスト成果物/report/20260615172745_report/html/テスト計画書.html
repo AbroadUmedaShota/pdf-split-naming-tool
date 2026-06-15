@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>テスト計画</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #666b73;
+      --border: #d9ddd6;
+      --accent: #0f766e;
+      --danger: #b42318;
+      --warn: #b7791f;
+      --ok: #16794c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 32px; font-size: 24px; border-left: 5px solid var(--accent); padding-left: 10px; }
+    h3 { margin-top: 24px; font-size: 18px; }
+    p { margin: 8px 0; }
+    a { color: #075985; }
+    code {
+      background: #eef2f0;
+      border: 1px solid #d7ddda;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      overflow: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      margin: 12px 0;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f0; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--danger); }
+    .na { color: var(--warn); }
+  </style>
+</head>
+<body>
+<h2>テスト計画書</h2>
+<p>対象プロダクト: PDF分割命名ツール（apps/desktop の Tauri + Next.js デスクトップアプリ ＋ recovery/pdf_splitter_tool の Python sidecar）</p>
+<p>作成日: セッション内作成</p>
+<p>位置づけ: リリース可否判断に向けたQA資産整備の最上流。本計画はテスト戦略レベルにとどめ、詳細な観点・設計・テストケースは後続成果物（分析・設計・ケース）へ委ねる。</p>
+<p>正本仕様: <code>docs/01_要件定義書.md</code></p>
+<h3>1. テスト目的</h3>
+<p>PDFを取り込み、ページ単位で分割し、箱No・バインダーNo・連番（＋任意の追加項目）で命名して、既存ファイルを上書きせずに分割PDFを出力するという中核業務（STEP1取込 → STEP2分割 → STEP3入力 → STEP4出力）が、ヨシダエルシス向けの基本運用で迷わず・データを壊さず・正しい名前で完了できることを確認する。</p>
+<p>このテストで得たい確信は次の3点に集約する。</p>
+<ul>
+<li>中核動線の動作確認: 取込から出力までを通しで実行でき、画面に表示した出力名と実際に生成されるファイル名が一致する。直近で「プレビューが全く表示されない（PNG/JPEG不一致）」という中核経路のバグが発覚しており、中核動線が長く未テストだった事実をリスクに反映する。</li>
+<li>データ破壊の不在確認: 既存PDFの上書きが起きない、状態保存・復元で入力値が無言で失われない・古い値が復活しない、分割点変更でメタデータが壊れない。</li>
+<li>リグレッション境界の明確化: 自動テスト（pytest／nodeロジック検査／Rust単体）で守れる範囲と、sidecar実体・実機Tauri・アプリ内updaterのように人間の手動受入でしか確定できない範囲を切り分け、リリース判断者が「何が自動で緑か」「何が人手で未確認か」を区別できるようにする。</li>
+</ul>
+<p>本計画は確信を与える範囲と与えられない範囲を明示することを重視する。E2E自動テストは現状ゼロであり、Playwrightで自動化できるのは Tauri invoke をモック化したUI・状態・ナビゲーション検証までである。実PDFの分割・プレビュー・出力など sidecar 実体を伴う検証は人間実行（手動受入）として扱う。</p>
+<h3>2. ドキュメント</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>文書</th><th>パス</th><th>本計画での役割</th></tr></thead>
+<tbody>
+<tr><td>要件定義書（正本）</td><td><code>docs/01_要件定義書.md</code></td><td>機能範囲・画面別要件・命名仕様・状態保存仕様・受入条件18項目の正本。テストアイテム・スコープ・リスクの基準。</td></tr>
+<tr><td>実装状況</td><td><code>docs/05_実装状況.md</code></td><td>STEP別実装済み範囲・未受入/手動確認項目・検証コマンド・後続候補。自動回帰の実行ルートの根拠。</td></tr>
+<tr><td>既知課題一覧</td><td><code>docs/issues/issues.md</code></td><td>ISS-001〜030。多くは CLOSED だが OPEN（ISS-027/028）・DEFERRED（ISS-014/020/021）・残メモが残る。リグレッションリスクと残課題の根拠。</td></tr>
+<tr><td>UI実体</td><td><code>apps/desktop/app/page.tsx</code>（約4089行）</td><td>4工程の画面ロジック・分割・命名・状態管理・busy/世代ガードの実装本体。</td></tr>
+<tr><td>sidecar実体</td><td><code>recovery/pdf_splitter_tool/sidecar.py</code>（約411行）ほか同ディレクトリ</td><td>PDF処理コマンド群（pdf_info/page_preview/page_thumbnail/page_text/search_text/search_highlights/index_candidates/blank_candidates/preflight/export/state_load/state_save）。</td></tr>
+<tr><td>nodeロジック検査</td><td><code>apps/desktop/scripts/check-*.mjs</code>（check-all が集約）</td><td>page.tsx 由来ロジックの非UI検査。filename-policy / segment-state / restore-state / output-state / step-render / preview-cache。</td></tr>
+<tr><td>pytest</td><td><code>recovery/tests/</code>（19ファイル）</td><td>sidecar・state・export・domain・workflow・新機能（ISS-030）の自動回帰。</td></tr>
+<tr><td>リリース手順</td><td><code>apps/desktop/RELEASE.md</code>（存在確認済み）</td><td>Tauri updater・署名鍵・<code>latest.json</code>・GitHub Releases。更新機能の受入根拠。</td></tr>
+<tr><td>デザインシステム</td><td><code>docs/2026-05-31_デザインシステム.md</code></td><td>UIレイアウト・トーン・幅対応の根拠（参照）。</td></tr>
+</tbody></table></div>
+<h3>3. テストアイテム</h3>
+<h4>3.1 機能・画面</h4>
+<ul>
+<li>STEP1 取込: PDF複数選択／一覧から除外／全クリア、出力フォルダ指定/リセット、共通値（箱No・バインダーNo）、状態保存。次へ進む条件（PDF1件以上＋出力先指定）。</li>
+<li>STEP2 分割: ページプレビュー、ページ状態一覧、前後ページ・ページ番号直接入力・複数PDF間移動、ズーム/幅合わせ/全体表示、現在ページ前で分割・最後の分割取り消し・選択分割削除・現在PDF全解除、検索（現在PDF固定）・検索語ハイライト・OCR本文（テキスト層）表示・候補検索・白紙候補。</li>
+<li>STEP3 入力: セグメント選択、箱No・バインダーNo・連番（必須3項目）、追加項目最大2件（prefix/suffix）、OCR本文からの追加項目転記、連番再採番、出力名プレビュー。</li>
+<li>STEP4 出力: 出力前チェック（preflight）、出力実行（export）、出力予定一覧、チェック結果、出力ログ、既存ファイル衝突時の一意名採番（<code>_2</code>/<code>_3</code>）・上書き防止。</li>
+<li>更新/配布: Tauri updater による更新検出・インストール・再起動後バージョン表示。</li>
+</ul>
+<h4>3.2 sidecarコマンド（API境界）</h4>
+<p><code>pdf_info</code> / <code>page_preview</code> / <code>page_thumbnail</code> / <code>page_text</code> / <code>search_text</code> / <code>search_highlights</code> / <code>index_candidates</code> / <code>blank_candidates</code> / <code>preflight</code> / <code>export</code> / <code>state_load</code> / <code>state_save</code>。常駐 serve モード（JSON Lines）と oneshot 退避モード（<code>PDF_ORGANIZER_SIDECAR_MODE=oneshot</code>）の両系統。</p>
+<h4>3.3 命名・状態の中核ロジック</h4>
+<ul>
+<li>命名テンプレート <code>{box_no:0&gt;2}_{binder_no:0&gt;2}_{seq:0&gt;3}.pdf</code> と追加項目 <code>affix_defs</code>（最大2件・prefix/suffix・空値除外・後方互換）。</li>
+<li>フロント（filename-policy.ts）と Python（domain）のファイル名ビルダ一致（strip・Windows禁止/予約名正規化を含む）。</li>
+<li>状態保存 <code>_pdf_split_state.json</code>（＋ <code>.bak.json</code> / <code>.tmp</code>）。主要フィールド、スキーマ検証、tmp→state コミット、bak退避、破損退避・復旧、pid付きtmp、残骸掃除。</li>
+</ul>
+<h4>3.4 既存テスト資産（正式回帰資産）</h4>
+<ul>
+<li>pytest 19ファイル（test_sidecar / test_state_recovery_failures / test_output_name_parity / test_iss030_nf ほか）。</li>
+<li>nodeロジック検査（check-all.mjs が集約する6検査：filename-policy / segment-state / restore-state / output-state / step-render / preview-cache）。</li>
+<li>Rust 単体テスト（<code>apps/desktop/src-tauri/src/lib.rs</code>。常駐サイドカー管理ほか。本数は <code>要確認</code>／ISS-014 記載では常駐分13件）。</li>
+<li>集約検証ルート <code>scripts/verify.ps1</code>（pytest ＋ desktop JS回帰 ＋ typecheck）、<code>scripts/sample-pdf-smoke.ps1</code>（サンプルPDFのsidecarスモーク）。</li>
+</ul>
+<h3>4. テストスコープ</h3>
+<h4>4.1 In Scope（自動・本フローで整備）</h4>
+<ul>
+<li>sidecarコマンドの正常系・異常系・境界（ページ範囲外・空入力・型不正・エラー応答形状）— pytest を主軸に拡充。</li>
+<li>命名ロジックと FE/BE 一致（空白混入・禁止/予約文字・affix の prefix/suffix・空値除外・三者正規化一致 NF-D1）— pytest（output_name_parity）＋ nodeロジック検査（filename-policy）。</li>
+<li>状態保存・復元のロジックと耐障害（部分復元・欠損列挙・current_page クランプ・破損退避・tmp/bak 復旧・pid衝突・残骸昇格防止）— pytest（state_recovery / state_recovery_failures / state_compat）。</li>
+<li>preflight/export の判定ロジック（出力先未指定・セグメントなし・既存衝突一意名・部分失敗 summary・preflight_blocked）— pytest。</li>
+<li>page.tsx 由来の純ロジック（segmentKey / buildSegments / ステップ判定 / プレビューキャッシュ / 復元 / 出力状態）— nodeロジック検査。</li>
+<li>新規 E2E（Playwright・Tauri invoke モック）: UI状態・4工程ナビゲーション・ステッパー誘導・busy/二重実行ガードの可視状態・確認ダイアログ発火・トーン表示・部分失敗の attention 表示・ハイライト残留（NF-U5）のUI挙動。invoke はモック応答で駆動する範囲に限定。</li>
+</ul>
+<h4>4.2 Out of Scope（自動化対象外・人間の手動受入で確認）</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>項目</th><th>自動化外の理由</th><th>残存リスク / 代替確認</th></tr></thead>
+<tbody>
+<tr><td>実PDFのプレビュー/サムネイル/分割/出力（sidecar実体伴う）</td><td>Playwright は invoke をモックするため実 PDF レンダリング・分割結果を検証できない。実体は PyMuPDF 依存。</td><td>高リスク（中核動線・プレビュー全滅バグが発生済み）。<code>sample-pdf-smoke.ps1</code> と手動受入で確認。手動受入チェックリストを必須成果物とする。</td></tr>
+<tr><td>プレビュー画像の実視認（PNG/JPEG・data: URL の実描画）</td><td>画像が実際に画面に出るかはコードでは確定不能。直近の「全く表示されない」バグはこの経路。</td><td>高リスク。手動受入で「各STEP2で1ページ以上が実際に表示される」ことを必須確認項目にする。</td></tr>
+<tr><td>実機 Tauri 動作（CSP・ダイアログ・relaunch・常駐プロセス ライフサイクル）</td><td>Next.js static export × Tauri ビルド・CSP・OSダイアログは実機依存。</td><td>高リスク。<code>docs/issues/issues.md</code> の「実機確認チェックリスト」12項目を手動受入として取り込む。</td></tr>
+<tr><td>アプリ内 updater の更新検出→インストール→再起動後バージョン表示</td><td>リリースasset URL確認だけでは E2E 完了扱いにしない（要件10・受入18）。</td><td>高リスク。<code>apps/desktop/RELEASE.md</code> 手順に沿った人間の一気通し確認。</td></tr>
+<tr><td>Rust の <code>cargo test</code> / <code>cargo check</code></td><td>レビュー環境に cargo 未導入。CI/ビルド機で実施。</td><td>中リスク。ビルド機実行を終了条件に組み込み、未実行なら残課題として可視化。</td></tr>
+<tr><td>現場PDF・日本語パス・スキャン画像PDFでの通し受入</td><td>実データ依存。テキスト層なしPDFの検索/候補挙動、UTF-8パイプ疎通。</td><td>中リスク。手動受入で確認。</td></tr>
+<tr><td>スマホ相当幅での実作業最適化</td><td>MVP受入条件外（要件3・受入15）。</td><td>低リスク。致命的な表示崩れがないことのみ確認（best-effort）。</td></tr>
+</tbody></table></div>
+<p>スコープ境界の不確定点は第11節「未決事項」に集約する。</p>
+<h3>5. テスト終了条件</h3>
+<h4>5.1 自動テスト</h4>
+<ul>
+<li>pytest（<code>recovery/tests/</code>）が全件パス。本フローで追加するケースを含む。</li>
+<li>nodeロジック検査（<code>npm run test:desktop</code> = check-all、および個別 test:* スクリプト）が全件パス。</li>
+<li>型チェック <code>npm run typecheck</code>（tsc --noEmit）が成功、<code>next build</code> が成功。</li>
+<li>集約検証 <code>scripts/verify.ps1</code> が成功。</li>
+<li>新規 Playwright E2E（invokeモック範囲）が全件パス、または未実装ケースが <code>未実装テストケース_E2E自動.md</code> に可視化されている。</li>
+</ul>
+<h4>5.2 手動受入（人間実行）</h4>
+<ul>
+<li>第4.2節の Out of Scope 各項目について、手動受入テストケース（人間実行）が用意され、実行結果（Pass/Fail/未実施）が最終レポートに可視化されている。未実施は「未実施」として明示し、緑扱いにしない。</li>
+<li>中核動線（取込→分割→入力→出力の通し）が実PDFで1回以上成功し、画面の出力名と実ファイル名が一致することを人間が確認。</li>
+<li>実機確認チェックリスト（issues.md 記載の12項目）の各項目が Pass / Fail / 未実施で記録される。</li>
+<li>アプリ内 updater の一気通し（更新検出→インストール→再起動後バージョン表示）が Pass / Fail / 未実施で記録される。</li>
+</ul>
+<h4>5.3 欠陥・残リスク・成果物品質ゲート</h4>
+<ul>
+<li>Fail として記録された不具合は、起票（BUGリスト）され、リリース判断者がリスク受容 or 修正済みを判断できる状態にある。</li>
+<li>高リスク項目（中核動線・プレビュー表示・データ破壊・updater）で未実施または Fail がある場合は、リリース可否判断にその残リスクが明記される（サイレントに緑化しない）。</li>
+<li>後続QA成果物（テスト計画・分析・設計・テストケース）のレビューで、未解決の <code>P0/P1</code> 指摘が残っていない。残る場合は明示的に承認または DEFERRED として記録されている。</li>
+<li>OPEN/DEFERRED 既知課題（ISS-027/028 ほか）について、リリース時点の扱い（修正/受容/次タスク）が判断材料として残されている。</li>
+<li><code>cargo test</code>（ビルド機）の実施有無が記録され、未実施なら残リスクとして可視化されている。</li>
+</ul>
+<p>組織的なサインオフ手順・承認者・しきい値の数値基準は本計画の参照資料に定義がないため、<code>要確認</code>（第11節）とする。</p>
+<h3>6. プロダクトリスク</h3>
+<p><code>発生確率(1-5) × 影響度(1-5) = リスク度</code>。15-25=高、8-14=中、1-7=低。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>ID</th><th>リスク</th><th>根拠/対象</th><th>発生確率(1-5)</th><th>影響度(1-5)</th><th>リスク度</th><th>対応方針</th></tr></thead>
+<tbody>
+<tr><td>R001</td><td>プレビュー/サムネイルが実機で表示されない（中核経路がコードで検証不能）</td><td>直近の「プレビューが全く表示されない（PNG/JPEG不一致）」中核バグ。要件7.2、ISS-013、page_preview/page_thumbnail</td><td>4</td><td>5</td><td>20</td><td>手動受入で各STEP2の実表示を必須確認。sample-pdf-smoke でレンダリング経路を機械確認。リグレッション観点を後続分析で厚く。</td></tr>
+<tr><td>R002</td><td>画面の出力名プレビューと実出力ファイル名が不一致</td><td>ISS-007（空白混入）、NF-D1（affix三者不一致）、要件8命名仕様</td><td>3</td><td>5</td><td>15</td><td>FE/BE 一致テスト（output_name_parity ＋ filename-policy）。空白・禁止/予約文字・affix prefix/suffix・state経由を境界網羅。</td></tr>
+<tr><td>R003</td><td>既存PDFの上書き・データ消失（出力時の衝突回避失敗）</td><td>要件10安全性・受入11、export 一意名採番</td><td>2</td><td>5</td><td>10</td><td>export の既存衝突・一意名 <code>_2</code>/<code>_3</code> 採番を pytest で境界網羅。手動受入で実フォルダ衝突を確認。</td></tr>
+<tr><td>R004</td><td>状態保存・復元で入力値が無言で失われる / 古い値が復活する</td><td>ISS-003/005/022、要件9状態保存、segmentKey orphan</td><td>3</td><td>4</td><td>12</td><td>部分復元・欠損列挙・current_page クランプ・保存時キーフィルタ・stale復活防止を pytest と nodeロジック検査で確認。</td></tr>
+<tr><td>R005</td><td>状態ファイル破損・多重起動・クラッシュで最新状態が失われる/古い残骸が昇格</td><td>ISS-011/023、state.py tmp/bak/pid</td><td>2</td><td>4</td><td>8</td><td>state_recovery_failures で破損退避・tmp優先・pid衝突・残骸非昇格を確認。</td></tr>
+<tr><td>R006</td><td>出力の部分失敗が「完了」表示で隠れる</td><td>ISS-008/025、export summary、エラー応答形状</td><td>3</td><td>4</td><td>12</td><td>export 部分失敗 summary とエラー応答ガードを pytest。attention/警告トーン表示を E2E（モック）で確認。</td></tr>
+<tr><td>R007</td><td>sidecar 多重実行・連打・応答競合で二重出力やプレビュー巻き戻り</td><td>ISS-001/006/024、busy/世代ガード、NF-B2/U4/U6</td><td>3</td><td>4</td><td>12</td><td>二重実行ガード・世代カウンタ・編集後再チェック必須の UI 挙動を E2E（モック）で。手動で体感確認。</td></tr>
+<tr><td>R008</td><td>アプリ内 updater が実機で機能しない（更新検出/インストール/再起動表示）</td><td>要件10更新・受入18、RELEASE.md</td><td>2</td><td>5</td><td>10</td><td>RELEASE.md 手順での人間一気通しを必須手動受入に。URL確認のみでは完了扱いにしない。</td></tr>
+<tr><td>R009</td><td>実機 Tauri 固有の破綻（CSP白画面・ダイアログ不発・relaunch失敗・常駐プロセス残留）</td><td>ISS-012/014、実機確認チェックリスト12項目</td><td>3</td><td>4</td><td>12</td><td>実機確認チェックリストを手動受入に取り込み Pass/Fail/未実施を記録。</td></tr>
+<tr><td>R010</td><td>テキスト層なし/スキャンPDFで検索・候補・白紙が無音失敗 or 重処理でタイムアウト</td><td>ISS-030 NF-C1（白紙全ページpixmap→30秒タイムアウト→kill）、NF-B1、要件7.2検索条件</td><td>3</td><td>3</td><td>9</td><td>blank_candidates の時間予算/部分結果・search複数用語1パス・案内文言を pytest と E2E（モック）で。手動でスキャンPDF確認。</td></tr>
+<tr><td>R011</td><td>分割点変更で入力済みメタデータが壊れる/誤分割を誘発</td><td>ISS-003、NF-U5（ハイライト残留）、segmentKey</td><td>3</td><td>4</td><td>12</td><td>segment-state 検査と分割操作シナリオで確認。ページ移動時のハイライト残留を E2E（モック）で。</td></tr>
+<tr><td>R012</td><td>連番・追加項目の編集事故（再採番上書き・空欄固定・削除再追加で旧値復活）</td><td>ISS-010/030 NF-U16/U14、要件7.3/8</td><td>3</td><td>3</td><td>9</td><td>再採番確認・連番空欄・affix削除再追加の挙動を nodeロジック検査と E2E（モック）で。</td></tr>
+<tr><td>R013</td><td>レスポンシブ破綻で業務PC幅（1366px前後）の主要操作が見切れる</td><td>要件3対象環境・受入14、ヘッダー常設化 ISS-009</td><td>2</td><td>3</td><td>6</td><td>手動受入で1366px前後と中間幅900-1100pxを確認。致命崩れの有無を記録。</td></tr>
+<tr><td>R014</td><td>自動テストが守れない範囲を緑と誤認しリリース判断を誤る</td><td>E2Eゼロ・cargo未実行・sidecar実体未自動化</td><td>4</td><td>4</td><td>16</td><td>自動/手動の境界を本計画と最終レポートで明示。未実施を「未実施」として可視化し緑化しない。</td></tr>
+</tbody></table></div>
+<h3>7. テストアプローチ</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>テストアプローチID</th><th>内容</th><th>仕様</th><th>リスクID</th></tr></thead>
+<tbody>
+<tr><td>TA001</td><td>sidecarコマンド単体の正常系・異常系・境界（ページ範囲外・空入力・型不正・未対応コマンド・エラー応答形状）を pytest で検証する単体/契約テスト</td><td>要件4 sidecar機能表、sidecar.py、test_sidecar.py/test_sidecar_contract.py</td><td>R001, R006, R010</td></tr>
+<tr><td>TA002</td><td>命名ロジックの単体テスト（ゼロ埋め・空白strip・Windows禁止/予約名正規化・affix prefix/suffix・空値除外・後方互換）を pytest で検証</td><td>要件8命名仕様、domain、test_domain.py</td><td>R002</td></tr>
+<tr><td>TA003</td><td>フロント命名ビルダと Python 命名ビルダの一致を pytest（パリティ）と nodeロジック検査（filename-policy）で二方向検証。NF-D1 の三者（domain/state_schema/フロント）正規化一致を含む</td><td>ISS-007/030 NF-D1、test_output_name_parity.py、check-filename-policy.mjs</td><td>R002</td></tr>
+<tr><td>TA004</td><td>preflight/export の判定ロジック（出力先未指定 missing_output_dir・セグメントなし no_segments・既存衝突一意名 <code>_2</code>/<code>_3</code>・preflight_blocked・部分失敗 summary）を pytest で網羅する単体/統合テスト</td><td>要件7.4チェック内容・出力動作、test_export_*.py/test_workflow.py</td><td>R003, R006</td></tr>
+<tr><td>TA005</td><td>状態保存・復元の単体/統合（主要フィールド往復・スキーマ検証・部分復元・欠損 missing_input_paths・current_page クランプ・保存時キーフィルタ・stale復活防止）を pytest で検証</td><td>要件9状態保存、ISS-003/005/022、test_state_*.py</td><td>R004</td></tr>
+<tr><td>TA006</td><td>状態ファイルの耐障害（破損退避・tmp→stateコミット窓・bak退避・tmp優先復旧・pid付きtmp衝突・残骸非昇格）を pytest で検証する異常系/回復テスト</td><td>ISS-011/023、state.py、test_state_recovery_failures.py</td><td>R005</td></tr>
+<tr><td>TA007</td><td>page.tsx 由来の純ロジック（segmentKey・buildSegments・ステップ判定・プレビューキャッシュ・復元・出力状態）を nodeロジック検査（check-*.mjs）で検証</td><td>ISS-003/006/008、check-segment-state/step-render/preview-cache/restore-state/output-state.mjs</td><td>R004, R006, R011</td></tr>
+<tr><td>TA008</td><td>4工程の主要ユースケース（取込→分割→入力→出力の通し）をユースケース/シナリオベースで定義。中核動線・代替フロー（複数PDF・既存衝突・部分失敗）・例外フロー（入力欠落でブロック）・事後条件（出力名一致・上書きなし）を識別。詳細分解は分析/設計へ委ねる</td><td>要件5-8・受入条件1-13、page.tsx 全体</td><td>R001, R002, R003, R006, R007</td></tr>
+<tr><td>TA009</td><td>Playwright E2E（Tauri invoke モック）で UI状態・4工程ナビゲーション・ステッパー誘導・busy/二重実行ガードの可視状態・確認ダイアログ発火・トーン/attention 表示・ハイライト残留挙動を検証。実 sidecar を伴う検証は対象外と明示</td><td>要件6-7画面要件、ISS-001/006/008/009/010/024/030、page.tsx</td><td>R006, R007, R011, R012</td></tr>
+<tr><td>TA010</td><td>検索/候補/白紙/サムネイル機能の単体・契約（複数用語1パス search・blank_candidates 時間予算/部分結果 start_page・件数上限・テキスト層なし案内・現在PDF固定スコープ）を pytest と E2E（モック）で検証</td><td>要件7.2検索条件、ISS-030 NF-B1/C1/B2/U5-U10、test_iss030_nf.py</td><td>R010, R011</td></tr>
+<tr><td>TA011</td><td>既存正式回帰資産の実行と存在確認を回帰テストとして組み込む（pytest 19ファイル・check-all 6検査・verify.ps1・sample-pdf-smoke.ps1）。Rust 単体は cargo 実行ルートを確認し、未実行ならその旨を記録</td><td>docs/05_実装状況.md 検証コマンド、scripts/verify.ps1、recovery/tests/、check-all.mjs</td><td>R001, R003, R004, R014</td></tr>
+<tr><td>TA012</td><td>実PDFでの sidecar 実体動作（プレビュー実描画・分割・出力・スキャンPDF・日本語パス）を手動受入（人間実行）で検証。sample-pdf-smoke.ps1 をレンダリング経路の機械確認の補助に使う</td><td>要件7全画面・受入1-13・16-17、docs/05検証コマンド</td><td>R001, R002, R003, R010</td></tr>
+<tr><td>TA013</td><td>実機 Tauri の手動受入（CSP白画面なし・data:URL画像表示・ダイアログ・busy体感・常駐サイドカー ライフサイクル・oneshot退避・中間幅レイアウト）を issues.md 実機確認チェックリスト12項目に沿って実施</td><td>ISS-012/014/024、issues.md 実機確認チェックリスト、要件3対象環境</td><td>R001, R007, R009, R013</td></tr>
+<tr><td>TA014</td><td>アプリ内 updater の一気通し（旧バージョンからの更新検出→インストール→再起動後バージョン表示）を RELEASE.md 手順に沿って手動受入で検証。URL確認のみでは完了扱いにしない</td><td>要件10更新/配布・受入18、apps/desktop/RELEASE.md</td><td>R008</td></tr>
+<tr><td>TA015</td><td>レスポンシブ/アクセシビリティ表層（1024px以上で主要操作成立・1366px前後重点・小型ノート幅で破綻なし・スマホ幅で致命崩れなし・フォーカス/コントラスト/altの表層）を手動受入と E2E（モック）の併用で確認</td><td>要件3対象環境・受入14-15、ISS-018、デザインシステム</td><td>R013</td></tr>
+</tbody></table></div>
+<h3>8. 対象ユースケース / 主要シナリオ（計画レベル）</h3>
+<p>後続の分析/設計で事前条件・主フロー・代替フロー・例外フロー・事後条件へ分解する。本計画では対象アクター・ゴール・リスク・優先度・対応受入条件のみ示す。受入条件番号は <code>docs/01_要件定義書.md</code> 第11節の18項目を指す。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>ユースケース</th><th>アクター</th><th>ゴール</th><th>主リスク</th><th>受入条件</th><th>優先度</th></tr></thead>
+<tbody>
+<tr><td>UC1 中核通し出力</td><td>整理担当者</td><td>1つのPDFを取込→分割→命名→上書きせず出力</td><td>R001, R002, R003</td><td>1-4, 9, 11-12</td><td>高</td></tr>
+<tr><td>UC2 複数PDF一括</td><td>整理担当者</td><td>複数PDFを取込み、PDF単位で分割・命名し一括出力</td><td>R002, R003, R006</td><td>1, 6, 12</td><td>高</td></tr>
+<tr><td>UC3 既存ファイル衝突</td><td>整理担当者</td><td>出力先に同名が既存でも上書きせず一意名で出力</td><td>R003</td><td>11</td><td>高</td></tr>
+<tr><td>UC4 中断・再開</td><td>整理担当者</td><td>作業状態を保存し、再起動後に復元して継続</td><td>R004, R005</td><td>13</td><td>高</td></tr>
+<tr><td>UC5 一部PDF欠損での復元</td><td>整理担当者</td><td>保存後にPDFが移動/削除されても残りを復元し欠損を把握</td><td>R004</td><td>13</td><td>中</td></tr>
+<tr><td>UC6 テキスト層ありPDFの検索支援分割</td><td>整理担当者</td><td>検索/ハイライト/候補/白紙を見て手動で分割位置を決める</td><td>R010, R011</td><td>16-17</td><td>中</td></tr>
+<tr><td>UC7 追加項目つき命名</td><td>整理担当者</td><td>箱/バインダー/連番に加え追加項目を先頭/末尾へ挿入して命名</td><td>R002, R012</td><td>7-9</td><td>中</td></tr>
+<tr><td>UC8 出力前チェックでの停止</td><td>整理担当者</td><td>必須未入力・出力先未指定・対象なしを出力前に検出して止める</td><td>R006</td><td>10</td><td>高</td></tr>
+<tr><td>UC9 アプリ更新</td><td>運用担当者</td><td>旧バージョンから更新を検出しインストールして再起動後に新バージョン確認</td><td>R008</td><td>18</td><td>中</td></tr>
+<tr><td>UC10 業務PC幅での操作成立</td><td>整理担当者</td><td>1024px以上（重点1366px前後）で主要操作が見切れず成立</td><td>R013</td><td>14-15</td><td>中</td></tr>
+</tbody></table></div>
+<h3>9. 正式テスト資産 / 回帰資産の扱い</h3>
+<ul>
+<li>pytest 19ファイル（<code>recovery/tests/</code>、test関数 約223件）: 存在確認済み。本フローの自動回帰の主軸として実行し、結果を証跡にする。新規ケースは既存構造に追加する。</li>
+<li>nodeロジック検査（<code>apps/desktop/scripts/check-*.mjs</code>、check-all が6検査を集約）: 存在確認済み。<code>npm run test:desktop</code> で実行し証跡にする。</li>
+<li>Rust 単体テスト（<code>apps/desktop/src-tauri/src/lib.rs</code>）: テスト定義の存在は確認済み。本数は <code>要確認</code>（ISS-014 記載では常駐サイドカー分13件）。cargo 実行はビルド機で行い、本フローのレビュー環境では未実行の可能性が高い。未実行なら残リスクとして記録する。</li>
+<li>集約検証 <code>scripts/verify.ps1</code>: pytest ＋ desktop JS回帰 ＋ typecheck を集約。実機E2E・updater E2E・現場PDF受入の代替ではない（実装状況の注意書きに従う）。</li>
+<li>サンプルPDFスモーク <code>scripts/sample-pdf-smoke.ps1</code>: 元PDF不変で一時フォルダに pdf_info/preview/preflight/export/state roundtrip を確認。sidecar実体経路の機械確認に使う（実視認の代替ではない）。</li>
+<li>不在/未整備の資産: E2E（Playwright）は現状ゼロ。本フローで新規作成する。ゴールデンファイル・契約テスト外部供給物は参照資料に記載なし（<code>要確認</code>）。</li>
+<li>資産存在の確認方針: 文書記載の資産がディスク上に存在すると仮定しない。本フロー実行時に pytest ファイル群・check-*.mjs・<code>scripts/verify.ps1</code>・<code>scripts/sample-pdf-smoke.ps1</code>・<code>apps/desktop/RELEASE.md</code> の存在と実行可否を確認し、欠落・実行不能があればリスク（R014）または未決事項として記録する。<code>apps/desktop/RELEASE.md</code>・<code>state.py</code>・<code>domain.py</code>・<code>apps/desktop/lib/filename-policy.ts</code> は本計画作成時点で存在確認済み。Rust 単体テストはファイル定義の存在のみ確認済みで cargo 実行は未実施（Q2）。</li>
+</ul>
+<h3>10. 後続成果物の深さ期待</h3>
+<ul>
+<li>R001/R002/R014（高リスク）: 後続分析でリグレッション観点・中核動線観点・FE/BE一致観点を厚く。プレビュー表示と命名一致は境界（空白・禁止/予約文字・affix・state経由・ページ範囲端）まで分解する。</li>
+<li>R003/R004/R005: 異常系・回復・永続化観点を深く。既存衝突、部分復元、破損/多重起動の組合せを設計で展開。</li>
+<li>R006/R007: 状態遷移観点（busy/世代/再チェック必須）と部分失敗の可視化観点を E2E（モック）レベルで設計。</li>
+<li>R008/R009/R013: 手動受入の確認手順を人間実行ケースとして具体化（実機チェックリスト12項目・updater一気通し・幅確認）。実施結果は最終レポートで Pass/Fail/未実施を明示。</li>
+<li>自動化境界: Playwright は invoke モック範囲に限定する前提を分析・設計・ケースで貫き、sidecar実体を伴うものは人間実行ケースへ振り分ける。</li>
+</ul>
+<h3>11. 未決事項</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>ID</th><th>項目</th><th>状態</th><th>影響</th></tr></thead>
+<tbody>
+<tr><td>Q1</td><td>リリース可否のサインオフ手順・承認者・合格しきい値（カバレッジ率・許容Fail数等）</td><td>要確認</td><td>終了条件の数値基準が未定。組織ルールの根拠が参照資料にない。</td></tr>
+<tr><td>Q2</td><td>Rust <code>cargo test</code> の実行環境と本数</td><td>要確認</td><td>ビルド機での実行可否。本数はISS-014記載の13件が最新か未確定。</td></tr>
+<tr><td>Q3</td><td>Playwright 導入有無・設定の所在（現状E2Eゼロ）</td><td>要確認</td><td>E2E実行基盤を本フローで新規整備する前提。既存設定なし。</td></tr>
+<tr><td>Q4</td><td>手動受入の実施担当・実機環境（OSバージョン・対象PC幅の実機）</td><td>要確認</td><td>実機受入の実施体制。要件3の幅は定義あり、実機の割当は未定。</td></tr>
+<tr><td>Q5</td><td>サンプルPDF・現場PDF・スキャンPDF・日本語パスPDFの実テストデータ所在</td><td>要確認</td><td>手動受入とスモークに必要な入力データの準備状況。</td></tr>
+<tr><td>Q6</td><td>OPEN既知課題 ISS-027（環境変数オーバーライド）/ ISS-028（残メモ群）のリリース時扱い</td><td>要確認</td><td>リリース判断材料。修正/受容/次タスクの方針が未確定。</td></tr>
+<tr><td>Q7</td><td>updater 実機検証に必要な旧バージョン配布物（v0.1.1 等）の用意（RELEASE.md は存在確認済み）</td><td>要確認</td><td>TA014（updater一気通し）の実施前提。手順書はあるが旧版配布物の準備状況が未確定。</td></tr>
+<tr><td>Q8</td><td>DEFERRED課題（ISS-014常駐結合・ISS-020フロント単体テスト空白ほか）の本リリーススコープ内/外</td><td>要確認</td><td>スコープ確定。フロント純ロジックのテスト空白はR004/R006に関係。</td></tr>
+</tbody></table></div>
+</body>
+</html>
