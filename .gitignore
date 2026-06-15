@@ -28,6 +28,11 @@ apps/desktop/tsconfig.tsbuildinfo
 apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/target/
 
+# Playwright run outputs (keep specs/config, ignore generated results)
+apps/desktop/test-results/
+apps/desktop/playwright-report/
+apps/desktop/e2e/.report/
+
 # OS/editor files
 .DS_Store
 Thumbs.db
