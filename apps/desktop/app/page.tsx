@@ -597,6 +597,8 @@ export default function Page() {
   const searchInFlightRef = useRef(false);
   const candidateInFlightRef = useRef(false);
   const zoomReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ctrl+ホイールの連続イベントを取りこぼさず加算するための最新ズーム値。レンダー毎に同期する。
+  const previewZoomRef = useRef(1.2);
   // 出力前チェック/出力実行/状態保存の二重起動を同期的に防ぐ（連打対策。state は表示用 disable）。
   const preflightInFlightRef = useRef(false);
   const exportInFlightRef = useRef(false);
@@ -615,6 +617,9 @@ export default function Page() {
   // （毎レンダーの addEventListener/removeEventListener 再登録を避ける）。
   const step2KeyHandlerRef = useRef<(event: KeyboardEvent) => void>(() => {});
   const step3KeyHandlerRef = useRef<(event: KeyboardEvent) => void>(() => {});
+  // プレビューの Ctrl+ホイール拡大縮小。要素にネイティブリスナーを張り、最新ハンドラを ref 経由で呼ぶ。
+  const previewFrameRef = useRef<HTMLDivElement | null>(null);
+  const previewWheelHandlerRef = useRef<(event: WheelEvent) => void>(() => {});
 
   const currentFile = pdfFiles.find((file) => file.path === currentPdf);
   const allSegments = useMemo(
@@ -697,6 +702,8 @@ export default function Page() {
   // 非同期処理の応答適用時に「最新の要求内容」と比較するため、毎レンダーで ref を同期する。
   const exportRequestSignatureRef = useRef(exportRequestSignature);
   exportRequestSignatureRef.current = exportRequestSignature;
+  // Ctrl+ホイールの加算基準。スライダー/ボタン由来の倍率変更も毎レンダーで取り込む。
+  previewZoomRef.current = previewZoom;
 
   function setStatus(message: string, tone: StatusTone = ""): void {
     setStatusState({ message, tone });
@@ -1831,6 +1838,24 @@ export default function Page() {
     setPreviewFitMode(nextMode);
   }
 
+  // Ctrl+ホイールでプレビューを拡大縮小する。ハンドラは毎レンダー更新し、ネイティブ
+  // リスナー（passive:false）から ref 経由で呼ぶ。Ctrl なしは通常スクロールに任せる。
+  previewWheelHandlerRef.current = (event: WheelEvent): void => {
+    if (!event.ctrlKey || !currentFile) {
+      return;
+    }
+    event.preventDefault();
+    const step = event.deltaY < 0 ? 0.1 : -0.1;
+    // ref を同期的に加算して連続イベントを取りこぼさない（再レンダー待ちにしない）。
+    const nextZoom = Math.max(0.4, Math.min(2.4, previewZoomRef.current + step));
+    if (nextZoom === previewZoomRef.current) {
+      return;
+    }
+    previewZoomRef.current = nextZoom;
+    changePreviewFitMode("free");
+    void changePreviewZoom(nextZoom);
+  };
+
   function changePreviewZoom(nextZoom: number): void {
     const normalizedZoom = Math.max(0.4, Math.min(2.4, nextZoom));
     setPreviewZoom(normalizedZoom);
@@ -1942,6 +1967,13 @@ export default function Page() {
       } else if (event.key === "ArrowUp" && isPlain) {
         event.preventDefault();
         moveSegmentSelection(-1);
+      } else if (event.key === "ArrowLeft" && isPlain) {
+        // 横←→＝ページ送り（STEP2と合わせる）。入力欄フォーカス中は上の guard で除外済み。
+        event.preventDefault();
+        void movePage(-1);
+      } else if (event.key === "ArrowRight" && isPlain) {
+        event.preventDefault();
+        void movePage(1);
       }
   };
 
@@ -1956,6 +1988,21 @@ export default function Page() {
       window.removeEventListener("keydown", listener);
     };
   }, []);
+
+  // プレビュー枠の Ctrl+ホイール。passive:false でないと preventDefault が効かず webview 既定の
+  // ズームが走るため、React の onWheel ではなくネイティブリスナーで張る。表示ステップ切替で
+  // 枠が付け外しされるので activeStep を依存に再アタッチする。
+  useEffect(() => {
+    const element = previewFrameRef.current;
+    if (!element) {
+      return;
+    }
+    const listener = (event: WheelEvent): void => previewWheelHandlerRef.current(event);
+    element.addEventListener("wheel", listener, { passive: false });
+    return () => {
+      element.removeEventListener("wheel", listener);
+    };
+  }, [activeStep]);
 
   // セグメント構成が変わったら、空の連番を表示順(PDF単位)で自動補完する。
   // 既存値(手動・採番済み)は変更しないので、保存状態の復元値も保持される。
@@ -3074,8 +3121,11 @@ export default function Page() {
               <button
                 className={previewFitMode === "free" ? "selected" : ""}
                 disabled={!currentFile}
-                onClick={() => changePreviewFitMode("free")}
-                title="手動ズーム（実寸）"
+                onClick={() => {
+                  changePreviewFitMode("free");
+                  void changePreviewZoom(1);
+                }}
+                title="実寸（100%）。以後はスライダーや Ctrl+ホイールで拡大縮小"
                 type="button"
               >
                 実寸
@@ -3103,7 +3153,7 @@ export default function Page() {
   function renderPreviewFrame() {
     const previewClassName = `preview-frame ${previewFitMode}`;
     return (
-      <div className={previewClassName}>
+      <div className={previewClassName} ref={previewFrameRef}>
         {isPreviewLoading ? (
           <div aria-live="polite" className="preview-loading-indicator" role="status">
             読み込み中…
