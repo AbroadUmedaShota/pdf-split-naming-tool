@@ -269,6 +269,33 @@ async function assertRejectedPreviewResponse({
   assert.deepEqual(appliedPreviews.at(-1), { imageDataUrl: "data:image/png;base64,page-2", pageNo: 2 });
 }
 
+{
+  // 実サイドカー(pdf_service.py)は page_preview を JPEG で返す。JPEG が受理されることの回帰テスト。
+  const cache = createPreviewCache(5);
+  const gate = createPreviewRequestGate();
+  const appliedPreviews = [];
+  const pdfPath = "C:\\docs\\jpeg.pdf";
+
+  const result = await loadPagePreview({
+    applyPreview: (preview) => appliedPreviews.push(preview),
+    cache,
+    gate,
+    pageNo: 1,
+    pdfPath,
+    requestPreview: async () => ({
+      ok: true,
+      command: "page_preview",
+      page_no: 1,
+      page_count: 3,
+      image_data_url: "data:image/jpeg;base64,jpeg-1",
+    }),
+  });
+
+  assert.equal(result, "sidecar");
+  assert.deepEqual(appliedPreviews, [{ imageDataUrl: "data:image/jpeg;base64,jpeg-1", pageNo: 1 }]);
+  assert.deepEqual(cache.get(pdfPath, 1), { imageDataUrl: "data:image/jpeg;base64,jpeg-1", pageNo: 1 });
+}
+
 for (const { label, response } of [
   {
     label: "missing image URL",
@@ -294,7 +321,7 @@ for (const { label, response } of [
     response: {
       ok: true,
       command: "page_preview",
-      image_data_url: "data:image/jpeg;base64,page-2",
+      image_data_url: "data:image/gif;base64,page-2",
       page_count: 8,
       page_no: 2,
     },

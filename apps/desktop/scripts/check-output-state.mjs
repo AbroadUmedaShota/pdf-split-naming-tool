@@ -27,6 +27,7 @@ const {
   outputDetailStateText,
   outputIssueCount,
   outputListStateText,
+  isOutputItemCreated,
 } = outputStateModule.exports;
 
 const preflightOk = {
@@ -86,3 +87,17 @@ assert.equal(outputIssueCount([preflightRenamed]), 0);
 
 // filename が空（失敗行など）は採番扱いにしない
 assert.equal(isOutputCheckRenamed({ ...preflightOk, filename: "" }), false);
+
+// 出力完了後の created 行は「出力可能」ではなく「作成済み」として可視化する
+const exportCreated = { ...preflightOk, status: "created", sha256: "abc" };
+assert.equal(isOutputItemCreated(exportCreated), true);
+assert.equal(isOutputItemCreated(preflightOk), false);
+assert.equal(isOutputCheckOk(exportCreated), true);
+assert.equal(outputListStateText(exportCreated), "作成済み");
+assert.equal(outputDetailStateText(exportCreated), "作成済み");
+// created かつ別名採番された行は採番済みであることも明示する
+const exportCreatedRenamed = { ...exportCreated, filename: "01_02_003_2.pdf" };
+assert.equal(outputListStateText(exportCreatedRenamed), "作成済み（別名採番）");
+assert.equal(outputDetailStateText(exportCreatedRenamed), "作成済み（別名「01_02_003_2.pdf」で採番）");
+// created 行は issue に数えない（出力は成功している）
+assert.equal(outputIssueCount([exportCreated]), 0);

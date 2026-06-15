@@ -29,6 +29,7 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   invokeSidecar,
+  revealPath,
   type AppPersistedState,
   type SidecarBlankCandidate,
   type SidecarExportResponse,
@@ -61,6 +62,7 @@ import {
   formatTopLevelMessage,
   isOutputCheckOk,
   isOutputCheckRenamed,
+  isOutputItemCreated,
   outputDetailStateText,
   outputIssueCount,
   outputListStateText
@@ -526,6 +528,8 @@ export default function Page() {
   const [exportResult, setExportResult] = useState<SidecarExportResponse | null>(null);
   const [isPreflighting, setIsPreflighting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  // 出力中の経過秒。1秒以上かかった異常系（権限/ロック/容量で停滞）で「固まっていない」ことを示す。
+  const [exportElapsedSec, setExportElapsedSec] = useState(0);
   const [isSavingState, setIsSavingState] = useState(false);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   // ステータスは文言とトーンをセットで保持する（文字列マッチによるトーン推定は誤判定するため廃止）。
@@ -663,7 +667,12 @@ export default function Page() {
   const existingOutputs = preflightChecks.filter((check) => check.has_existing_output).length;
   const canContinueFromImport = pdfFiles.length > 0 && Boolean(outputDir);
   const canRunPreflight = allSegments.length > 0 && Boolean(outputDir);
-  const canExport = preflightChecks.length > 0 && outputIssues === 0 && existingOutputs === 0;
+  const canExport =
+    preflightChecks.length > 0 &&
+    outputIssues === 0 &&
+    existingOutputs === 0 &&
+    // 全件成功後の再クリックによる _2 複製を防ぐ。再出力は「再チェック」経由（exportResult がクリアされる）。
+    (exportResult === null || exportResult.summary.failed > 0);
   const totalSplitPointCount = useMemo(
     () => pdfFiles.reduce((total, file) => total + splitPointsFor(file.pageCount, splitPointsByPdf[file.path]).length, 0),
     [pdfFiles, splitPointsByPdf]
@@ -983,6 +992,17 @@ export default function Page() {
       setSplitStepVisited(true);
     }
   }, [activeStep]);
+
+  // 出力中だけ経過秒を1秒刻みで進める。完了/失敗で isExporting が false に戻ると停止しリセットする。
+  useEffect(() => {
+    if (!isExporting) {
+      setExportElapsedSec(0); // 初回マウント時と、完了・失敗で出力が終わった後のリセット。
+      return;
+    }
+    setExportElapsedSec(0); // 出力開始時に0から数え直す。
+    const timer = setInterval(() => setExportElapsedSec((seconds) => seconds + 1), 1000);
+    return () => clearInterval(timer);
+  }, [isExporting]);
 
   useEffect(() => {
     if (!currentFile || devPreviewEnabled) {
@@ -2295,6 +2315,32 @@ export default function Page() {
     }
   }
 
+  // ステッパーからのステップ移動。出力実行中は移動を止め、編集による「出力済み≠表示内容」のズレを防ぐ。
+  function requestStepChange(stepId: StepId): void {
+    if (devPreviewEnabled) {
+      switchDevPreviewStep(stepId);
+      return;
+    }
+    if (isExporting) {
+      setStatus("出力処理中はステップを移動できません。完了までお待ちください。", "warning");
+      return;
+    }
+    setActiveStep(stepId);
+  }
+
+  // 出力先フォルダを OS のファイルマネージャで開く。出力後の生成PDF確認・振り分けへの導線。
+  async function openOutputDir(): Promise<void> {
+    if (!outputDir) {
+      setStatus("出力先が未設定です。", "warning");
+      return;
+    }
+    try {
+      await revealPath(outputDir);
+    } catch (error) {
+      setStatus(`出力フォルダを開けませんでした: ${String(error)}`, "danger");
+    }
+  }
+
   async function saveState(): Promise<void> {
     if (saveStateInFlightRef.current) {
       return;
@@ -2758,7 +2804,13 @@ export default function Page() {
           <div className="output-list">
             {preflightChecks.map((check, index) => (
               <div
-                className={isOutputCheckOk(check) ? "output-row" : "output-row error"}
+                className={
+                  isOutputItemCreated(check)
+                    ? "output-row created"
+                    : isOutputCheckOk(check)
+                      ? "output-row"
+                      : "output-row error"
+                }
                 key={`${check.pdf_path}-${check.pages}-${index}`}
               >
                 <span>
@@ -2767,7 +2819,11 @@ export default function Page() {
                 </span>
                 <span
                   className={
-                    isOutputCheckOk(check) && !isOutputCheckRenamed(check) ? "state-text ok" : "state-text warning"
+                    isOutputItemCreated(check)
+                      ? "state-text ok"
+                      : isOutputCheckOk(check) && !isOutputCheckRenamed(check)
+                        ? "state-text ok"
+                        : "state-text warning"
                   }
                 >
                   {outputListStateText(check)}
@@ -3313,6 +3369,9 @@ export default function Page() {
   }
 
   function renderOutputWork() {
+    // 出力失敗した行だけを抜き出し、ファイル名と理由を明細表示する（後工程前の原因特定用）。
+    const exportFailedItems = exportResult ? exportResult.items.filter((item) => item.status === "failed") : [];
+    const exportHasFailure = Boolean(exportResult && exportResult.summary.failed > 0);
     return (
       <section className="work-card stack" aria-label="出力">
         <PaneHeader
@@ -3325,15 +3384,32 @@ export default function Page() {
           <StatLine label="出力先" value={outputDir || "未設定"} />
         </div>
         {exportResult ? (
-          <div className="log-box">
-            <strong>出力結果</strong>
+          <div className={exportHasFailure ? "log-box has-failures" : "log-box is-complete"}>
+            <strong>{exportHasFailure ? "出力結果（失敗あり）" : "出力結果"}</strong>
             <p>{`作成 ${exportResult.summary.created}件 / 失敗 ${exportResult.summary.failed}件`}</p>
+            {exportFailedItems.length > 0 ? (
+              <ul className="export-failures">
+                {exportFailedItems.map((item, index) => (
+                  <li key={`${item.requested_path || item.pdf_path}-${item.pages}-${index}`}>
+                    <span className="export-failure-name">
+                      {item.requested_filename || item.filename || `ページ ${item.pages}`}
+                    </span>
+                    <span className="export-failure-reason">{outputDetailStateText(item)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             {exportResult.messages && exportResult.messages.length > 0 ? (
               <ul className="export-messages">
                 {exportResult.messages.map((msg) => (
                   <li key={msg}>{formatTopLevelMessage(msg)}</li>
                 ))}
               </ul>
+            ) : null}
+            {exportHasFailure ? (
+              <p className="export-recovery-hint">
+                失敗した行は、出力フォルダ内の既存ファイルを確認・削除してから「再チェック」→「出力実行」で再出力できます。
+              </p>
             ) : null}
           </div>
         ) : null}
@@ -3347,7 +3423,13 @@ export default function Page() {
             </div>
             {preflightChecks.map((check, index) => (
               <div
-                className={isOutputCheckOk(check) ? "check-row" : "check-row error"}
+                className={
+                  isOutputItemCreated(check)
+                    ? "check-row created"
+                    : isOutputCheckOk(check)
+                      ? "check-row"
+                      : "check-row error"
+                }
                 key={`${check.pdf_path}-${check.pages}-${index}`}
               >
                 <span>{check.pages}</span>
@@ -3366,8 +3448,13 @@ export default function Page() {
           <button disabled={!canRunPreflight || isPreflighting} onClick={runPreflight} type="button">
             <IconLabel icon={ClipboardCheck}>{isPreflighting ? "チェック中…" : "再チェック"}</IconLabel>
           </button>
+          <button disabled={!outputDir} onClick={() => void openOutputDir()} type="button">
+            <IconLabel icon={FolderOpen}>出力フォルダを開く</IconLabel>
+          </button>
           <button className="primary wide" disabled={!canExport || isExporting} onClick={runExport} type="button">
-            <IconLabel icon={Download}>{isExporting ? "出力中…" : "出力実行"}</IconLabel>
+            <IconLabel icon={Download}>
+              {isExporting ? (exportElapsedSec > 0 ? `出力中…（${exportElapsedSec}秒経過）` : "出力中…") : "出力実行"}
+            </IconLabel>
           </button>
         </div>
       </section>
@@ -3837,7 +3924,7 @@ export default function Page() {
               className={`step-tab ${state}`}
               data-testid={`step-${step.id}`}
               key={step.id}
-              onClick={() => (devPreviewEnabled ? switchDevPreviewStep(step.id) : setActiveStep(step.id))}
+              onClick={() => requestStepChange(step.id)}
               type="button"
             >
               <span className="step-index">{index + 1}</span>

@@ -30,7 +30,15 @@ export type LoadPagePreviewOptions = {
   zoom?: number;
 };
 
-const previewImageDataUrlPrefix = "data:image/png;base64,";
+// サイドカー(pdf_service.py)は page_preview を軽量化のため JPEG で返す。PNG も将来互換で許容する。
+// ブラウザはどちらの data URL も描画できるため、形式は限定せず「想定プレフィックス＋本体あり」だけ検証する。
+const previewImageDataUrlPrefixes = ["data:image/jpeg;base64,", "data:image/png;base64,"];
+
+function hasPreviewImageData(value: string): boolean {
+  return previewImageDataUrlPrefixes.some(
+    (prefix) => value.startsWith(prefix) && value.length > prefix.length
+  );
+}
 
 function isValidPagePreviewResponse(
   response: PreviewFlowResponse,
@@ -38,8 +46,7 @@ function isValidPagePreviewResponse(
 ): response is PreviewFlowResponse & { image_data_url: string; page_count: number; page_no: number } {
   return (
     typeof response.image_data_url === "string" &&
-    response.image_data_url.startsWith(previewImageDataUrlPrefix) &&
-    response.image_data_url.length > previewImageDataUrlPrefix.length &&
+    hasPreviewImageData(response.image_data_url) &&
     typeof response.page_count === "number" &&
     Number.isInteger(response.page_count) &&
     response.page_count > 0 &&
