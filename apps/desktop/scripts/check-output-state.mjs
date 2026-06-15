@@ -164,3 +164,26 @@ assert.equal(mergedFail.summary.failed, 1);
 assert.equal(mergedFail.ok, false);
 assert.deepEqual(mergedFail.messages, ["export_incomplete"]);
 assert.equal(mergedFail.items[1].error, "still locked");
+
+// 全件失敗のまま（created=0）なら export_incomplete は付けない（一部成功時だけの警告）
+const baseAllFail = {
+  ok: false,
+  command: "export",
+  output_dir: "C:\\out",
+  summary: { created: 0, failed: 2 },
+  items: [failedItem("01.pdf", "1", "x"), failedItem("02.pdf", "2", "y")],
+  messages: [],
+};
+const retryAllFail = {
+  ok: false,
+  command: "export",
+  output_dir: "C:\\out",
+  summary: { created: 0, failed: 2 },
+  items: [failedItem("01.pdf", "1", "x2"), failedItem("02.pdf", "2", "y2")],
+  messages: [],
+};
+const mergedAllFail = mergeRetriedExport(baseAllFail, retryAllFail, [0, 1]);
+assert.equal(mergedAllFail.summary.created, 0);
+assert.equal(mergedAllFail.summary.failed, 2);
+assert.equal(mergedAllFail.ok, false);
+assert.deepEqual(mergedAllFail.messages, []);
