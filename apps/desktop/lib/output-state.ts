@@ -1,4 +1,4 @@
-import type { SidecarOutputCheck, SidecarOutputItem } from "./sidecar";
+import type { SidecarExportResponse, SidecarOutputCheck, SidecarOutputItem } from "./sidecar";
 
 export type OutputCheckLike = SidecarOutputCheck | SidecarOutputItem;
 
@@ -67,4 +67,32 @@ export function outputDetailStateText(check: OutputCheckLike): string {
     return check.error || check.messages.map(formatMessage).join(" / ") || "出力失敗";
   }
   return check.messages.map(formatMessage).join(" / ");
+}
+
+// 「失敗分のみ再出力」の結果を元の出力結果へマージする。
+// base.items は初回出力の全行、retry.items は失敗indexのみを再出力した結果（failedIndices と同順）。
+// 成功済み行は温存し、失敗していた位置だけ retry の結果で差し替え、サマリ・ok・messages を再計算する。
+export function mergeRetriedExport(
+  base: SidecarExportResponse,
+  retry: SidecarExportResponse,
+  failedIndices: number[]
+): SidecarExportResponse {
+  const mergedItems = [...base.items];
+  failedIndices.forEach((originalIndex, retryIndex) => {
+    const retried = retry.items[retryIndex];
+    if (retried) {
+      mergedItems[originalIndex] = retried;
+    }
+  });
+  const created = mergedItems.filter((item) => isOutputItemCreated(item)).length;
+  const failed = mergedItems.filter((item) => item.status === "failed").length;
+  return {
+    ...retry,
+    ok: failed === 0,
+    output_dir: base.output_dir,
+    summary: { created, failed },
+    items: mergedItems,
+    // 一部成功・一部失敗のときだけ「出力フォルダが不完全」の警告を残す。
+    messages: failed > 0 && created > 0 ? ["export_incomplete"] : []
+  };
 }
