@@ -19,6 +19,7 @@
     "test:e2e": "playwright test",
     "test:installed-step1": "node scripts/installed-step1-smoke.mjs",
     "test:installed-core": "node scripts/installed-core-smoke.mjs",
+    "test:installed-native-dialog": "node scripts/installed-native-dialog-smoke.mjs",
     "tauri": "tauri",
     "release:manifest": "node scripts/create-updater-manifest.mjs"
   },
