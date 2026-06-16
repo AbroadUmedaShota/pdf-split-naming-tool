@@ -14,12 +14,15 @@ def test_desktop_shell_uses_next_static_export_for_tauri() -> None:
     tauri_config = json.loads((DESKTOP / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
 
     assert package_json["scripts"]["build"] == "next build"
+    assert package_json["scripts"]["build:sidecar"].endswith("scripts/build-sidecar.ps1")
+    assert package_json["scripts"]["build:bundle"] == "npm run build:sidecar && npm run build"
     assert package_json["scripts"]["typecheck"] == "tsc --noEmit"
     assert package_json["dependencies"]["next"].startswith("^16.")
     assert "output: 'export'" in next_config
     assert tauri_config["build"]["frontendDist"] == "../out"
-    assert tauri_config["build"]["beforeBuildCommand"] == "npm run build"
+    assert tauri_config["build"]["beforeBuildCommand"] == "npm run build:bundle"
     assert tauri_config["bundle"]["icon"] == ["icons/icon.ico"]
+    assert tauri_config["bundle"]["resources"] == ["resources/sidecar/"]
     assert tauri_config["bundle"]["windows"]["wix"]["language"] == "ja-JP"
 
 
@@ -42,6 +45,8 @@ def test_desktop_tauri_runs_resident_sidecar_with_oneshot_fallback() -> None:
     assert "--sidecar-serve" in lib_rs
     assert "SidecarState" in lib_rs
     assert "PDF_ORGANIZER_SIDECAR_MODE" in lib_rs
+    assert "PDF_ORGANIZER_SIDECAR_EXE" in lib_rs
+    assert "pdf-splitter-sidecar.exe" in lib_rs
     assert "run_sidecar_oneshot" in lib_rs
     assert "--sidecar-request" in lib_rs
     assert "PDF_ORGANIZER_SIDECAR_TIMEOUT_MS" in lib_rs

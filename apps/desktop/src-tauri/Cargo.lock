@@ -2227,7 +2227,7 @@ dependencies = [
 
 [[package]]
 name = "pdf-organizer-desktop"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "serde_json",
  "tauri",

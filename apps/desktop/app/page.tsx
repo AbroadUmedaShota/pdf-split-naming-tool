@@ -44,6 +44,7 @@ import {
   type SidecarSearchHighlightsResponse,
   type SidecarSearchResult,
   type SidecarSearchTextResponse,
+  type SidecarRequest,
   type SidecarSegment
 } from "../lib/sidecar";
 import { resolveMissingSavedPdfRestore, restorableInputPaths } from "../lib/restore-state";
@@ -120,6 +121,16 @@ type SelectedSearchHit = {
   pageNo: number;
   pdfPath: string;
 };
+type E2eHarness = {
+  invokeSidecar?: (request: SidecarRequest) => Promise<SidecarResponse> | SidecarResponse;
+  openDialog?: (options: unknown) => Promise<unknown> | unknown;
+};
+
+declare global {
+  interface Window {
+    __PDF_TOOL_E2E__?: E2eHarness;
+  }
+}
 type PageState = {
   blankScore?: number;
   hasSplitBefore: boolean;
@@ -421,7 +432,36 @@ function shouldUseDevPreviewMode(): boolean {
   if (typeof window === "undefined") {
     return false;
   }
+  if (new URLSearchParams(window.location.search).has("e2e")) {
+    return false;
+  }
   return isDevBrowserPreview() || new URLSearchParams(window.location.search).get("review") === "step2";
+}
+
+function e2eHarness(): E2eHarness | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  if (!new URLSearchParams(window.location.search).has("e2e")) {
+    return null;
+  }
+  return window.__PDF_TOOL_E2E__ ?? null;
+}
+
+async function openDialog(options: unknown): Promise<unknown> {
+  const harness = e2eHarness();
+  if (harness?.openDialog) {
+    return harness.openDialog(options);
+  }
+  return open(options as Parameters<typeof open>[0]);
+}
+
+async function runSidecar(request: SidecarRequest): Promise<SidecarResponse> {
+  const harness = e2eHarness();
+  if (harness?.invokeSidecar) {
+    return harness.invokeSidecar(request);
+  }
+  return invokeSidecar(request);
 }
 
 function IconLabel({ children, icon: Icon }: { children: ReactNode; icon: LucideIcon }) {
@@ -540,7 +580,7 @@ export default function Page() {
   });
   // 分割ステップを一度でも開いたか（分割点ゼロ運用でもステッパーを「完了」にするための訪問フラグ）。
   const [splitStepVisited, setSplitStepVisited] = useState(false);
-  const [currentVersion, setCurrentVersion] = useState("0.1.3");
+  const [currentVersion, setCurrentVersion] = useState("0.1.4");
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
   const [updateMessage, setUpdateMessage] = useState("更新未確認");
   const [updateProgress, setUpdateProgress] = useState("");
@@ -946,7 +986,7 @@ export default function Page() {
       })
       .catch(() => {
         if (!disposed) {
-          setCurrentVersion("0.1.3");
+          setCurrentVersion("0.1.4");
         }
       });
 
@@ -1020,7 +1060,7 @@ export default function Page() {
 
     async function loadCurrentPageText(): Promise<void> {
       try {
-        const response = await invokeSidecar({ command: "page_text", pdf_path: currentFile!.path, page_no: currentPage });
+        const response = await runSidecar({ command: "page_text", pdf_path: currentFile!.path, page_no: currentPage });
         if (!pageTextRequestGateRef.current.isCurrent(requestId)) {
           return;
         }
@@ -1071,7 +1111,7 @@ export default function Page() {
       setBlankScanProgress(`白紙判定中… 0/${pageCount}`);
       try {
         for (;;) {
-          const response = await invokeSidecar({ command: "blank_candidates", pdf_path: pdfPath, start_page: startPage });
+          const response = await runSidecar({ command: "blank_candidates", pdf_path: pdfPath, start_page: startPage });
           if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
             return;
           }
@@ -1118,7 +1158,7 @@ export default function Page() {
         const chunk = pendingPages.slice(offset, offset + THUMBNAIL_CONCURRENCY);
         const responses = await Promise.all(
           chunk.map((pageNo) =>
-            invokeSidecar({ command: "page_thumbnail", pdf_path: pdfPath, page_no: pageNo })
+            runSidecar({ command: "page_thumbnail", pdf_path: pdfPath, page_no: pageNo })
               .then((response) => (response.ok && response.command === "page_thumbnail" ? response : null))
               .catch(() => null)
           )
@@ -1273,7 +1313,7 @@ export default function Page() {
   }
 
   async function loadPdfInfo(path: string): Promise<PdfFile> {
-    const response = await invokeSidecar({ command: "pdf_info", pdf_path: path });
+    const response = await runSidecar({ command: "pdf_info", pdf_path: path });
     if (!response.ok || response.command !== "pdf_info") {
       throw new Error(response.ok ? "PDF情報を取得できませんでした。" : sidecarError(response));
     }
@@ -1324,7 +1364,7 @@ export default function Page() {
         invalidPreviewMessage: "プレビューを取得できませんでした。",
         pageNo,
         pdfPath,
-        requestPreview: (request) => invokeSidecar(request),
+        requestPreview: (request) => runSidecar(request),
         responseErrorMessage: (response) => sidecarError(response as SidecarResponse),
         zoom: zoomOverride
       });
@@ -1339,7 +1379,7 @@ export default function Page() {
   async function choosePdfs(): Promise<void> {
     let requestId = 0;
     try {
-      const selected = await open({
+      const selected = await openDialog({
         multiple: true,
         filters: [{ name: "PDF", extensions: ["pdf"] }]
       });
@@ -1382,7 +1422,7 @@ export default function Page() {
   }
 
   async function chooseOutputDir(): Promise<void> {
-    const selected = await open({ directory: true, multiple: false });
+    const selected = await openDialog({ directory: true, multiple: false });
     if (typeof selected === "string") {
       invalidateWorkspaceRequests();
       setOutputDir(selected);
@@ -1686,7 +1726,7 @@ export default function Page() {
     try {
       const responses = await Promise.all(
         targetTerms.map(async (term) => {
-          const response = await invokeSidecar({
+          const response = await runSidecar({
             command: "search_highlights",
             pdf_path: pdfPath,
             page_no: pageNo,
@@ -1762,7 +1802,7 @@ export default function Page() {
     setIsSearching(true);
     try {
       // 全用語を1リクエストで検索する（用語数×全ページ走査の繰り返しを避ける）。
-      const response = await invokeSidecar({
+      const response = await runSidecar({
         command: "search_text",
         current_pdf: currentPdf,
         pdf_paths: [currentPdf],
@@ -1809,7 +1849,7 @@ export default function Page() {
     candidateInFlightRef.current = true;
     setIsCandidateLoading(true);
     try {
-      const response = await invokeSidecar({
+      const response = await runSidecar({
         command: "index_candidates",
         pdf_paths: [currentPdf]
       });
@@ -2288,7 +2328,7 @@ export default function Page() {
     // 送信時点の要求内容を保持し、応答待ち中に編集された場合は結果を適用しない。
     const requestSignature = exportRequestSignature;
     try {
-      const response = await invokeSidecar({
+      const response = await runSidecar({
         command: "preflight",
         output_dir: outputDir,
         segments: requestSegments(),
@@ -2338,7 +2378,7 @@ export default function Page() {
     setIsExporting(true);
     setStatus("出力しています…");
     try {
-      const response = await invokeSidecar({
+      const response = await runSidecar({
         command: "export",
         output_dir: outputDir,
         segments: requestSegments(),
@@ -2398,7 +2438,7 @@ export default function Page() {
     setIsExporting(true);
     setStatus(`失敗した ${failedIndices.length}件を再出力しています…`);
     try {
-      const response = await invokeSidecar({
+      const response = await runSidecar({
         command: "export",
         output_dir: outputDir,
         segments: retrySegments,
@@ -2485,7 +2525,7 @@ export default function Page() {
         current_pdf: currentPdf,
         current_page: currentPage
       };
-      const response = await invokeSidecar({ command: "state_save", state });
+      const response = await runSidecar({ command: "state_save", state });
       if (response.ok) {
         setStatus("状態を保存しました。", "ok");
       } else {
@@ -2510,7 +2550,7 @@ export default function Page() {
     const requestId = workspaceRequestGateRef.current.next();
     invalidatePreviewRequests();
     try {
-      const response = await invokeSidecar({ command: "state_load" });
+      const response = await runSidecar({ command: "state_load" });
       if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
         return;
       }

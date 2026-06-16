@@ -1,7 +1,13 @@
 use tauri::Manager;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 /// Number of recent stderr lines kept for diagnostics when the sidecar fails.
 const STDERR_TAIL_MAX_LINES: usize = 50;
+const BUNDLED_SIDECAR_RESOURCE_PATH: &str = "resources/sidecar/pdf-splitter-sidecar.exe";
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -57,14 +63,29 @@ enum SidecarMode {
     Oneshot,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SidecarRuntime {
+    BundledExecutable { path: std::path::PathBuf },
+    Python {
+        recovery_dir: std::path::PathBuf,
+        launcher: PythonLauncher,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SidecarProcessSpec {
+    program: std::path::PathBuf,
+    args: Vec<String>,
+    current_dir: Option<std::path::PathBuf>,
+}
+
 #[tauri::command]
 async fn run_sidecar(
+    app: tauri::AppHandle,
     state: tauri::State<'_, SidecarState>,
     request: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let recovery_dir = find_recovery_dir()?;
-    let explicit_python = std::env::var_os("PDF_ORGANIZER_PYTHON").map(std::path::PathBuf::from);
-    let python_launcher = sidecar_python_launcher_from(explicit_python.as_deref());
+    let runtime = sidecar_runtime(&app)?;
     let timeout_override = std::env::var("PDF_ORGANIZER_SIDECAR_TIMEOUT_MS").ok();
     let timeout = sidecar_timeout_from(timeout_override.as_deref());
     let mode_override = std::env::var("PDF_ORGANIZER_SIDECAR_MODE").ok();
@@ -75,12 +96,11 @@ async fn run_sidecar(
         SidecarMode::Oneshot => {
             let request_text =
                 serde_json::to_string(&request).map_err(|error| error.to_string())?;
-            run_sidecar_oneshot(&recovery_dir, &python_launcher, &request_text, timeout)
+            run_sidecar_oneshot(&runtime, &request_text, timeout)
         }
         SidecarMode::Resident => run_sidecar_resident(
             &shared_slot,
-            &recovery_dir,
-            &python_launcher,
+            &runtime,
             &request,
             timeout,
         ),
@@ -141,10 +161,107 @@ fn sidecar_mode_from(value: Option<&str>) -> SidecarMode {
     }
 }
 
+fn sidecar_runtime(app: &tauri::AppHandle) -> Result<SidecarRuntime, String> {
+    let explicit_exe = std::env::var_os("PDF_ORGANIZER_SIDECAR_EXE").map(std::path::PathBuf::from);
+    if let Some(path) = explicit_exe.filter(|path| !path.as_os_str().is_empty()) {
+        return sidecar_executable_runtime(path);
+    }
+
+    let explicit_python = std::env::var_os("PDF_ORGANIZER_PYTHON").map(std::path::PathBuf::from);
+    let explicit_recovery =
+        std::env::var_os("PDF_ORGANIZER_RECOVERY_DIR").map(std::path::PathBuf::from);
+    if explicit_python.is_none() && explicit_recovery.is_none() {
+        if let Some(path) = bundled_sidecar_path(app) {
+            return sidecar_executable_runtime(path);
+        }
+    }
+
+    Ok(SidecarRuntime::Python {
+        recovery_dir: find_recovery_dir()?,
+        launcher: sidecar_python_launcher_from(explicit_python.as_deref()),
+    })
+}
+
+fn sidecar_executable_runtime(path: std::path::PathBuf) -> Result<SidecarRuntime, String> {
+    if path.is_file() {
+        Ok(SidecarRuntime::BundledExecutable { path })
+    } else {
+        Err(format!(
+            "PDF_ORGANIZER_SIDECAR_EXE does not point to a file: {}",
+            path.display()
+        ))
+    }
+}
+
+fn bundled_sidecar_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    let resource_dir = app.path().resource_dir().ok()?;
+    bundled_sidecar_path_from_resource_dir(&resource_dir)
+}
+
+fn bundled_sidecar_path_from_resource_dir(
+    resource_dir: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let candidate = resource_dir.join(BUNDLED_SIDECAR_RESOURCE_PATH);
+    candidate.is_file().then_some(candidate)
+}
+
+fn sidecar_process_spec(runtime: &SidecarRuntime, mode: SidecarMode) -> SidecarProcessSpec {
+    match runtime {
+        SidecarRuntime::BundledExecutable { path } => SidecarProcessSpec {
+            program: path.clone(),
+            args: match mode {
+                SidecarMode::Resident => vec!["--sidecar-serve".to_string()],
+                SidecarMode::Oneshot => vec!["--sidecar-request".to_string(), "-".to_string()],
+            },
+            current_dir: path.parent().map(std::path::Path::to_path_buf),
+        },
+        SidecarRuntime::Python {
+            recovery_dir,
+            launcher,
+        } => {
+            let mut args = launcher.args.clone();
+            match mode {
+                SidecarMode::Resident => {
+                    args.extend([
+                        "-m".to_string(),
+                        "pdf_splitter_tool".to_string(),
+                        "--sidecar-serve".to_string(),
+                    ]);
+                }
+                SidecarMode::Oneshot => {
+                    args.extend([
+                        "-m".to_string(),
+                        "pdf_splitter_tool".to_string(),
+                        "--sidecar-request".to_string(),
+                        "-".to_string(),
+                    ]);
+                }
+            }
+            SidecarProcessSpec {
+                program: launcher.program.clone(),
+                args,
+                current_dir: Some(recovery_dir.clone()),
+            }
+        }
+    }
+}
+
+fn sidecar_command(spec: &SidecarProcessSpec) -> std::process::Command {
+    let mut command = std::process::Command::new(&spec.program);
+    command.args(spec.args.iter().map(String::as_str));
+    if let Some(current_dir) = &spec.current_dir {
+        command.current_dir(current_dir);
+    }
+    command.env("PYTHONIOENCODING", "utf-8");
+    command.env("PYTHONUTF8", "1");
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
+
 fn run_sidecar_resident(
     shared_slot: &std::sync::Mutex<Option<ResidentSidecar>>,
-    recovery_dir: &std::path::Path,
-    python_launcher: &PythonLauncher,
+    runtime: &SidecarRuntime,
     request: &serde_json::Value,
     timeout: std::time::Duration,
 ) -> Result<serde_json::Value, String> {
@@ -159,7 +276,8 @@ fn run_sidecar_resident(
     };
     if needs_spawn {
         let _ = kill_resident_sidecar(&mut slot);
-        *slot = Some(spawn_resident_sidecar(recovery_dir, python_launcher)?);
+        let spec = sidecar_process_spec(runtime, SidecarMode::Resident);
+        *slot = Some(spawn_resident_sidecar(&spec)?);
     }
 
     let sidecar = slot
@@ -177,15 +295,9 @@ fn run_sidecar_resident(
 }
 
 fn spawn_resident_sidecar(
-    recovery_dir: &std::path::Path,
-    python_launcher: &PythonLauncher,
+    spec: &SidecarProcessSpec,
 ) -> Result<ResidentSidecar, String> {
-    let child = std::process::Command::new(&python_launcher.program)
-        .args(python_launcher.args.iter().map(String::as_str))
-        .args(["-m", "pdf_splitter_tool", "--sidecar-serve"])
-        .current_dir(recovery_dir)
-        .env("PYTHONIOENCODING", "utf-8")
-        .env("PYTHONUTF8", "1")
+    let child = sidecar_command(spec)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -338,17 +450,12 @@ fn append_stderr_tail(message: String, stderr_tail: &str) -> String {
 /// Legacy one-process-per-request execution, kept as a fallback that can be
 /// selected with `PDF_ORGANIZER_SIDECAR_MODE=oneshot`.
 fn run_sidecar_oneshot(
-    recovery_dir: &std::path::Path,
-    python_launcher: &PythonLauncher,
+    runtime: &SidecarRuntime,
     request_text: &str,
     timeout: std::time::Duration,
 ) -> Result<serde_json::Value, String> {
-    let mut child = std::process::Command::new(&python_launcher.program)
-        .args(python_launcher.args.iter().map(String::as_str))
-        .args(["-m", "pdf_splitter_tool", "--sidecar-request", "-"])
-        .current_dir(recovery_dir)
-        .env("PYTHONIOENCODING", "utf-8")
-        .env("PYTHONUTF8", "1")
+    let spec = sidecar_process_spec(runtime, SidecarMode::Oneshot);
+    let mut child = sidecar_command(&spec)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -428,6 +535,7 @@ fn is_recovery_dir(path: &std::path::Path) -> bool {
         .is_file()
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct PythonLauncher {
     program: std::path::PathBuf,
     args: Vec<String>,
@@ -666,6 +774,50 @@ mod tests {
     fn sidecar_mode_oneshot_can_be_selected() {
         assert_eq!(sidecar_mode_from(Some("oneshot")), SidecarMode::Oneshot);
         assert_eq!(sidecar_mode_from(Some(" ONESHOT ")), SidecarMode::Oneshot);
+    }
+
+    #[test]
+    fn bundled_sidecar_path_is_resolved_from_resource_dir() {
+        let root = unique_test_dir("resource-sidecar");
+        let sidecar = root.join(BUNDLED_SIDECAR_RESOURCE_PATH);
+        std::fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+        std::fs::write(&sidecar, "").unwrap();
+
+        let resolved = bundled_sidecar_path_from_resource_dir(&root).unwrap();
+
+        assert_eq!(resolved, sidecar);
+    }
+
+    #[test]
+    fn bundled_sidecar_process_spec_uses_executable_directly() {
+        let path = std::path::PathBuf::from("C:\\Program Files\\PDF整理ツール\\resources\\sidecar\\pdf-splitter-sidecar.exe");
+        let runtime = SidecarRuntime::BundledExecutable { path: path.clone() };
+
+        let resident = sidecar_process_spec(&runtime, SidecarMode::Resident);
+        let oneshot = sidecar_process_spec(&runtime, SidecarMode::Oneshot);
+
+        assert_eq!(resident.program, path);
+        assert_eq!(resident.args, vec!["--sidecar-serve"]);
+        assert_eq!(oneshot.args, vec!["--sidecar-request", "-"]);
+        assert!(resident.current_dir.unwrap().ends_with("resources\\sidecar"));
+    }
+
+    #[test]
+    fn python_sidecar_process_spec_keeps_development_fallback() {
+        let recovery_dir = std::path::PathBuf::from("C:\\repo\\recovery");
+        let runtime = SidecarRuntime::Python {
+            recovery_dir: recovery_dir.clone(),
+            launcher: PythonLauncher {
+                program: std::path::PathBuf::from("py"),
+                args: vec!["-3.12".to_string()],
+            },
+        };
+
+        let spec = sidecar_process_spec(&runtime, SidecarMode::Resident);
+
+        assert_eq!(spec.program, std::path::PathBuf::from("py"));
+        assert_eq!(spec.args, vec!["-3.12", "-m", "pdf_splitter_tool", "--sidecar-serve"]);
+        assert_eq!(spec.current_dir, Some(recovery_dir));
     }
 
     #[test]

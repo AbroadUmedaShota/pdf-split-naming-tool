@@ -1,19 +1,108 @@
 import { test, expect } from '@playwright/test';
 import { openDevStep, countSearchHighlights, readCurrentPage } from './helpers.js';
 
-// 対象: apps/desktop（Next.js）http://localhost:3000 を dev preview モード（?dev=<stepId>）で検証する。
-// dev preview は Tauri/Python サイドカー無しでサンプル状態の本番想定 UI を描画する（app/page.tsx shouldUseDevPreviewMode）。
+const step1MockPdfPath = 'C:\\Users\\tester\\Documents\\sample-step1.pdf';
+const step1MockOutputDir = 'C:\\Users\\tester\\Desktop\\pdf-output';
+const step1PreviewDataUrl =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 420 594'%3E%3Crect width='420' height='594' fill='%23fffaf0'/%3E%3Ctext x='210' y='80' text-anchor='middle' font-family='Arial' font-size='22' fill='%232c3335'%3ESTEP1 E2E PDF%3C/text%3E%3Cline x1='72' y1='140' x2='348' y2='140' stroke='%238a8274' stroke-width='3'/%3E%3Cline x1='72' y1='200' x2='348' y2='200' stroke='%238a8274' stroke-width='3'/%3E%3Cline x1='72' y1='260' x2='348' y2='260' stroke='%238a8274' stroke-width='3'/%3E%3C/svg%3E";
+
+async function installStep1Harness(page) {
+  await page.addInitScript(
+    ({ outputDir, pdfPath, previewDataUrl }) => {
+      window.__PDF_TOOL_E2E_CALLS__ = [];
+      window.__PDF_TOOL_E2E__ = {
+        async openDialog(options) {
+          window.__PDF_TOOL_E2E_CALLS__.push(options?.directory ? 'open:directory' : 'open:pdf');
+          return options?.directory ? outputDir : [pdfPath];
+        },
+        async invokeSidecar(request) {
+          window.__PDF_TOOL_E2E_CALLS__.push(request.command);
+          if (request.command === 'pdf_info') {
+            return {
+              ok: true,
+              command: 'pdf_info',
+              pdf_path: request.pdf_path,
+              page_count: 3,
+              naming_template: '{box_no}_{binder_no}_{seq}.pdf',
+            };
+          }
+          if (request.command === 'page_preview') {
+            return {
+              ok: true,
+              command: 'page_preview',
+              pdf_path: request.pdf_path,
+              page_no: request.page_no,
+              page_count: 3,
+              image_data_url: previewDataUrl,
+            };
+          }
+          return {
+            ok: false,
+            command: request.command,
+            error: `Unexpected E2E sidecar command: ${request.command}`,
+            error_type: 'UnexpectedE2ECommand',
+          };
+        },
+      };
+    },
+    { outputDir: step1MockOutputDir, pdfPath: step1MockPdfPath, previewDataUrl: step1PreviewDataUrl },
+  );
+}
+
+// 対象: apps/desktop（Next.js）http://localhost:3000 を STEP1 ハーネス（?e2e=step1）と
+// dev preview モード（?dev=<stepId>）で検証する。
 //
 // 自動化方針:
-//   - dev preview で「決定論的に再現できる UI 観点」のみ自動化する。
+//   - STEP1 はファイル選択とsidecar応答をハーネス化し、PDF取込のUI遷移を自動化する。
+//   - dev preview では「決定論的に再現できる UI 観点」のみ自動化する。
 //   - 処理中状態の注入・旧応答破棄・部分失敗 summary 注入・確認ダイアログ発火・リクエストゲート・
 //     再採番/affix 編集の動的動作・ステップ遷移ガード（dev preview ではバイパスされる）は dev preview の
 //     静的 early-return 設計で再現できないため、本ファイルでは自動化せず未実装テストケースへ退避する。
-//   - 自動化したのは TC-E2E-011（検索ハイライトのページ移動後残留なし・NF-U5）のみ。
+//   - dev preview で自動化したのは TC-E2E-011（検索ハイライトのページ移動後残留なし・NF-U5）。
 //     dev preview のページ移動（selectPageForPreview→clearSearchHighlights）は実コードパスで動作するため、
 //     期待結果「前ページのハイライトが残らない」を実 DOM で判定できる。
 
 test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
+  test('TC-E2E-S1-003 PDF選択後にPDF一覧・ページ数・プレビューが反映される', async ({ page }) => {
+    // TC: TC-E2E-S1-003 | Risk: STEP1 PDF取込失敗
+    // 測定手段: ?e2e=step1 で dev preview を無効化し、Tauri dialog / sidecar 応答だけをブラウザ内で差し替える。
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await installStep1Harness(page);
+
+    await page.goto('/?e2e=step1', { waitUntil: 'networkidle' });
+    await expect(page.getByRole('heading', { name: 'PDF整理ツール' })).toBeVisible();
+    await expect(page.getByText('PDFが未選択です')).toBeVisible();
+
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+
+    await expect(page.getByText('sample-step1.pdf').first()).toBeVisible();
+    await expect(page.getByText('3ページ').first()).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => (window.__PDF_TOOL_E2E_CALLS__ ?? []).slice(0, 3)))
+      .toEqual(['open:pdf', 'pdf_info', 'page_preview']);
+    await expect(pageErrors, 'PDF選択からプレビュー反映まで JS 例外が発生しない').toEqual([]);
+  });
+
+  test('TC-E2E-S1-004 PDFと出力先の設定後にSTEP2へ進める', async ({ page }) => {
+    // TC: TC-E2E-S1-004 | Risk: STEP1完了条件が満たされても通常フローへ進めない
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await installStep1Harness(page);
+
+    await page.goto('/?e2e=step1', { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+    await page.getByRole('button', { name: '出力フォルダ' }).click();
+
+    const nextButton = page.getByRole('button', { name: '分割へ進む' });
+    await expect(nextButton).toBeEnabled();
+    await nextButton.click();
+
+    await expect(page.locator('[data-testid="step-split"][aria-current="step"]')).toBeAttached();
+    await expect(page.getByRole('button', { name: '前ページ' })).toBeVisible();
+    await expect(pageErrors, 'STEP1完了からSTEP2遷移まで JS 例外が発生しない').toEqual([]);
+  });
+
   test('TC-E2E-011 検索ハイライト表示中にページ移動すると前ページのハイライトが残らない', async ({ page }) => {
     // TC: TC-E2E-011 | TD: TD049 | TV: TV049 | TA: TA009 | Risk: R011
     // Spec: テスト設計.md TD049 / ISS-030 NF-U5（page.tsx clearSearchHighlights）

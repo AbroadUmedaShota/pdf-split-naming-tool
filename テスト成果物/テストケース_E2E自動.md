@@ -14,24 +14,27 @@
 
 ## 3. E2E自動テストで実行するテストケース
 
-**Playwright 導入確定（@playwright/test 1.60.0・chromium 導入済み）。実行手段は dev preview モード（`?dev=<stepId>`）でサイドカー無しに UI を検証する。**
+**Playwright 導入確定（@playwright/test 1.60.0・chromium 導入済み）。実行手段は STEP1 取込E2Eハーネス（`?e2e=step1`）と dev preview モード（`?dev=<stepId>`）を併用する。**
 
-dev preview で決定論的に再現できるケースのみ自動化した。dev preview の静的 early-return 設計で再現できない 17 件（処理中状態注入・旧応答破棄・部分失敗注入・確認ダイアログ発火・リクエストゲート・再採番/affix の動的編集・ステップ遷移ガード）は `未実装テストケース_E2E自動.md` に退避済み（DQ03 は導入確定だが invoke モック test seam が別途必要なため）。
+STEP1のPDF取込は、Tauriのファイル選択とsidecar応答をハーネスで差し替えて自動化した。dev preview の静的 early-return 設計で再現できない 17 件（処理中状態注入・旧応答破棄・部分失敗注入・確認ダイアログ発火・リクエストゲート・再採番/affix の動的編集・ステップ遷移ガード）は `未実装テストケース_E2E自動.md` に退避済み（DQ03 は導入確定だが invoke モック test seam が別途必要なため）。
 
 | テストケースID | 元テスト設計ID | テスト観点ID | テストアプローチID | 実行区分 | テストレベル/タイプ | 優先度 | テストケース名 | 前提条件 | 入力/データ | 手順 | 期待結果 | 確認方法/証跡 | 関連質問ID | 仕様 | リスクID | 状態 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| TC-E2E-S1-003 | STEP1優先 | TV-S1 | TA-S1 | E2E自動 | E2E | 高 | 有効なPDF選択後、PDF一覧・ページ数・プレビューが反映されること | `?e2e=step1` で Tauri open / sidecar をハーネス化 | 2ページPDF相当の `pdf_info` と `page_preview` 応答 | 1. STEP1を開く 2. PDF選択を実行する 3. 一覧、ページ数、プレビュー、呼び出し順を確認する | PDF名、2ページ、プレビューが表示され、`open:pdf`、`pdf_info`、`page_preview` が呼ばれる | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | DQ03（導入確定） | E2Eテスト一覧_STEP1優先.md | R-STEP1 | 作成済み |
+| TC-E2E-S1-004 | STEP1優先 | TV-S1 | TA-S1 | E2E自動 | E2E | 高 | PDFと出力先設定後、STEP2へ進めること | `?e2e=step1` で Tauri open / sidecar をハーネス化 | PDFパス1件、出力先フォルダ1件 | 1. PDFを選択する 2. 出力先を選択する 3. 次へ進む | STEP2「仕分けルール」が表示される | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | DQ03（導入確定） | E2Eテスト一覧_STEP1優先.md | R-STEP1 | 作成済み |
 | TC-E2E-011 | TD049 | TV049 | TA009 | E2E自動 | E2E | 高 | 検索ハイライト表示中にページ移動→前ページのハイライトが残らないこと | dev preview（?dev=split）でハイライトが描画されている状態 | ハイライト表示中のページ移動操作 | 1. ?dev=split を開きハイライト矩形（svg rect/highlightクラス）の存在を確認する 2. 次ページへ移動する 3. ハイライトが DOM に残らないことを検証する | 前ページのハイライトがページ移動後に残留しない（svgRects=0・highlightクラス=0） | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | DQ03（導入確定） | テスト設計.md TD049 / ISS-030 NF-U5 / page.tsx clearSearchHighlights | R011 | 作成済み |
 
-**測定手段の注記**: TC-E2E-011 は設計記載の「invoke モック」ではなく dev preview を測定手段とする。page.tsx の `clearSearchHighlights` は dev preview のページ移動でも実行されるため、期待結果「前ページのハイライトが残らない（NF-U5）」を実 DOM で判定できる。残り 17 件は invoke モック注入口が無いと再現できず退避。
+**測定手段の注記**: TC-E2E-S1-003 / TC-E2E-S1-004 は `window.__PDF_TOOL_E2E__` でファイル選択とsidecar応答を差し替える。TC-E2E-011 は設計記載の「invoke モック」ではなく dev preview を測定手段とする。page.tsx の `clearSearchHighlights` は dev preview のページ移動でも実行されるため、期待結果「前ページのハイライトが残らない（NF-U5）」を実 DOM で判定できる。残り 17 件は invoke モック注入口が無いと再現できず退避。
 
 ## 4. 上流成果物への追記・更新
 
-追記・更新なし。E2EレーンのTD全行は設計段階から状態=質問待ち（DQ03）として記録されている。
+STEP1取込不具合の切り分けを優先するため、`E2Eテスト一覧_STEP1優先.md` を追加した。E2Eレーンの既存TD全行は設計段階から状態=質問待ち（DQ03）として記録されている。
 
 ## 5. カバレッジ確認
 
 | テスト設計ID | 対応テストケースID | 実行区分 | 状態 | 出力ファイル | カバー状況 |
 |---|---|---|---|---|---|
+| STEP1優先 | TC-E2E-S1-003, TC-E2E-S1-004 | E2E自動 | 作成済み | テストケース_E2E自動.md / E2Eテスト一覧_STEP1優先.md | 実装済み（E2Eハーネス） |
 | TD043 | TC-E2E-001 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |
 | TD044 | TC-E2E-002 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |
 | TD045 | TC-E2E-003, TC-E2E-004 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |

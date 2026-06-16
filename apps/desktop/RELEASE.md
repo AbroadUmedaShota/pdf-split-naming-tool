@@ -29,13 +29,14 @@ GitHub Actions でビルドする場合だけ、private key の内容を
 ## リリースごとに行う作業
 
 1. `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、
+   `..\..\recovery\pyproject.toml`、
    `..\..\recovery\pdf_splitter_tool\app_metadata.py` の version を同じ SemVer に揃えます。
 2. 依存関係とテストを確認します。
 
 ```powershell
 cd apps\desktop
 npm run typecheck
-npm run build
+npm run build:bundle
 cd src-tauri
 cargo test
 ```
@@ -66,7 +67,7 @@ npm run release:manifest
 
 ```powershell
 $repo = "AbroadUmedaShota/pdf-split-naming-tool"
-$version = "0.1.3"
+$version = "0.1.4"
 $tag = "v$version"
 
 gh release upload $tag `
@@ -82,7 +83,7 @@ asset 名だけを `latest.json` に戻します。これにより GitHub Releas
 
 ```powershell
 $repo = "AbroadUmedaShota/pdf-split-naming-tool"
-$version = "0.1.3"
+$version = "0.1.4"
 $tag = "v$version"
 $tempDir = Join-Path $env:TEMP "pdf-updater-release"
 $tempAsset = Join-Path $tempDir "latest-json"
@@ -109,7 +110,7 @@ https://github.com/AbroadUmedaShota/pdf-split-naming-tool/releases/latest/downlo
 
 ```powershell
 $repo = "AbroadUmedaShota/pdf-split-naming-tool"
-$version = "0.1.3"
+$version = "0.1.4"
 $tag = "v$version"
 
 curl.exe -sS -L "https://github.com/AbroadUmedaShota/pdf-split-naming-tool/releases/latest/download/latest.json"
