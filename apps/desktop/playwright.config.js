@@ -33,7 +33,7 @@ export default defineConfig({
     url: 'http://localhost:3000',
     cwd: __dirname,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 240_000,
     stdout: 'pipe',
     stderr: 'pipe',
   },

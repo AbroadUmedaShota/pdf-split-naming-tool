@@ -3,21 +3,33 @@ import { openDevStep, countSearchHighlights, readCurrentPage } from './helpers.j
 
 const step1MockPdfPath = 'C:\\Users\\tester\\Documents\\sample-step1.pdf';
 const step1MockOutputDir = 'C:\\Users\\tester\\Desktop\\pdf-output';
-const step1PreviewDataUrl =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 420 594'%3E%3Crect width='420' height='594' fill='%23fffaf0'/%3E%3Ctext x='210' y='80' text-anchor='middle' font-family='Arial' font-size='22' fill='%232c3335'%3ESTEP1 E2E PDF%3C/text%3E%3Cline x1='72' y1='140' x2='348' y2='140' stroke='%238a8274' stroke-width='3'/%3E%3Cline x1='72' y1='200' x2='348' y2='200' stroke='%238a8274' stroke-width='3'/%3E%3Cline x1='72' y1='260' x2='348' y2='260' stroke='%238a8274' stroke-width='3'/%3E%3C/svg%3E";
+const step1BrokenPdfPath = 'C:\\Users\\tester\\Documents\\broken-step1.pdf';
+const step1PreviewDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
-async function installStep1Harness(page) {
+async function installStep1Harness(page, options = {}) {
   await page.addInitScript(
-    ({ outputDir, pdfPath, previewDataUrl }) => {
+    ({ failPdfInfo, openResults, outputDir, pdfPath, previewDataUrl }) => {
       window.__PDF_TOOL_E2E_CALLS__ = [];
+      window.__PDF_TOOL_E2E_OPEN_RESULTS__ = [...openResults];
       window.__PDF_TOOL_E2E__ = {
         async openDialog(options) {
           window.__PDF_TOOL_E2E_CALLS__.push(options?.directory ? 'open:directory' : 'open:pdf');
+          if (window.__PDF_TOOL_E2E_OPEN_RESULTS__.length) {
+            return window.__PDF_TOOL_E2E_OPEN_RESULTS__.shift();
+          }
           return options?.directory ? outputDir : [pdfPath];
         },
         async invokeSidecar(request) {
           window.__PDF_TOOL_E2E_CALLS__.push(request.command);
           if (request.command === 'pdf_info') {
+            if (failPdfInfo) {
+              return {
+                ok: false,
+                command: 'pdf_info',
+                error: 'PDFを開けませんでした',
+                error_type: 'PdfOpenError',
+              };
+            }
             return {
               ok: true,
               command: 'pdf_info',
@@ -36,6 +48,38 @@ async function installStep1Harness(page) {
               image_data_url: previewDataUrl,
             };
           }
+          if (request.command === 'page_text') {
+            return {
+              ok: true,
+              command: 'page_text',
+              pdf_path: request.pdf_path,
+              page_no: request.page_no,
+              page_count: 3,
+              text: 'STEP1 E2E PDF',
+              has_text: true,
+            };
+          }
+          if (request.command === 'blank_candidates') {
+            return {
+              ok: true,
+              command: 'blank_candidates',
+              pdf_path: request.pdf_path,
+              threshold: request.threshold ?? 0.985,
+              candidates: [],
+              partial: false,
+              scanned_until: 3,
+            };
+          }
+          if (request.command === 'page_thumbnail') {
+            return {
+              ok: true,
+              command: 'page_thumbnail',
+              pdf_path: request.pdf_path,
+              page_no: request.page_no,
+              page_count: 3,
+              image_data_url: previewDataUrl,
+            };
+          }
           return {
             ok: false,
             command: request.command,
@@ -45,7 +89,13 @@ async function installStep1Harness(page) {
         },
       };
     },
-    { outputDir: step1MockOutputDir, pdfPath: step1MockPdfPath, previewDataUrl: step1PreviewDataUrl },
+    {
+      failPdfInfo: Boolean(options.failPdfInfo),
+      openResults: options.openResults ?? [],
+      outputDir: step1MockOutputDir,
+      pdfPath: options.pdfPath ?? step1MockPdfPath,
+      previewDataUrl: step1PreviewDataUrl,
+    },
   );
 }
 
@@ -63,6 +113,36 @@ async function installStep1Harness(page) {
 //     期待結果「前ページのハイライトが残らない」を実 DOM で判定できる。
 
 test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
+  test('TC-E2E-S1-001 STEP1初期表示でPDF未選択状態とPDF選択ボタンが表示される', async ({ page }) => {
+    // TC: TC-E2E-S1-001 | Risk: STEP1初期状態の崩れ
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await installStep1Harness(page);
+
+    await page.goto('/?e2e=step1', { waitUntil: 'networkidle' });
+
+    await expect(page.getByRole('heading', { name: 'PDF整理ツール' })).toBeVisible();
+    await expect(page.getByText('PDFが未選択です')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'PDFを選択' }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: '分割へ進む' })).toBeDisabled();
+    await expect(page.locator('[role="status"]')).toContainText('PDFを選択してください。');
+    await expect(pageErrors, 'STEP1初期表示で JS 例外が発生しない').toEqual([]);
+  });
+
+  test('TC-E2E-S1-002 PDF選択操作でファイル選択処理が呼ばれる', async ({ page }) => {
+    // TC: TC-E2E-S1-002 | Risk: PDF選択ボタンがTauri dialogへ接続されない
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await installStep1Harness(page, { openResults: [[]] });
+
+    await page.goto('/?e2e=step1', { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+
+    await expect.poll(() => page.evaluate(() => window.__PDF_TOOL_E2E_CALLS__ ?? [])).toEqual(['open:pdf']);
+    await expect(page.getByText('PDFが未選択です')).toBeVisible();
+    await expect(pageErrors, 'PDF選択ダイアログ呼び出しで JS 例外が発生しない').toEqual([]);
+  });
+
   test('TC-E2E-S1-003 PDF選択後にPDF一覧・ページ数・プレビューが反映される', async ({ page }) => {
     // TC: TC-E2E-S1-003 | Risk: STEP1 PDF取込失敗
     // 測定手段: ?e2e=step1 で dev preview を無効化し、Tauri dialog / sidecar 応答だけをブラウザ内で差し替える。
@@ -78,6 +158,7 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
 
     await expect(page.getByText('sample-step1.pdf').first()).toBeVisible();
     await expect(page.getByText('3ページ').first()).toBeVisible();
+    await expect(page.locator('[role="status"]')).toContainText('1件のPDFを読み込みました。');
     await expect
       .poll(() => page.evaluate(() => (window.__PDF_TOOL_E2E_CALLS__ ?? []).slice(0, 3)))
       .toEqual(['open:pdf', 'pdf_info', 'page_preview']);
@@ -101,6 +182,55 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await expect(page.locator('[data-testid="step-split"][aria-current="step"]')).toBeAttached();
     await expect(page.getByRole('button', { name: '前ページ' })).toBeVisible();
     await expect(pageErrors, 'STEP1完了からSTEP2遷移まで JS 例外が発生しない').toEqual([]);
+  });
+
+  test('TC-E2E-S1-005 PDF選択キャンセル時、一覧とステータスが壊れない', async ({ page }) => {
+    // TC: TC-E2E-S1-005 | Risk: PDF選択キャンセルで既存一覧や完了状態が壊れる
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await installStep1Harness(page, { openResults: [[step1MockPdfPath], null] });
+
+    await page.goto('/?e2e=step1', { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+    await expect(page.getByText('sample-step1.pdf').first()).toBeVisible();
+    await expect(page.locator('[role="status"]')).toContainText('1件のPDFを読み込みました。');
+
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+
+    await expect(page.getByText('sample-step1.pdf').first()).toBeVisible();
+    await expect(page.getByText('3ページ').first()).toBeVisible();
+    await expect(page.locator('[role="status"]')).toContainText('1件のPDFを読み込みました。');
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const calls = window.__PDF_TOOL_E2E_CALLS__ ?? [];
+          return {
+            lastCall: calls.at(-1),
+            openCount: calls.filter((call) => call === 'open:pdf').length,
+            pdfInfoCount: calls.filter((call) => call === 'pdf_info').length,
+          };
+        })
+      )
+      .toEqual({ lastCall: 'open:pdf', openCount: 2, pdfInfoCount: 1 });
+    await expect(pageErrors, 'PDF選択キャンセルで JS 例外が発生しない').toEqual([]);
+  });
+
+  test('TC-E2E-S1-006 pdf_info失敗時、エラー表示となり一覧へ不正反映しない', async ({ page }) => {
+    // TC: TC-E2E-S1-006 | Risk: 壊れたPDF情報が一覧へ混入する
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await installStep1Harness(page, { failPdfInfo: true, pdfPath: step1BrokenPdfPath });
+
+    await page.goto('/?e2e=step1', { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+
+    await expect(page.locator('[role="status"]')).toContainText('PDF取込エラー');
+    await expect(page.locator('[role="status"]')).toContainText('PDFを開けませんでした');
+    await expect(page.getByText('broken-step1.pdf')).toHaveCount(0);
+    await expect(page.getByText('PDFが未選択です')).toBeVisible();
+    await expect(page.getByRole('button', { name: '分割へ進む' })).toBeDisabled();
+    await expect.poll(() => page.evaluate(() => window.__PDF_TOOL_E2E_CALLS__ ?? [])).toEqual(['open:pdf', 'pdf_info']);
+    await expect(pageErrors, 'pdf_info失敗時に JS 例外が発生しない').toEqual([]);
   });
 
   test('TC-E2E-011 検索ハイライト表示中にページ移動すると前ページのハイライトが残らない', async ({ page }) => {

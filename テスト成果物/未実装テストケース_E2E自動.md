@@ -17,7 +17,7 @@ dev preview モード（app/page.tsx `shouldUseDevPreviewMode()`）は、Tauri/P
 
 これらは設計（テスト設計.md TD043-050/047b/056/068/069）でも測定手段が「Playwright（invoke モック）／未導入時は手動」と定義されており、invoke モック注入の test seam が前提である。現状の dev preview には invoke モック注入口が無く、製品コードを変更しない限り注入できない。よって自動化せず退避する。
 
-> 実装済みは TC-E2E-011（検索ハイライトのページ移動後残留なし）の1件のみ。`apps/desktop/e2e/desktop-shell.e2e.spec.js` に実装。dev preview のページ移動でも `clearSearchHighlights` が実行されるため、期待結果を実 DOM で判定できる。
+> 既存E2Eレーン（TC-E2E-001〜018）で実装済みは TC-E2E-011（検索ハイライトのページ移動後残留なし）の1件。STEP1優先の追加E2Eは TC-E2E-S1-001〜006 を `apps/desktop/e2e/desktop-shell.e2e.spec.js` に実装済み。dev preview のページ移動でも `clearSearchHighlights` が実行されるため、TC-E2E-011 の期待結果を実 DOM で判定できる。
 
 ## 2. 参照資料
 
@@ -62,5 +62,5 @@ dev preview モード（app/page.tsx `shouldUseDevPreviewMode()`）は、Tauri/P
 ## 5. トレーサビリティ確認
 
 - 退避 17 件（TC-E2E-001〜010, 012〜018）はすべて元テスト設計 ID（TD043-050/047b/056/068/069）・TV・TA・Risk を保持。
-- 実装 1 件（TC-E2E-011 / TD049 / TV049 / TA009 / R011）は `apps/desktop/e2e/desktop-shell.e2e.spec.js` に実装し、トレースコメントを保持。
-- E2E レーンの元 18 件（TC-E2E-001〜018）の内訳: 実装 1・退避 17。欠落なし。
+- 実装 1 件（TC-E2E-011 / TD049 / TV049 / TA009 / R011）と STEP1優先 6 件（TC-E2E-S1-001〜006）は `apps/desktop/e2e/desktop-shell.e2e.spec.js` に実装し、トレースコメントを保持。
+- E2E レーンの元 18 件（TC-E2E-001〜018）の内訳: 実装 1・退避 17。STEP1優先 10件の内訳: 実装 6・未実装 4。欠落なし。
