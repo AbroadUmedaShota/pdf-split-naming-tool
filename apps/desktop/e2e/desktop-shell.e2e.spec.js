@@ -226,6 +226,7 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
 
     await expect(page.locator('[role="status"]')).toContainText('PDF取込エラー');
     await expect(page.locator('[role="status"]')).toContainText('PDFを開けませんでした');
+    await expect(page.locator('[role="status"]')).not.toContainText('Error:');
     await expect(page.getByText('broken-step1.pdf')).toHaveCount(0);
     await expect(page.getByText('PDFが未選択です')).toBeVisible();
     await expect(page.getByRole('button', { name: '分割へ進む' })).toBeDisabled();

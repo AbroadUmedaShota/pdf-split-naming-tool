@@ -321,6 +321,10 @@ function sidecarError(response: SidecarResponse): string {
   return "サイドカーの応答をこの操作に使用できません。";
 }
 
+function displayError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 // 破壊的操作の確認は Tauri WebView で動作しない恐れのある window.confirm を避け、
 // plugin-dialog の confirm を使う。ブラウザプレビュー等で plugin が使えない場合のみ退避する。
 async function confirmAction(message: string): Promise<boolean> {
@@ -1417,7 +1421,7 @@ export default function Page() {
       if (requestId && !workspaceRequestGateRef.current.isCurrent(requestId)) {
         return;
       }
-      setStatus(`PDF取込エラー: ${String(error)}`, "danger");
+      setStatus(`PDF取込エラー: ${displayError(error)}`, "danger");
     }
   }
 

@@ -12,6 +12,9 @@ const keepTemp = process.env.PDF_ORGANIZER_KEEP_INSTALLED_SMOKE_TMP === "1";
 const screenshotPath =
   process.env.PDF_ORGANIZER_INSTALLED_SMOKE_SCREENSHOT ??
   join(tmpdir(), `pdf-tool-installed-step1-smoke-${Date.now()}.png`);
+const passwordErrorScreenshotPath = screenshotPath.replace(/(\.[^.\\/]+)?$/, "-password-error.png");
+const encryptedPdfBase64 =
+  "JVBERi0xLjcKJcK1wrYKCjEgMCBvYmoKPDwvVHlwZS9DYXRhbG9nL1BhZ2VzIDIgMCBSPj4KZW5kb2JqCgoyIDAgb2JqCjw8L1R5cGUvUGFnZXMvQ291bnQgMS9LaWRzWzQgMCBSXT4+CmVuZG9iagoKMyAwIG9iago8PC9Gb250PDwvaGVsdiA1IDAgUj4+Pj4KZW5kb2JqCgo0IDAgb2JqCjw8L1R5cGUvUGFnZS9NZWRpYUJveFswIDAgMzAwIDMwMF0vUm90YXRlIDAvUmVzb3VyY2VzIDMgMCBSL1BhcmVudCAyIDAgUi9Db250ZW50c1s2IDAgUl0+PgplbmRvYmoKCjUgMCBvYmoKPDwvVHlwZS9Gb250L1N1YnR5cGUvVHlwZTEvQmFzZUZvbnQvSGVsdmV0aWNhL0VuY29kaW5nL1dpbkFuc2lFbmNvZGluZz4+CmVuZG9iagoKNiAwIG9iago8PC9MZW5ndGggMTEyL0ZpbHRlci9GbGF0ZURlY29kZT4+CnN0cmVhbQqUCwKau6cGbVbwGdKfJoTUzIoya+Hc0PuP9XMwJPF6MkQ8qotB5mocKnIjAuKzlnlOrvDOyN/lLeN79E9Ms2TRSQv7ZCYRkAVLAXz3kcaBDbuYWYMaK4J5BIjAKEr1CJ4FWAx52Qz9KMMfLxulZnh5CmVuZHN0cmVhbQplbmRvYmoKCnhyZWYKMCA3CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAxNiAwMDAwMCBuIAowMDAwMDAwMDYyIDAwMDAwIG4gCjAwMDAwMDAxMTQgMDAwMDAgbiAKMDAwMDAwMDE1NSAwMDAwMCBuIAowMDAwMDAwMjYyIDAwMDAwIG4gCjAwMDAwMDAzNTEgMDAwMDAgbiAKCnRyYWlsZXIKPDwvU2l6ZSA3L1Jvb3QgMSAwIFIvSURbPDVEQzJCQTQ2QzNBNjM4MDRDMzlEQzM5QzFBNUQ3M0MzPjw1M0RBRTRDQTk5MkI3RDBCN0E4NzY2QkExQTRCQ0VEQz5dL0VuY3J5cHQ8PC9GaWx0ZXIvU3RhbmRhcmQvUiA2L1YgNS9MZW5ndGggMjU2L1AgLTQvRW5jcnlwdE1ldGFkYXRhIHRydWUvU3RtRi9TdGRDRi9TdHJGL1N0ZENGL0NGPDwvU3RkQ0Y8PC9BdXRoRXZlbnQvRG9jT3Blbi9DRk0vQUVTVjMvTGVuZ3RoIDMyPj4+Pi9PPDEyRDkxMTcxQUEwNkNFNkU1MDNDQThFRDk5ODk3OTBFQjIyOTk2RDgxQjAwQkExRTM1RDBBQjFFRTdBREVDQUJERDYwQTM2NTlDNjVCN0QzQTVGRTY0NUI3N0Q4QzNBND4vVTwzQjIwQTg1NTlDNzU0NjcwNkJGODUzQTAxMkYxMDQxNjNBODlGREQ2RkIxMEEyMzIzMDUyMzkzOTMyMEU0ODU5QjlBODg3M0Y1MjNGMUI4NTdBNjU4RTFGRUE0MjkwNUI+L09FPEFGQzNDMTNCOTI5MDQ0MTM2OTExRUE1MzBBM0VEOTY3MDc4M0Q0QTZCRDVDMjBGMTlFNUQwMTVGRkI0QUM3Qjg+L1VFPDk4OUJENEZENUM3QUQxNjJFQ0UzN0NCMThBNDNBNDk5Q0VDN0Q3MUE3RkEwNEU3M0NCQkQ4MDdBN0U2RDZEQjc+L1Blcm1zPDUzOUZFQUY4Njc5MTdCMkFEMzcwNjU2M0U1MUM5NTE1Pj4+Pj4Kc3RhcnR4cmVmCjUzMgolJUVPRgo=";
 
 function buildPdf(objects) {
   let body = "%PDF-1.4\n";
@@ -59,6 +62,10 @@ function writeSamplePdf(pdfPath) {
       { id: 7, body: streamObject("STEP1 page 2") },
     ]),
   );
+}
+
+function writeEncryptedPdf(pdfPath) {
+  writeFileSync(pdfPath, Buffer.from(encryptedPdfBase64, "base64"));
 }
 
 async function freePort() {
@@ -120,9 +127,11 @@ async function main() {
 
   const tempRoot = mkdtempSync(join(tmpdir(), "pdf-tool-installed-step1-"));
   const pdfPath = join(tempRoot, "STEP1 日本語 path smoke.pdf");
+  const encryptedPdfPath = join(tempRoot, "STEP1 password protected.pdf");
   const outputDir = join(tempRoot, "output folder");
   mkdirSync(outputDir, { recursive: true });
   writeSamplePdf(pdfPath);
+  writeEncryptedPdf(encryptedPdfPath);
 
   const port = await freePort();
   let browser = null;
@@ -151,20 +160,33 @@ async function main() {
     });
 
     await page.addInitScript(
-      ({ outputDir, pdfPath }) => {
+      ({ encryptedPdfPath, outputDir, pdfPath }) => {
+        const pdfOpenResults = [[encryptedPdfPath], [pdfPath]];
         window.__PDF_TOOL_E2E__ = {
           async openDialog(options) {
-            return options?.directory ? outputDir : [pdfPath];
+            if (options?.directory) {
+              return outputDir;
+            }
+            return pdfOpenResults.shift() ?? [pdfPath];
           },
         };
       },
-      { outputDir, pdfPath },
+      { encryptedPdfPath, outputDir, pdfPath },
     );
 
     await page.goto("http://tauri.localhost/?e2e=installed", { waitUntil: "domcontentloaded" });
     await expect(page).toHaveTitle("PDF整理ツール", { timeout: 30_000 });
     await expect(page.getByRole("heading", { name: "PDF整理ツール" })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("PDFが未選択です")).toBeVisible();
+
+    await page.getByRole("button", { name: "PDFを選択" }).first().click();
+    await expect(page.locator('[role="status"]')).toContainText("PDF取込エラー", { timeout: 120_000 });
+    await expect(page.locator('[role="status"]')).toContainText("パスワード付きPDFには対応していません", { timeout: 120_000 });
+    await expect(page.locator('[role="status"]')).not.toContainText("Error:");
+    await expect(page.locator(".queue-row")).toHaveCount(0);
+    await expect(page.getByText("PDFが未選択です")).toBeVisible();
+    await expect(page.getByRole("button", { name: "分割へ進む" })).toBeDisabled();
+    await page.screenshot({ fullPage: false, path: passwordErrorScreenshotPath });
 
     await page.getByRole("button", { name: "PDFを選択" }).first().click();
     await expect(page.getByText("STEP1 日本語 path smoke.pdf").first()).toBeVisible({ timeout: 120_000 });
@@ -186,6 +208,7 @@ async function main() {
         {
           ok: true,
           appPath,
+          passwordErrorScreenshotPath,
           screenshotPath,
           tempRoot: keepTemp ? tempRoot : undefined,
         },
