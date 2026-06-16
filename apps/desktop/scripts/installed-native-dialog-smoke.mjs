@@ -1,6 +1,6 @@
 import { chromium, expect } from "@playwright/test";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import net from "node:net";
@@ -194,6 +194,87 @@ Write-Output "selected:$PdfPath"
   return result.stdout.trim();
 }
 
+function selectOutputDirInNativeFolderDialog(outputDir) {
+  const script = String.raw`
+$OutputDir = $env:PDF_NATIVE_OUTPUT_DIR
+if ([string]::IsNullOrWhiteSpace($OutputDir)) { throw 'PDF_NATIVE_OUTPUT_DIR is empty' }
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class NativeFolderDialogSmokeWin32 {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+  [DllImport("user32.dll")] public static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+}
+"@
+function Find-FolderDialog {
+  $script:found = [IntPtr]::Zero
+  [NativeFolderDialogSmokeWin32]::EnumWindows({ param($h, $l)
+    if (-not [NativeFolderDialogSmokeWin32]::IsWindowVisible($h)) { return $true }
+    $title = New-Object System.Text.StringBuilder 512
+    $class = New-Object System.Text.StringBuilder 256
+    [void][NativeFolderDialogSmokeWin32]::GetWindowText($h, $title, $title.Capacity)
+    [void][NativeFolderDialogSmokeWin32]::GetClassName($h, $class, $class.Capacity)
+    if ($class.ToString() -eq '#32770' -and $title.ToString() -match 'フォルダーの選択|Select Folder|Choose Folder') {
+      $script:found = $h
+      return $false
+    }
+    return $true
+  }, [IntPtr]::Zero) | Out-Null
+  return $script:found
+}
+$deadline = (Get-Date).AddSeconds(10)
+$hwnd = [IntPtr]::Zero
+while ((Get-Date) -lt $deadline -and $hwnd -eq [IntPtr]::Zero) {
+  $hwnd = Find-FolderDialog
+  Start-Sleep -Milliseconds 200
+}
+if ($hwnd -eq [IntPtr]::Zero) { throw 'Folder dialog not found' }
+[void][NativeFolderDialogSmokeWin32]::SetForegroundWindow($hwnd)
+$dialog = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+$all = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+$editHwnd = [IntPtr]::Zero
+$selectHwnd = [IntPtr]::Zero
+for ($i = 0; $i -lt $all.Count; $i++) {
+  $el = $all.Item($i)
+  if ($el.Current.AutomationId -eq '1152' -and $el.Current.ClassName -eq 'Edit') {
+    $editHwnd = [IntPtr]$el.Current.NativeWindowHandle
+  }
+  if ($el.Current.AutomationId -eq '1' -and $el.Current.ClassName -eq 'Button') {
+    $selectHwnd = [IntPtr]$el.Current.NativeWindowHandle
+  }
+}
+if ($editHwnd -eq [IntPtr]::Zero) { throw 'Folder path edit not found' }
+if ($selectHwnd -eq [IntPtr]::Zero) { throw 'Select folder button not found' }
+$WM_SETTEXT = 0x000C
+$BM_CLICK = 0x00F5
+[void][NativeFolderDialogSmokeWin32]::SendMessage($editHwnd, $WM_SETTEXT, [IntPtr]::Zero, $OutputDir)
+Start-Sleep -Milliseconds 200
+[void][NativeFolderDialogSmokeWin32]::SendMessage($selectHwnd, $BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero)
+Write-Output "selected:$OutputDir"
+`;
+
+  const result = spawnSync("powershell", ["-NoProfile", "-Command", script], {
+    encoding: "utf8",
+    env: { ...process.env, PDF_NATIVE_OUTPUT_DIR: outputDir },
+    timeout: 20_000,
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `Native folder dialog automation failed.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+  }
+  return result.stdout.trim();
+}
+
 async function main() {
   if (!existsSync(appPath)) {
     throw new Error(`Installed app was not found: ${appPath}`);
@@ -201,7 +282,9 @@ async function main() {
 
   const tempRoot = mkdtempSync(join(tmpdir(), "pdf-tool-native-dialog-"));
   const pdfPath = join(tempRoot, "Native Dialog 日本語 path.pdf");
+  const outputDir = join(tempRoot, "Native Output 日本語 folder");
   writeSamplePdf(pdfPath);
+  mkdirSync(outputDir, { recursive: true });
 
   const port = await freePort();
   let browser = null;
@@ -243,6 +326,12 @@ async function main() {
     await expect(page.locator('[role="status"]')).toContainText("1件のPDFを読み込みました。", {
       timeout: 120_000,
     });
+    await page.getByRole("button", { name: "出力フォルダ" }).click({ timeout: 10_000 });
+    const outputDialogResult = selectOutputDirInNativeFolderDialog(outputDir);
+    await expect(page.locator('[role="status"]')).toContainText("出力フォルダを設定しました。", {
+      timeout: 30_000,
+    });
+    await expect(page.getByText(outputDir).first()).toBeVisible({ timeout: 30_000 });
     await page.screenshot({ fullPage: false, path: screenshotPath });
 
     expect(pageErrors, "Native dialog smoke should not produce page errors").toEqual([]);
@@ -254,6 +343,7 @@ async function main() {
           ok: true,
           appPath,
           dialogResult,
+          outputDialogResult,
           screenshotPath,
           tempRoot: keepTemp ? tempRoot : undefined,
         },
