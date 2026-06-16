@@ -9,13 +9,16 @@ const step1PreviewDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAA
 
 async function installStep1Harness(page, options = {}) {
   await page.addInitScript(
-    ({ failPdfInfo, failedPdfPaths, openResults, outputDir, pdfPath, previewDataUrl }) => {
+    ({ failPdfInfo, failedPdfPaths, openDelayMs, openResults, outputDir, pdfPath, previewDataUrl }) => {
       const failedPathSet = new Set(failedPdfPaths);
       window.__PDF_TOOL_E2E_CALLS__ = [];
       window.__PDF_TOOL_E2E_OPEN_RESULTS__ = [...openResults];
       window.__PDF_TOOL_E2E__ = {
         async openDialog(options) {
           window.__PDF_TOOL_E2E_CALLS__.push(options?.directory ? 'open:directory' : 'open:pdf');
+          if (openDelayMs) {
+            await new Promise((resolve) => setTimeout(resolve, openDelayMs));
+          }
           if (window.__PDF_TOOL_E2E_OPEN_RESULTS__.length) {
             return window.__PDF_TOOL_E2E_OPEN_RESULTS__.shift();
           }
@@ -94,6 +97,7 @@ async function installStep1Harness(page, options = {}) {
     {
       failPdfInfo: Boolean(options.failPdfInfo),
       failedPdfPaths: options.failedPdfPaths ?? [],
+      openDelayMs: options.openDelayMs ?? 0,
       openResults: options.openResults ?? [],
       outputDir: step1MockOutputDir,
       pdfPath: options.pdfPath ?? step1MockPdfPath,
@@ -264,6 +268,22 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
       .poll(() => page.evaluate(() => (window.__PDF_TOOL_E2E_CALLS__ ?? []).includes('page_preview')))
       .toBe(true);
     await expect(pageErrors, '一部失敗の複数PDF取込で JS 例外が発生しない').toEqual([]);
+  });
+
+  test('TC-E2E-S1-012 PDF選択待ち中に取込ボタンが無効化される', async ({ page }) => {
+    // TC: TC-E2E-S1-012 | Risk: OSファイル選択待ち中に無反応/連打できるように見える
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await installStep1Harness(page, { openDelayMs: 3000 });
+
+    await page.goto('/?e2e=step1', { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+
+    await expect(page.locator('[role="status"]')).toContainText('PDFを選択しています');
+    await expect(page.getByRole('button', { name: '選択中' }).first()).toBeDisabled();
+    await expect(page.getByText('sample-step1.pdf').first()).toBeVisible();
+    await expect(page.locator('[role="status"]')).toContainText('1件のPDFを読み込みました。');
+    await expect(pageErrors, 'PDF選択待ち表示で JS 例外が発生しない').toEqual([]);
   });
 
   test('TC-E2E-011 検索ハイライト表示中にページ移動すると前ページのハイライトが残らない', async ({ page }) => {

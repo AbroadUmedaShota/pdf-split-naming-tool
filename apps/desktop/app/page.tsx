@@ -573,6 +573,7 @@ export default function Page() {
   const [exportResult, setExportResult] = useState<SidecarExportResponse | null>(null);
   const [isPreflighting, setIsPreflighting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isImportingPdfs, setIsImportingPdfs] = useState(false);
   // 出力中の経過秒。1秒以上かかった異常系（権限/ロック/容量で停滞）で「固まっていない」ことを示す。
   const [exportElapsedSec, setExportElapsedSec] = useState(0);
   const [isSavingState, setIsSavingState] = useState(false);
@@ -1381,7 +1382,13 @@ export default function Page() {
   }
 
   async function choosePdfs(): Promise<void> {
+    if (isImportingPdfs) {
+      return;
+    }
     let requestId = 0;
+    const previousStatus = statusState;
+    setIsImportingPdfs(true);
+    setStatus("PDFを選択しています…");
     try {
       const selected = await openDialog({
         multiple: true,
@@ -1391,8 +1398,10 @@ export default function Page() {
         (path): path is string => typeof path === "string" && path.length > 0
       );
       if (!paths.length) {
+        setStatusState(previousStatus);
         return;
       }
+      setStatus("PDF情報を読み込んでいます…");
       requestId = workspaceRequestGateRef.current.next();
       invalidatePreviewRequests();
       for (const path of paths) {
@@ -1448,6 +1457,8 @@ export default function Page() {
         return;
       }
       setStatus(`PDF取込エラー: ${displayError(error)}`, "danger");
+    } finally {
+      setIsImportingPdfs(false);
     }
   }
 
@@ -2729,8 +2740,8 @@ export default function Page() {
         ) : (
           <EmptyState
             action={
-              <button className="primary" onClick={choosePdfs} type="button">
-                <IconLabel icon={Upload}>PDFを選択</IconLabel>
+              <button className="primary" disabled={isImportingPdfs} onClick={choosePdfs} type="button">
+                <IconLabel icon={Upload}>{isImportingPdfs ? "選択中" : "PDFを選択"}</IconLabel>
               </button>
             }
             icon={FileText}
@@ -3058,10 +3069,10 @@ export default function Page() {
               <strong>{pdfFiles.length ? `${pdfFiles.length}件 / ${totalPages}ページ` : "未選択"}</strong>
             </div>
             <div className="action-row import-actions">
-              <button className="primary" onClick={choosePdfs} type="button">
-                <IconLabel icon={Upload}>PDFを選択</IconLabel>
+              <button className="primary" disabled={isImportingPdfs} onClick={choosePdfs} type="button">
+                <IconLabel icon={Upload}>{isImportingPdfs ? "選択中" : "PDFを選択"}</IconLabel>
               </button>
-              <button className="ghost danger" disabled={!pdfFiles.length} onClick={() => void clearPdfSelection()} type="button">
+              <button className="ghost danger" disabled={!pdfFiles.length || isImportingPdfs} onClick={() => void clearPdfSelection()} type="button">
                 <IconLabel icon={Trash2}>全クリア</IconLabel>
               </button>
             </div>

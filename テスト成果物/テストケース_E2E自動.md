@@ -27,6 +27,7 @@ STEP1のPDF取込は、Tauriのファイル選択とsidecar応答をハーネス
 | TC-E2E-S1-005 | STEP1優先 | TV-S1 | TA-S1 | E2E自動 | E2E | 高 | PDF選択キャンセル時、一覧とステータスが壊れないこと | `?e2e=step1` で Tauri open / sidecar をハーネス化 | 読込済みPDF1件、2回目のファイル選択キャンセル | 1. PDFを読み込む 2. もう一度PDF選択を実行してキャンセルする 3. 一覧、ページ数、ステータス、追加 `pdf_info` 不発を確認する | 読込済みPDFが維持され、キャンセルで不正な再読込やエラー表示にならない | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | DQ03（導入確定） | E2Eテスト一覧_STEP1優先.md | R-STEP1 | 作成済み |
 | TC-E2E-S1-006 | STEP1優先 | TV-S1 | TA-S1 | E2E自動 | E2E | 高 | `pdf_info`失敗時、エラー表示となり一覧へ不正反映しないこと | `?e2e=step1` で Tauri open / sidecar をハーネス化 | `pdf_info` がエラー応答を返すPDF | 1. STEP1を開く 2. 壊れたPDF相当を選択する 3. エラー表示、一覧未反映、次へボタン無効を確認する | `PDF取込エラー` が表示され、対象PDFは一覧に追加されない | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | DQ03（導入確定） | E2Eテスト一覧_STEP1優先.md | R-STEP1 | 作成済み |
 | TC-E2E-S1-011 | STEP1優先 | TV-S1 | TA-S1 | E2E自動 | E2E | 高 | 複数PDF選択時、1件失敗しても読めるPDFを取り込めること | `?e2e=step1` で Tauri open / sidecar をハーネス化 | 正常PDF2件、`pdf_info` 失敗PDF1件 | 1. STEP1を開く 2. 正常2件＋失敗1件を同時選択する 3. 一覧、警告ステータス、プレビュー呼び出しを確認する | 正常PDF2件は一覧に入り、失敗PDFは一覧に混入せず、警告に失敗件数と対象名が表示される | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | DQ03（導入確定） | E2Eテスト一覧_STEP1優先.md | R-STEP1 | 作成済み |
+| TC-E2E-S1-012 | STEP1優先 | TV-S1 | TA-S1 | E2E自動 | E2E | 高 | PDF選択待ち中、取込ボタンが無効化されること | `?e2e=step1` で Tauri open を遅延させる | ファイル選択待ち相当の遅延 | 1. STEP1を開く 2. PDF選択を実行する 3. 選択中ステータスとボタン無効化を確認する 4. PDF取込完了を確認する | OSファイル選択待ちに相当する間、取込ボタンが無効化され、完了後はPDFが一覧に反映される | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | DQ03（導入確定） | E2Eテスト一覧_STEP1優先.md | R-STEP1/R007 | 作成済み |
 | TC-E2E-011 | TD049 | TV049 | TA009 | E2E自動 | E2E | 高 | 検索ハイライト表示中にページ移動→前ページのハイライトが残らないこと | dev preview（?dev=split）でハイライトが描画されている状態 | ハイライト表示中のページ移動操作 | 1. ?dev=split を開きハイライト矩形（svg rect/highlightクラス）の存在を確認する 2. 次ページへ移動する 3. ハイライトが DOM に残らないことを検証する | 前ページのハイライトがページ移動後に残留しない（svgRects=0・highlightクラス=0） | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | DQ03（導入確定） | テスト設計.md TD049 / ISS-030 NF-U5 / page.tsx clearSearchHighlights | R011 | 作成済み |
 
 **測定手段の注記**: TC-E2E-S1-001 から TC-E2E-S1-006 は `window.__PDF_TOOL_E2E__` でファイル選択とsidecar応答を差し替える。TC-E2E-011 は設計記載の「invoke モック」ではなく dev preview を測定手段とする。page.tsx の `clearSearchHighlights` は dev preview のページ移動でも実行されるため、期待結果「前ページのハイライトが残らない（NF-U5）」を実 DOM で判定できる。残り 17 件は invoke モック注入口が無いと再現できず退避。
@@ -39,7 +40,7 @@ STEP1取込不具合の切り分けを優先するため、`E2Eテスト一覧_S
 
 | テスト設計ID | 対応テストケースID | 実行区分 | 状態 | 出力ファイル | カバー状況 |
 |---|---|---|---|---|---|
-| STEP1優先 | TC-E2E-S1-001〜TC-E2E-S1-006, TC-E2E-S1-011 | E2E自動 | 作成済み | テストケース_E2E自動.md / E2Eテスト一覧_STEP1優先.md | 実装済み（E2Eハーネス） |
+| STEP1優先 | TC-E2E-S1-001〜TC-E2E-S1-006, TC-E2E-S1-011, TC-E2E-S1-012 | E2E自動 | 作成済み | テストケース_E2E自動.md / E2Eテスト一覧_STEP1優先.md | 実装済み（E2Eハーネス） |
 | TD043 | TC-E2E-001 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |
 | TD044 | TC-E2E-002 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |
 | TD045 | TC-E2E-003, TC-E2E-004 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |
