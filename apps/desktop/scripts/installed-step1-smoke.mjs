@@ -161,7 +161,7 @@ async function main() {
 
     await page.addInitScript(
       ({ encryptedPdfPath, outputDir, pdfPath }) => {
-        const pdfOpenResults = [[encryptedPdfPath], [pdfPath]];
+        const pdfOpenResults = [[encryptedPdfPath], [encryptedPdfPath, pdfPath]];
         window.__PDF_TOOL_E2E__ = {
           async openDialog(options) {
             if (options?.directory) {
@@ -191,7 +191,10 @@ async function main() {
     await page.getByRole("button", { name: "PDFを選択" }).first().click();
     await expect(page.getByText("STEP1 日本語 path smoke.pdf").first()).toBeVisible({ timeout: 120_000 });
     await expect(page.getByText("2ページ").first()).toBeVisible({ timeout: 120_000 });
+    await expect(page.locator(".queue-row")).toHaveCount(1);
     await expect(page.locator('[role="status"]')).toContainText("1件のPDFを読み込みました。", { timeout: 120_000 });
+    await expect(page.locator('[role="status"]')).toContainText("1件は読み込めませんでした", { timeout: 120_000 });
+    await expect(page.locator('[role="status"]')).not.toContainText("Error:");
 
     await page.getByRole("button", { name: "出力フォルダ" }).click();
     const nextButton = page.getByRole("button", { name: "分割へ進む" });

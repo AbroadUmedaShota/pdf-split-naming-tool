@@ -1387,7 +1387,9 @@ export default function Page() {
         multiple: true,
         filters: [{ name: "PDF", extensions: ["pdf"] }]
       });
-      const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+      const paths = (Array.isArray(selected) ? selected : selected ? [selected] : []).filter(
+        (path): path is string => typeof path === "string" && path.length > 0
+      );
       if (!paths.length) {
         return;
       }
@@ -1397,8 +1399,27 @@ export default function Page() {
         previewCache.clearPdf(path);
         purgeThumbnailKeysForPath(path);
       }
-      const loaded = await Promise.all(paths.map((path) => loadPdfInfo(path)));
+      const importResults = await Promise.all(
+        paths.map(async (path) => {
+          try {
+            return { file: await loadPdfInfo(path), status: "fulfilled" as const };
+          } catch (error) {
+            return { message: displayError(error), path, status: "rejected" as const };
+          }
+        })
+      );
       if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
+        return;
+      }
+      const loaded = importResults
+        .filter((result): result is { file: PdfFile; status: "fulfilled" } => result.status === "fulfilled")
+        .map((result) => result.file);
+      const failed = importResults.filter(
+        (result): result is { message: string; path: string; status: "rejected" } => result.status === "rejected"
+      );
+      if (!loaded.length) {
+        const detail = failed.map((result) => `${basename(result.path)}（${result.message}）`).join("、");
+        setStatus(`PDF取込エラー: ${failed.length}件のPDFを読み込めませんでした${detail ? `: ${detail}` : "。"}`, "danger");
         return;
       }
       setPdfFiles((existing) => {
@@ -1416,7 +1437,12 @@ export default function Page() {
       if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
         return;
       }
-      setStatus(`${loaded.length}件のPDFを読み込みました。`, "ok");
+      if (failed.length) {
+        const detail = failed.map((result) => `${basename(result.path)}（${result.message}）`).join("、");
+        setStatus(`${loaded.length}件のPDFを読み込みました。${failed.length}件は読み込めませんでした: ${detail}`, "warning");
+      } else {
+        setStatus(`${loaded.length}件のPDFを読み込みました。`, "ok");
+      }
     } catch (error) {
       if (requestId && !workspaceRequestGateRef.current.isCurrent(requestId)) {
         return;
