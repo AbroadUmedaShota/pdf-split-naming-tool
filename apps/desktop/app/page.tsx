@@ -540,7 +540,7 @@ export default function Page() {
   });
   // 分割ステップを一度でも開いたか（分割点ゼロ運用でもステッパーを「完了」にするための訪問フラグ）。
   const [splitStepVisited, setSplitStepVisited] = useState(false);
-  const [currentVersion, setCurrentVersion] = useState("0.1.0");
+  const [currentVersion, setCurrentVersion] = useState("0.1.3");
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
   const [updateMessage, setUpdateMessage] = useState("更新未確認");
   const [updateProgress, setUpdateProgress] = useState("");
@@ -946,7 +946,7 @@ export default function Page() {
       })
       .catch(() => {
         if (!disposed) {
-          setCurrentVersion("0.1.0");
+          setCurrentVersion("0.1.3");
         }
       });
 

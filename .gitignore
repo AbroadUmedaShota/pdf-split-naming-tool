@@ -17,11 +17,15 @@ recovery/_pdf_split_state.tmp
 __pycache__/
 *.py[cod]
 .pytest_cache/
+*.egg-info/
+.venv/
+recovery/.venv/
 recovery/build/
 recovery/dist/
 
 # Node / Tauri generated files
 node_modules/
+apps/desktop/.codex/
 apps/desktop/.next/
 apps/desktop/out/
 apps/desktop/tsconfig.tsbuildinfo
