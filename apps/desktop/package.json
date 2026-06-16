@@ -17,6 +17,7 @@
     "test:output-state": "node scripts/check-output-state.mjs",
     "test:segment-state": "node scripts/check-segment-state.mjs",
     "test:e2e": "playwright test",
+    "test:installed-step1": "node scripts/installed-step1-smoke.mjs",
     "tauri": "tauri",
     "release:manifest": "node scripts/create-updater-manifest.mjs"
   },
