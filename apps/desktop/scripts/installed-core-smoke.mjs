@@ -15,6 +15,7 @@ const screenshotPath =
 const providedPdfPath = process.env.PDF_ORGANIZER_INSTALLED_CORE_PDF_PATH?.trim();
 const expectedPageCount = process.env.PDF_ORGANIZER_INSTALLED_CORE_EXPECTED_PAGES?.trim();
 const preexistingOutputMode = process.env.PDF_ORGANIZER_INSTALLED_CORE_PREEXISTING_OUTPUT === "1";
+const multiPdfMode = process.env.PDF_ORGANIZER_INSTALLED_CORE_MULTI_PDF === "1";
 
 function buildPdf(objects) {
   let body = "%PDF-1.4\n";
@@ -92,6 +93,10 @@ async function waitForCdp(port) {
   throw new Error(`Timed out waiting for WebView2 CDP: ${lastError?.message ?? "no response"}`);
 }
 
+async function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function waitForProcessExit(child, timeoutMs) {
   if (child.exitCode !== null || child.signalCode !== null) {
     return true;
@@ -116,23 +121,40 @@ async function terminateProcess(child) {
   spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
 }
 
+async function stopInstalledApp() {
+  spawnSync("taskkill", ["/IM", "pdf-organizer-desktop.exe", "/F"], { stdio: "ignore" });
+  await sleep(5_000);
+}
+
 async function main() {
   if (!existsSync(appPath)) {
     throw new Error(`Installed app was not found: ${appPath}`);
   }
+  await stopInstalledApp();
 
   const tempRoot = mkdtempSync(join(tmpdir(), "pdf-tool-installed-core-"));
   const pdfPath = providedPdfPath ? resolve(providedPdfPath) : join(tempRoot, "Core Smoke 日本語 path.pdf");
+  const secondPdfPath = multiPdfMode ? join(tempRoot, "Core Smoke second 日本語 path.pdf") : null;
   const pdfName = basename(pdfPath);
+  const secondPdfName = secondPdfPath ? basename(secondPdfPath) : null;
   const outputDir = join(tempRoot, "output folder");
   mkdirSync(outputDir, { recursive: true });
   const preexistingOutputPath = join(outputDir, "01_01_001.pdf");
+  if (multiPdfMode && providedPdfPath) {
+    throw new Error("PDF_ORGANIZER_INSTALLED_CORE_MULTI_PDF cannot be combined with PDF_ORGANIZER_INSTALLED_CORE_PDF_PATH");
+  }
+  if (multiPdfMode && preexistingOutputMode) {
+    throw new Error("PDF_ORGANIZER_INSTALLED_CORE_MULTI_PDF cannot be combined with preexisting output mode");
+  }
   if (providedPdfPath) {
     if (!existsSync(pdfPath)) {
       throw new Error(`Provided PDF was not found: ${pdfPath}`);
     }
   } else {
     writeSamplePdf(pdfPath);
+    if (secondPdfPath) {
+      writeSamplePdf(secondPdfPath);
+    }
   }
   if (preexistingOutputMode) {
     writeFileSync(preexistingOutputPath, "existing output must not be overwritten");
@@ -165,14 +187,14 @@ async function main() {
     });
 
     await page.addInitScript(
-      ({ outputDir, pdfPath }) => {
+      ({ outputDir, pdfPath, secondPdfPath }) => {
         window.__PDF_TOOL_E2E__ = {
           async openDialog(options) {
-            return options?.directory ? outputDir : [pdfPath];
+            return options?.directory ? outputDir : secondPdfPath ? [pdfPath, secondPdfPath] : [pdfPath];
           },
         };
       },
-      { outputDir, pdfPath },
+      { outputDir, pdfPath, secondPdfPath },
     );
 
     await page.goto("http://tauri.localhost/?e2e=installed-core", { waitUntil: "domcontentloaded" });
@@ -181,13 +203,18 @@ async function main() {
 
     await page.getByRole("button", { name: "PDFを選択" }).first().click();
     await expect(page.getByText(pdfName).first()).toBeVisible({ timeout: 120_000 });
+    if (secondPdfName) {
+      await expect(page.getByText(secondPdfName).first()).toBeVisible({ timeout: 120_000 });
+    }
     const pageCountText = expectedPageCount || (providedPdfPath ? null : "2");
     if (pageCountText) {
       await expect(page.getByText(`${pageCountText}ページ`).first()).toBeVisible({ timeout: 120_000 });
     } else {
       await expect(page.locator(".queue-row").first()).toContainText(/\d+ページ/, { timeout: 120_000 });
     }
-    await expect(page.locator('[role="status"]')).toContainText("1件のPDFを読み込みました。", { timeout: 120_000 });
+    await expect(page.locator('[role="status"]')).toContainText(`${secondPdfPath ? 2 : 1}件のPDFを読み込みました。`, {
+      timeout: 120_000,
+    });
 
     await page.getByRole("button", { name: "出力フォルダ" }).click();
     await expect(page.locator('[role="status"]')).toContainText("出力フォルダを設定しました。", { timeout: 30_000 });
@@ -201,15 +228,14 @@ async function main() {
     await page.getByRole("button", { name: "入力へ進む" }).click();
 
     await expect(page.locator('[data-testid="step-input"][aria-current="step"]')).toBeAttached({ timeout: 30_000 });
-    await expect(page.locator(".mini-row")).toHaveCount(2, { timeout: 30_000 });
-    await page.locator(".mini-row").nth(0).click();
-    await page.locator('input[name="box_no"]').fill("1");
-    await page.locator('input[name="binder_no"]').fill("1");
-    await page.locator('input[name="seq"]').fill("1");
-    await page.locator(".mini-row").nth(1).click();
-    await page.locator('input[name="box_no"]').fill("1");
-    await page.locator('input[name="binder_no"]').fill("1");
-    await page.locator('input[name="seq"]').fill("2");
+    const expectedSegments = secondPdfPath ? 3 : 2;
+    await expect(page.locator(".mini-row")).toHaveCount(expectedSegments, { timeout: 30_000 });
+    for (let index = 0; index < expectedSegments; index += 1) {
+      await page.locator(".mini-row").nth(index).click();
+      await page.locator('input[name="box_no"]').fill("1");
+      await page.locator('input[name="binder_no"]').fill("1");
+      await page.locator('input[name="seq"]').fill(String(index + 1));
+    }
     await expect(page.getByLabel("入力完了条件")).toContainText("未入力0件", { timeout: 30_000 });
     await page.getByRole("button", { name: "出力前チェック" }).last().click();
 
@@ -251,9 +277,11 @@ async function main() {
     await expect(page.locator('[role="status"]')).toContainText("出力できます。", { timeout: 120_000 });
     await page.getByRole("button", { name: "出力実行" }).click();
     await expect(page.locator('[role="status"]')).toContainText("出力が完了しました。", { timeout: 120_000 });
-    await expect(page.getByText("作成 2件 / 失敗 0件")).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator(".output-list .output-row.created")).toHaveCount(2, { timeout: 30_000 });
-    await expect(page.locator(".output-list .output-row.created .state-text")).toHaveText(["作成済み", "作成済み"]);
+    await expect(page.getByText(`作成 ${expectedSegments}件 / 失敗 0件`)).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".output-list .output-row.created")).toHaveCount(expectedSegments, { timeout: 30_000 });
+    await expect(page.locator(".output-list .output-row.created .state-text")).toHaveText(
+      Array.from({ length: expectedSegments }, () => "作成済み"),
+    );
     await expect(page.getByRole("button", { name: "出力実行" })).toBeDisabled();
     await expect(page.getByText("同じ内容をもう一度出力する場合は「再チェック」を押してください。")).toBeVisible({
       timeout: 30_000,
@@ -261,7 +289,11 @@ async function main() {
     await page.screenshot({ fullPage: false, path: screenshotPath });
 
     const outputs = readdirSync(outputDir).filter((name) => name.toLowerCase().endsWith(".pdf")).sort();
-    expect(outputs, "Core smoke should create two split PDFs").toEqual(["01_01_001.pdf", "01_01_002.pdf"]);
+    const expectedOutputs = Array.from(
+      { length: expectedSegments },
+      (_unused, index) => `01_01_${String(index + 1).padStart(3, "0")}.pdf`,
+    );
+    expect(outputs, `Core smoke should create ${expectedSegments} split PDFs`).toEqual(expectedOutputs);
     expect(pageErrors, "Installed app core smoke should not produce page errors").toEqual([]);
     expect(consoleMessages, "Installed app core smoke should not produce console warnings/errors").toEqual([]);
 
@@ -270,7 +302,9 @@ async function main() {
         {
           ok: true,
           appPath,
+          mode: secondPdfPath ? "multi-pdf" : "single-pdf",
           pdfPath,
+          secondPdfPath: secondPdfPath ?? undefined,
           outputDir: keepTemp ? outputDir : undefined,
           outputs,
           screenshotPath,

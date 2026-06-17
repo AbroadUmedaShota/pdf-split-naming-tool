@@ -140,11 +140,36 @@ gh release view $tag --repo $repo --json assets,tagName,url
 
 ## 動作確認
 
+通常のリリース確認では、旧版から新版への更新を自動スモークで一気通しします。
+
+```powershell
+cd apps\desktop
+npm run test:installed-updater
+```
+
+既定ではローカルの v0.1.3 installer を入れ直し、GitHub Release 上の v0.1.4 を検出、
+`インストール`、再起動後のバージョン表示、同じバージョンでの `最新版です。` 表示まで確認します。
+旧版/新版を変える場合は、次の環境変数を指定します。
+
+```powershell
+$env:PDF_ORGANIZER_UPDATER_OLD_INSTALLER_PATH="C:\path\to\PDF整理ツール_0.1.3_x64-setup.exe"
+$env:PDF_ORGANIZER_UPDATER_OLD_VERSION="0.1.3"
+$env:PDF_ORGANIZER_UPDATER_NEW_VERSION="0.1.4"
+npm run test:installed-updater
+```
+
+手動で確認する場合も、同じ観点で確認します。
+
 - 古いバージョンの packaged app を起動し、ヘッダーの `更新確認` を押します。
 - 新しいバージョンが表示されることを確認します。
 - `インストール` を押し、Windows installer が更新を完了できることを確認します。
+- 再起動後にバージョン表示が新バージョンになることを確認します。
 - 同じバージョンでは `最新版です。` と表示されることを確認します。
 
 リリース asset の URL 確認だけでは、アプリ内 updater の E2E 確認は完了扱いにしません。
 最低 1 回は旧バージョンをインストールした状態から、新バージョンの検出、インストール、
 再起動後のバージョン表示まで確認します。
+
+2026-06-18 の v0.1.4 公開確認では、`npm run test:installed-updater` により
+v0.1.3 から v0.1.4 への更新、再起動後の `現在のバージョン: 0.1.4`、
+再確認時の `最新版です。` 表示まで成功しています。

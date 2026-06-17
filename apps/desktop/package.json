@@ -21,6 +21,7 @@
     "test:installed-core": "node scripts/installed-core-smoke.mjs",
     "test:installed-state": "node scripts/installed-state-smoke.mjs",
     "test:installed-native-dialog": "node scripts/installed-native-dialog-smoke.mjs",
+    "test:installed-updater": "node scripts/installed-updater-smoke.mjs",
     "tauri": "tauri",
     "release:manifest": "node scripts/create-updater-manifest.mjs",
     "release:check": "node scripts/check-release-assets.mjs"
