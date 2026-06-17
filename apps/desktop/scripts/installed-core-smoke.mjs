@@ -14,6 +14,7 @@ const screenshotPath =
   join(tmpdir(), `pdf-tool-installed-core-smoke-${Date.now()}.png`);
 const providedPdfPath = process.env.PDF_ORGANIZER_INSTALLED_CORE_PDF_PATH?.trim();
 const expectedPageCount = process.env.PDF_ORGANIZER_INSTALLED_CORE_EXPECTED_PAGES?.trim();
+const preexistingOutputMode = process.env.PDF_ORGANIZER_INSTALLED_CORE_PREEXISTING_OUTPUT === "1";
 
 function buildPdf(objects) {
   let body = "%PDF-1.4\n";
@@ -125,12 +126,16 @@ async function main() {
   const pdfName = basename(pdfPath);
   const outputDir = join(tempRoot, "output folder");
   mkdirSync(outputDir, { recursive: true });
+  const preexistingOutputPath = join(outputDir, "01_01_001.pdf");
   if (providedPdfPath) {
     if (!existsSync(pdfPath)) {
       throw new Error(`Provided PDF was not found: ${pdfPath}`);
     }
   } else {
     writeSamplePdf(pdfPath);
+  }
+  if (preexistingOutputMode) {
+    writeFileSync(preexistingOutputPath, "existing output must not be overwritten");
   }
 
   const port = await freePort();
@@ -209,6 +214,40 @@ async function main() {
     await page.getByRole("button", { name: "出力前チェック" }).last().click();
 
     await expect(page.locator('[data-testid="step-output"][aria-current="step"]')).toBeAttached({ timeout: 120_000 });
+    if (preexistingOutputMode) {
+      await expect(page.locator('[role="status"]')).toContainText("修正が必要な項目があります。", { timeout: 120_000 });
+      await expect(page.getByText("既存あり（要対処）")).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText("同名ファイルが既存です。出力先を変更するか既存ファイルを削除してください")).toBeVisible({
+        timeout: 30_000,
+      });
+      await expect(page.getByRole("button", { name: "出力実行" })).toBeDisabled();
+      await page.screenshot({ fullPage: false, path: screenshotPath });
+
+      const outputs = readdirSync(outputDir).filter((name) => name.toLowerCase().endsWith(".pdf")).sort();
+      expect(outputs, "Existing-output smoke should not create additional PDFs").toEqual(["01_01_001.pdf"]);
+      expect(pageErrors, "Installed app existing-output smoke should not produce page errors").toEqual([]);
+      expect(consoleMessages, "Installed app existing-output smoke should not produce console warnings/errors").toEqual([]);
+
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            appPath,
+            mode: "preexisting-output",
+            pdfPath,
+            preexistingOutputPath,
+            outputDir: keepTemp ? outputDir : undefined,
+            outputs,
+            screenshotPath,
+            tempRoot: keepTemp ? tempRoot : undefined,
+          },
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+
     await expect(page.locator('[role="status"]')).toContainText("出力できます。", { timeout: 120_000 });
     await page.getByRole("button", { name: "出力実行" }).click();
     await expect(page.locator('[role="status"]')).toContainText("出力が完了しました。", { timeout: 120_000 });
