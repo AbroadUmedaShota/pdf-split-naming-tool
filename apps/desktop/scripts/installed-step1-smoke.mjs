@@ -129,11 +129,14 @@ async function main() {
   const pdfPath = join(tempRoot, "STEP1 日本語 path smoke.pdf");
   const secondPdfPath = join(tempRoot, "STEP1 second 日本語 path smoke.pdf");
   const encryptedPdfPath = join(tempRoot, "STEP1 password protected.pdf");
+  const nonPdfPath = join(tempRoot, "STEP1 not a pdf.txt");
+  const missingPdfPath = join(tempRoot, "STEP1 missing file.pdf");
   const outputDir = join(tempRoot, "output folder");
   mkdirSync(outputDir, { recursive: true });
   writeSamplePdf(pdfPath);
   writeSamplePdf(secondPdfPath);
   writeEncryptedPdf(encryptedPdfPath);
+  writeFileSync(nonPdfPath, "this is not a pdf\n", "utf-8");
 
   const port = await freePort();
   let browser = null;
@@ -162,8 +165,14 @@ async function main() {
     });
 
     await page.addInitScript(
-      ({ encryptedPdfPath, outputDir, pdfPath, secondPdfPath }) => {
-        const pdfOpenResults = [[encryptedPdfPath], [encryptedPdfPath, pdfPath, secondPdfPath], [pdfPath]];
+      ({ encryptedPdfPath, missingPdfPath, nonPdfPath, outputDir, pdfPath, secondPdfPath }) => {
+        const pdfOpenResults = [
+          [encryptedPdfPath],
+          [nonPdfPath, missingPdfPath],
+          [encryptedPdfPath, pdfPath],
+          [pdfPath, secondPdfPath],
+          [pdfPath],
+        ];
         window.__PDF_TOOL_E2E__ = {
           async openDialog(options) {
             if (options?.directory) {
@@ -173,7 +182,7 @@ async function main() {
           },
         };
       },
-      { encryptedPdfPath, outputDir, pdfPath, secondPdfPath },
+      { encryptedPdfPath, missingPdfPath, nonPdfPath, outputDir, pdfPath, secondPdfPath },
     );
 
     await page.goto("http://tauri.localhost/?e2e=installed", { waitUntil: "domcontentloaded" });
@@ -191,13 +200,39 @@ async function main() {
     await page.screenshot({ fullPage: false, path: passwordErrorScreenshotPath, timeout: 120_000 });
 
     await page.getByRole("button", { name: "PDFを選択" }).first().click();
+    await expect(page.locator('[role="status"]')).toContainText("PDF取込エラー", { timeout: 120_000 });
+    await expect(page.locator('[role="status"]')).toContainText("STEP1 not a pdf.txt", { timeout: 120_000 });
+    await expect(page.locator('[role="status"]')).toContainText("STEP1 missing file.pdf", { timeout: 120_000 });
+    await expect(page.locator('[role="status"]')).not.toContainText("Error:");
+    await expect(page.locator(".queue-row")).toHaveCount(0);
+    await expect(page.getByText("PDFが未選択です")).toBeVisible();
+    await expect(page.getByRole("button", { name: "分割へ進む" })).toBeDisabled();
+
+    await page.getByRole("button", { name: "PDFを選択" }).first().click();
     await expect(page.getByText("STEP1 日本語 path smoke.pdf").first()).toBeVisible({ timeout: 120_000 });
+    await expect(page.locator(".queue-row")).toHaveCount(1);
+    await expect(page.locator('[role="status"]')).toContainText("1件のPDFを読み込みました。", { timeout: 120_000 });
+    await expect(page.locator('[role="status"]')).toContainText("1件は読み込めませんでした", { timeout: 120_000 });
+    await expect(page.locator('[role="status"]')).toContainText("STEP1 password protected.pdf", { timeout: 120_000 });
+    await expect(page.locator('[role="status"]')).not.toContainText("Error:");
+
+    await page.getByRole("button", { name: "PDFを選択" }).first().click();
+    await expect(page.locator(".queue-row")).toHaveCount(2);
+    await expect(page.locator(".queue-row").nth(0)).toContainText("STEP1 日本語 path smoke.pdf");
+    await expect(page.locator(".queue-row").nth(1)).toContainText("STEP1 second 日本語 path smoke.pdf");
+    await expect(page.locator('[role="status"]')).toContainText("1件のPDFを読み込みました。", { timeout: 120_000 });
+    await expect(page.locator('[role="status"]')).toContainText("1件は追加済みです。", { timeout: 120_000 });
+
+    await page.locator(".queue-row").filter({ hasText: "STEP1 second 日本語 path smoke.pdf" }).locator(".queue-main").click();
+    await expect(page.locator(".queue-row.selected")).toContainText("STEP1 second 日本語 path smoke.pdf");
+
+    await page.getByRole("button", { name: "PDFを選択" }).first().click();
+    await expect(page.locator(".queue-row")).toHaveCount(2);
+    await expect(page.locator(".queue-row.selected")).toContainText("STEP1 second 日本語 path smoke.pdf");
+    await expect(page.locator('[role="status"]')).toContainText("選択したPDFはすでに一覧にあります。", { timeout: 120_000 });
+
     await expect(page.getByText("STEP1 second 日本語 path smoke.pdf").first()).toBeVisible({ timeout: 120_000 });
     await expect(page.getByText("2ページ").first()).toBeVisible({ timeout: 120_000 });
-    await expect(page.locator(".queue-row")).toHaveCount(2);
-    await expect(page.locator('[role="status"]')).toContainText("2件のPDFを読み込みました。", { timeout: 120_000 });
-    await expect(page.locator('[role="status"]')).toContainText("1件は読み込めませんでした", { timeout: 120_000 });
-    await expect(page.locator('[role="status"]')).not.toContainText("Error:");
 
     await page.getByRole("button", { name: "STEP1 日本語 path smoke.pdf を一覧から外す" }).click();
     await expect(page.locator(".queue-row")).toHaveCount(1);

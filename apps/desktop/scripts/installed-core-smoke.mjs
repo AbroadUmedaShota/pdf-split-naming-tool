@@ -252,6 +252,12 @@ async function main() {
     await page.getByRole("button", { name: "出力実行" }).click();
     await expect(page.locator('[role="status"]')).toContainText("出力が完了しました。", { timeout: 120_000 });
     await expect(page.getByText("作成 2件 / 失敗 0件")).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".output-list .output-row.created")).toHaveCount(2, { timeout: 30_000 });
+    await expect(page.locator(".output-list .output-row.created .state-text")).toHaveText(["作成済み", "作成済み"]);
+    await expect(page.getByRole("button", { name: "出力実行" })).toBeDisabled();
+    await expect(page.getByText("同じ内容をもう一度出力する場合は「再チェック」を押してください。")).toBeVisible({
+      timeout: 30_000,
+    });
     await page.screenshot({ fullPage: false, path: screenshotPath });
 
     const outputs = readdirSync(outputDir).filter((name) => name.toLowerCase().endsWith(".pdf")).sort();

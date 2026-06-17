@@ -5,6 +5,8 @@ const step1MockPdfPath = 'C:\\Users\\tester\\Documents\\sample-step1.pdf';
 const step1SecondMockPdfPath = 'C:\\Users\\tester\\Documents\\second-step1.pdf';
 const step1MockOutputDir = 'C:\\Users\\tester\\Desktop\\pdf-output';
 const step1BrokenPdfPath = 'C:\\Users\\tester\\Documents\\broken-step1.pdf';
+const step1TextPath = 'C:\\Users\\tester\\Documents\\not-pdf.txt';
+const step1MissingPdfPath = 'C:\\Users\\tester\\Documents\\missing-step1.pdf';
 const step1PreviewDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
 async function installStep1Harness(page, options = {}) {
@@ -270,6 +272,33 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await expect(pageErrors, '一部失敗の複数PDF取込で JS 例外が発生しない').toEqual([]);
   });
 
+  test('TC-E2E-S1-020 PDF以外と存在しないパスは一覧へ不正反映せず復旧できる', async ({ page }) => {
+    // TC: TC-E2E-S1-020 | Risk: PDF以外や存在しないパスが一覧に混入して後続処理を壊す
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await installStep1Harness(page, {
+      failedPdfPaths: [step1MissingPdfPath],
+      openResults: [[step1TextPath, step1MissingPdfPath], [step1MockPdfPath]],
+    });
+
+    await page.goto('/?e2e=step1', { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+
+    await expect(page.locator('[role="status"]')).toContainText('PDF取込エラー');
+    await expect(page.locator('[role="status"]')).toContainText('not-pdf.txt');
+    await expect(page.locator('[role="status"]')).toContainText('PDFファイルではありません。');
+    await expect(page.locator('[role="status"]')).toContainText('missing-step1.pdf');
+    await expect(page.locator('.queue-row')).toHaveCount(0);
+    await expect(page.getByText('PDFが未選択です')).toBeVisible();
+    await expect(page.getByRole('button', { name: '分割へ進む' })).toBeDisabled();
+
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+    await expect(page.locator('.queue-row')).toHaveCount(1);
+    await expect(page.getByText('sample-step1.pdf').first()).toBeVisible();
+    await expect(page.locator('[role="status"]')).toContainText('1件のPDFを読み込みました。');
+    await expect(pageErrors, 'PDF以外/存在しないパスの復旧で JS 例外が発生しない').toEqual([]);
+  });
+
   test('TC-E2E-S1-012 PDF選択待ち中に取込ボタンが無効化される', async ({ page }) => {
     // TC: TC-E2E-S1-012 | Risk: OSファイル選択待ち中に無反応/連打できるように見える
     const pageErrors = [];
@@ -326,6 +355,36 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await nextButton.click();
     await expect(page.locator('[data-testid="step-split"][aria-current="step"]')).toBeAttached();
     await expect(pageErrors, 'PDF削除・全クリア・再取込で JS 例外が発生しない').toEqual([]);
+  });
+
+  test('TC-E2E-S1-021 複数PDFを連続追加しても重複せず現在選択PDFを維持する', async ({ page }) => {
+    // TC: TC-E2E-S1-021 | Risk: 連続追加や重複選択で一覧順・現在PDFが壊れる
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await installStep1Harness(page, {
+      openResults: [[step1MockPdfPath], [step1MockPdfPath, step1SecondMockPdfPath], [step1MockPdfPath]],
+    });
+
+    await page.goto('/?e2e=step1', { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+    await expect(page.locator('.queue-row')).toHaveCount(1);
+    await expect(page.locator('.queue-row').nth(0)).toContainText('sample-step1.pdf');
+
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+    await expect(page.locator('.queue-row')).toHaveCount(2);
+    await expect(page.locator('.queue-row').nth(0)).toContainText('sample-step1.pdf');
+    await expect(page.locator('.queue-row').nth(1)).toContainText('second-step1.pdf');
+    await expect(page.locator('[role="status"]')).toContainText('1件のPDFを読み込みました。');
+    await expect(page.locator('[role="status"]')).toContainText('1件は追加済みです。');
+
+    await page.locator('.queue-row').filter({ hasText: 'second-step1.pdf' }).locator('.queue-main').click();
+    await expect(page.locator('.queue-row.selected')).toContainText('second-step1.pdf');
+
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+    await expect(page.locator('.queue-row')).toHaveCount(2);
+    await expect(page.locator('.queue-row.selected')).toContainText('second-step1.pdf');
+    await expect(page.locator('[role="status"]')).toContainText('選択したPDFはすでに一覧にあります。');
+    await expect(pageErrors, 'PDF連続追加・重複排除で JS 例外が発生しない').toEqual([]);
   });
 
   test('TC-E2E-011 検索ハイライト表示中にページ移動すると前ページのハイライトが残らない', async ({ page }) => {

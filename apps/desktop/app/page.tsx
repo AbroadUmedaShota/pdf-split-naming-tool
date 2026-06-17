@@ -1411,6 +1411,9 @@ export default function Page() {
       const importResults = await Promise.all(
         paths.map(async (path) => {
           try {
+            if (!path.toLowerCase().endsWith(".pdf")) {
+              throw new Error("PDFファイルではありません。");
+            }
             return { file: await loadPdfInfo(path), status: "fulfilled" as const };
           } catch (error) {
             return { message: displayError(error), path, status: "rejected" as const };
@@ -1431,26 +1434,49 @@ export default function Page() {
         setStatus(`PDF取込エラー: ${failed.length}件のPDFを読み込めませんでした${detail ? `: ${detail}` : "。"}`, "danger");
         return;
       }
-      setPdfFiles((existing) => {
-        const byPath = new Map(existing.map((file) => [file.path, file]));
-        for (const file of loaded) {
-          byPath.set(file.path, file);
+      const knownPaths = new Set(pdfFiles.map((file) => file.path));
+      const newFiles: PdfFile[] = [];
+      for (const file of loaded) {
+        if (knownPaths.has(file.path)) {
+          continue;
         }
-        return [...byPath.values()];
-      });
-      setCurrentPdf(loaded[0].path);
-      requestedPageRef.current = 1;
-      setCurrentPage(1);
-      clearOutputState();
-      await loadPreview(loaded[0].path, 1);
-      if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
+        knownPaths.add(file.path);
+        newFiles.push(file);
+      }
+      const duplicateCount = loaded.length - newFiles.length;
+      if (newFiles.length) {
+        setPdfFiles((existing) => [...existing, ...newFiles]);
+        setCurrentPdf(newFiles[0].path);
+        requestedPageRef.current = 1;
+        setCurrentPage(1);
+        clearOutputState();
+        await loadPreview(newFiles[0].path, 1);
+        if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
+          return;
+        }
+      }
+      if (!newFiles.length && duplicateCount) {
+        if (failed.length) {
+          const detail = failed.map((result) => `${basename(result.path)}（${result.message}）`).join("、");
+          setStatus(
+            `新しいPDFは追加されませんでした。${duplicateCount}件は追加済みです。${failed.length}件は読み込めませんでした: ${detail}`,
+            "warning"
+          );
+        } else {
+          setStatus("選択したPDFはすでに一覧にあります。", "warning");
+        }
         return;
       }
       if (failed.length) {
         const detail = failed.map((result) => `${basename(result.path)}（${result.message}）`).join("、");
-        setStatus(`${loaded.length}件のPDFを読み込みました。${failed.length}件は読み込めませんでした: ${detail}`, "warning");
+        setStatus(
+          `${newFiles.length}件のPDFを読み込みました。${duplicateCount ? `${duplicateCount}件は追加済みです。` : ""}${failed.length}件は読み込めませんでした: ${detail}`,
+          "warning"
+        );
+      } else if (duplicateCount) {
+        setStatus(`${newFiles.length}件のPDFを読み込みました。${duplicateCount}件は追加済みです。`, "ok");
       } else {
-        setStatus(`${loaded.length}件のPDFを読み込みました。`, "ok");
+        setStatus(`${newFiles.length}件のPDFを読み込みました。`, "ok");
       }
     } catch (error) {
       if (requestId && !workspaceRequestGateRef.current.isCurrent(requestId)) {
