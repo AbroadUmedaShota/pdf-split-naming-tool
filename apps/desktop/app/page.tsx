@@ -1519,6 +1519,10 @@ export default function Page() {
   }
 
   async function selectSegmentForPreview(segment: SegmentView): Promise<void> {
+    if (devPreviewEnabled) {
+      await selectPageForPreview(segment.pdfPath, segment.startPage);
+      return;
+    }
     invalidateWorkspaceRequests();
     clearSearchHighlights();
     setSelectedSegmentKey(segment.key);
@@ -1630,6 +1634,10 @@ export default function Page() {
     const basePage = requestedPageRef.current;
     const nextPage = Math.max(1, Math.min(currentFile.pageCount, basePage + offset));
     if (nextPage === basePage) {
+      return;
+    }
+    if (devPreviewEnabled) {
+      await selectPageForPreview(currentFile.path, nextPage);
       return;
     }
     requestedPageRef.current = nextPage;

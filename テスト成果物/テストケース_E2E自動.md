@@ -16,7 +16,7 @@
 
 **Playwright 導入確定（@playwright/test 1.60.0・chromium 導入済み）。実行手段は STEP1 取込E2Eハーネス（`?e2e=step1`）と dev preview モード（`?dev=<stepId>`）を併用する。**
 
-STEP1のPDF取込は、Tauriのファイル選択とsidecar応答をハーネスで差し替えて自動化した。dev preview の静的 early-return 設計で再現できない 17 件（処理中状態注入・旧応答破棄・部分失敗注入・確認ダイアログ発火・リクエストゲート・再採番/affix の動的編集・ステップ遷移ガード）は `未実装テストケース_E2E自動.md` に退避済み（DQ03 は導入確定だが invoke モック test seam が別途必要なため）。
+STEP1のPDF取込は、Tauriのファイル選択とsidecar応答をハーネスで差し替えて自動化した。dev preview で決定論的に確認できる検索ハイライト残留なし、表示モード/ズーム/Ctrl+ホイール、STEP2/STEP3矢印ナビも自動化した。dev preview の静的 early-return 設計で再現できない 17 件（処理中状態注入・旧応答破棄・部分失敗注入・確認ダイアログ発火・リクエストゲート・再採番/affix の動的編集・ステップ遷移ガード）は `未実装テストケース_E2E自動.md` に退避済み（DQ03 は導入確定だが invoke モック test seam が別途必要なため）。
 
 | テストケースID | 元テスト設計ID | テスト観点ID | テストアプローチID | 実行区分 | テストレベル/タイプ | 優先度 | テストケース名 | 前提条件 | 入力/データ | 手順 | 期待結果 | 確認方法/証跡 | 関連質問ID | 仕様 | リスクID | 状態 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -29,8 +29,10 @@ STEP1のPDF取込は、Tauriのファイル選択とsidecar応答をハーネス
 | TC-E2E-S1-011 | STEP1優先 | TV-S1 | TA-S1 | E2E自動 | E2E | 高 | 複数PDF選択時、1件失敗しても読めるPDFを取り込めること | `?e2e=step1` で Tauri open / sidecar をハーネス化 | 正常PDF2件、`pdf_info` 失敗PDF1件 | 1. STEP1を開く 2. 正常2件＋失敗1件を同時選択する 3. 一覧、警告ステータス、プレビュー呼び出しを確認する | 正常PDF2件は一覧に入り、失敗PDFは一覧に混入せず、警告に失敗件数と対象名が表示される | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | DQ03（導入確定） | E2Eテスト一覧_STEP1優先.md | R-STEP1 | 作成済み |
 | TC-E2E-S1-012 | STEP1優先 | TV-S1 | TA-S1 | E2E自動 | E2E | 高 | PDF選択待ち中、取込ボタンが無効化されること | `?e2e=step1` で Tauri open を遅延させる | ファイル選択待ち相当の遅延 | 1. STEP1を開く 2. PDF選択を実行する 3. 選択中ステータスとボタン無効化を確認する 4. PDF取込完了を確認する | OSファイル選択待ちに相当する間、取込ボタンが無効化され、完了後はPDFが一覧に反映される | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | DQ03（導入確定） | E2Eテスト一覧_STEP1優先.md | R-STEP1/R007 | 作成済み |
 | TC-E2E-011 | TD049 | TV049 | TA009 | E2E自動 | E2E | 高 | 検索ハイライト表示中にページ移動→前ページのハイライトが残らないこと | dev preview（?dev=split）でハイライトが描画されている状態 | ハイライト表示中のページ移動操作 | 1. ?dev=split を開きハイライト矩形（svg rect/highlightクラス）の存在を確認する 2. 次ページへ移動する 3. ハイライトが DOM に残らないことを検証する | 前ページのハイライトがページ移動後に残留しない（svgRects=0・highlightクラス=0） | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | DQ03（導入確定） | テスト設計.md TD049 / ISS-030 NF-U5 / page.tsx clearSearchHighlights | R011 | 作成済み |
+| TC-E2E-B6 | 手動受入B6/B7 | TV-B6 | TA009 | E2E自動 | E2E | 中 | プレビューの表示モード・ズーム・Ctrlホイールが表示状態へ反映されること | dev preview（?dev=split）でPDFプレビューが描画されている状態 | 表示モードボタン、ズームスライダー、Ctrl+ホイール | 1. 幅合わせ、全体表示、実寸を押す 2. ズーム倍率をキー操作する 3. Ctrl+ホイールとCtrlなしホイールを送る | preview-frame の表示モードclass、ズーム倍率表示、Ctrl+ホイール時のみ倍率更新が確認できる | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | - | 手動受入チェックリスト.md B6/B7 | R001/R011 | 作成済み |
+| TC-E2E-B8 | 手動受入B8 | TV-B8 | TA009 | E2E自動 | E2E | 中 | STEP2/STEP3の矢印ナビと入力欄フォーカス中ガードが動作すること | dev preview（?dev=split / ?dev=input）でサンプルPDFとセグメントが描画されている状態 | ArrowLeft / ArrowRight / ArrowUp / ArrowDown、入力欄フォーカス | 1. STEP2で←/→を送る 2. STEP3で↑/↓と←/→を送る 3. 入力欄フォーカス中に→を送る | STEP2/STEP3のページ移動、STEP3のセグメント移動が反映され、入力欄フォーカス中はナビしない | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | - | 手動受入チェックリスト.md B8 | R001/R012 | 作成済み |
 
-**測定手段の注記**: TC-E2E-S1-001 から TC-E2E-S1-006 は `window.__PDF_TOOL_E2E__` でファイル選択とsidecar応答を差し替える。TC-E2E-011 は設計記載の「invoke モック」ではなく dev preview を測定手段とする。page.tsx の `clearSearchHighlights` は dev preview のページ移動でも実行されるため、期待結果「前ページのハイライトが残らない（NF-U5）」を実 DOM で判定できる。残り 17 件は invoke モック注入口が無いと再現できず退避。
+**測定手段の注記**: TC-E2E-S1 系は `window.__PDF_TOOL_E2E__` でファイル選択とsidecar応答を差し替える。TC-E2E-011 / TC-E2E-B6 / TC-E2E-B8 は設計記載の「invoke モック」ではなく dev preview を測定手段とする。page.tsx の `clearSearchHighlights` は dev preview のページ移動でも実行されるため、期待結果「前ページのハイライトが残らない（NF-U5）」を実 DOM で判定できる。残り 17 件は invoke モック注入口が無いと再現できず退避。
 
 ## 4. 上流成果物への追記・更新
 
@@ -41,6 +43,7 @@ STEP1取込不具合の切り分けを優先するため、`E2Eテスト一覧_S
 | テスト設計ID | 対応テストケースID | 実行区分 | 状態 | 出力ファイル | カバー状況 |
 |---|---|---|---|---|---|
 | STEP1優先 | TC-E2E-S1-001〜TC-E2E-S1-006, TC-E2E-S1-011, TC-E2E-S1-012 | E2E自動 | 作成済み | テストケース_E2E自動.md / E2Eテスト一覧_STEP1優先.md | 実装済み（E2Eハーネス） |
+| 手動受入B6/B7/B8 | TC-E2E-B6, TC-E2E-B8 | E2E自動 | 作成済み | テストケース_E2E自動.md / E2Eテスト一覧_STEP1優先.md | 実装済み（dev preview） |
 | TD043 | TC-E2E-001 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |
 | TD044 | TC-E2E-002 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |
 | TD045 | TC-E2E-003, TC-E2E-004 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |

@@ -108,6 +108,12 @@ async function installStep1Harness(page, options = {}) {
   );
 }
 
+async function pressWindowShortcut(page, key) {
+  await page.evaluate((nextKey) => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: nextKey, bubbles: true, cancelable: true }));
+  }, key);
+}
+
 // 対象: apps/desktop（Next.js）http://localhost:3000 を STEP1 ハーネス（?e2e=step1）と
 // dev preview モード（?dev=<stepId>）で検証する。
 //
@@ -442,5 +448,84 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
 
     // 副次確認: ハイライトクリア処理でレンダリングがクラッシュしない。
     expect(pageErrors, 'ページ移動中に JS 例外が発生しない').toEqual([]);
+  });
+
+  test('TC-E2E-B6 プレビューの表示モード・スライダー・Ctrlホイールでズーム状態が反映される', async ({ page }) => {
+    // TC: manual B6/B7 | Risk: プレビュー拡大縮小が表示へ反映されず操作確認できない
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+
+    await openDevStep(page, 'split');
+
+    const previewFrame = page.locator('.preview-frame');
+    const zoomGroup = page.locator('.zoom-controls');
+    const zoomSlider = page.getByLabel('ズーム倍率');
+
+    await expect(previewFrame).toHaveClass(/page/);
+    await page.getByRole('button', { name: '幅合わせ' }).click();
+    await expect(previewFrame).toHaveClass(/width/);
+    await expect(page.getByRole('button', { name: '幅合わせ' })).toHaveClass(/selected/);
+
+    await page.getByRole('button', { name: '全体表示' }).click();
+    await expect(previewFrame).toHaveClass(/page/);
+    await expect(page.getByRole('button', { name: '全体表示' })).toHaveClass(/selected/);
+
+    await page.getByRole('button', { name: '実寸' }).click();
+    await expect(previewFrame).toHaveClass(/free/);
+    await expect(zoomSlider).toHaveValue('1');
+    await expect(zoomGroup).toContainText('100%');
+
+    await zoomSlider.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(previewFrame).toHaveClass(/free/);
+    await expect(zoomSlider).toHaveValue('1.1');
+    await expect(zoomGroup).toContainText('110%');
+
+    await previewFrame.dispatchEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -120 });
+    await expect(zoomSlider).toHaveValue('1.2');
+    await expect(zoomGroup).toContainText('120%');
+
+    await previewFrame.dispatchEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: false, deltaY: -120 });
+    await expect(zoomSlider).toHaveValue('1.2');
+    await expect(zoomGroup).toContainText('120%');
+
+    expect(pageErrors, 'ズーム操作で JS 例外が発生しない').toEqual([]);
+  });
+
+  test('TC-E2E-B8 STEP2/STEP3の矢印ナビと入力欄フォーカス中のガードが動作する', async ({ page }) => {
+    // TC: manual B8 | Risk: キーボード操作がページ/セグメント移動と入力編集で衝突する
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+
+    await openDevStep(page, 'split');
+    await page.locator('.preview-frame').click();
+    expect(await readCurrentPage(page), 'STEP2初期表示は4ページ目').toBe('4');
+    await pressWindowShortcut(page, 'ArrowRight');
+    await expect.poll(async () => await readCurrentPage(page)).toBe('5');
+    await pressWindowShortcut(page, 'ArrowLeft');
+    await expect.poll(async () => await readCurrentPage(page)).toBe('4');
+
+    await openDevStep(page, 'input');
+    const selectedRow = page.locator('.mini-row.selected');
+    await expect(selectedRow).toContainText('4-7');
+    expect(await readCurrentPage(page), 'STEP3初期表示は選択セグメント先頭').toBe('4');
+
+    await page.locator('.preview-frame').click();
+    await pressWindowShortcut(page, 'ArrowDown');
+    await expect(selectedRow).toContainText('8-11');
+    await expect.poll(async () => await readCurrentPage(page)).toBe('8');
+    await pressWindowShortcut(page, 'ArrowUp');
+    await expect(selectedRow).toContainText('4-7');
+    await expect.poll(async () => await readCurrentPage(page)).toBe('4');
+    await pressWindowShortcut(page, 'ArrowRight');
+    await expect.poll(async () => await readCurrentPage(page)).toBe('5');
+
+    await page.locator('input[name="box_no"]').focus();
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(async () => await readCurrentPage(page), {
+      message: '入力欄フォーカス中は矢印キーでページ移動しない',
+    }).toBe('5');
+
+    expect(pageErrors, '矢印ナビ操作で JS 例外が発生しない').toEqual([]);
   });
 });
