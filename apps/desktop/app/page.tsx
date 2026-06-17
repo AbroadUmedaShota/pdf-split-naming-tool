@@ -1450,7 +1450,23 @@ export default function Page() {
         requestedPageRef.current = 1;
         setCurrentPage(1);
         clearOutputState();
-        await loadPreview(newFiles[0].path, 1);
+        try {
+          await loadPreview(newFiles[0].path, 1);
+        } catch (error) {
+          if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
+            return;
+          }
+          const duplicateMessage = duplicateCount ? `${duplicateCount}件は追加済みです。` : "";
+          const failedDetail = failed.map((result) => `${basename(result.path)}（${result.message}）`).join("、");
+          const failedMessage = failed.length
+            ? `${failed.length}件は読み込めませんでした${failedDetail ? `: ${failedDetail}` : "。"}`
+            : "";
+          setStatus(
+            `${newFiles.length}件のPDFを読み込みましたが、プレビューを表示できませんでした: ${displayError(error)}${duplicateMessage || failedMessage ? ` ${duplicateMessage}${failedMessage}` : ""}`,
+            "danger"
+          );
+          return;
+        }
         if (!workspaceRequestGateRef.current.isCurrent(requestId)) {
           return;
         }

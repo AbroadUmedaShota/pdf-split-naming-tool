@@ -7,12 +7,14 @@ const step1MockOutputDir = 'C:\\Users\\tester\\Desktop\\pdf-output';
 const step1BrokenPdfPath = 'C:\\Users\\tester\\Documents\\broken-step1.pdf';
 const step1TextPath = 'C:\\Users\\tester\\Documents\\not-pdf.txt';
 const step1MissingPdfPath = 'C:\\Users\\tester\\Documents\\missing-step1.pdf';
+const step1AccessDeniedPdfPath = 'C:\\Users\\tester\\Documents\\access-denied-step1.pdf';
 const step1PreviewDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
 async function installStep1Harness(page, options = {}) {
   await page.addInitScript(
-    ({ failPdfInfo, failedPdfPaths, openDelayMs, openResults, outputDir, pdfPath, previewDataUrl }) => {
+    ({ failPdfInfo, failedPdfPaths, failedPreviewPaths, openDelayMs, openResults, outputDir, pdfPath, previewDataUrl }) => {
       const failedPathSet = new Set(failedPdfPaths);
+      const failedPreviewPathSet = new Set(failedPreviewPaths);
       window.__PDF_TOOL_E2E_CALLS__ = [];
       window.__PDF_TOOL_E2E_OPEN_RESULTS__ = [...openResults];
       window.__PDF_TOOL_E2E__ = {
@@ -46,6 +48,14 @@ async function installStep1Harness(page, options = {}) {
             };
           }
           if (request.command === 'page_preview') {
+            if (failedPreviewPathSet.has(request.pdf_path)) {
+              return {
+                ok: false,
+                command: 'page_preview',
+                error: 'プレビュー画像を生成できませんでした',
+                error_type: 'PreviewError',
+              };
+            }
             return {
               ok: true,
               command: 'page_preview',
@@ -99,6 +109,7 @@ async function installStep1Harness(page, options = {}) {
     {
       failPdfInfo: Boolean(options.failPdfInfo),
       failedPdfPaths: options.failedPdfPaths ?? [],
+      failedPreviewPaths: options.failedPreviewPaths ?? [],
       openDelayMs: options.openDelayMs ?? 0,
       openResults: options.openResults ?? [],
       outputDir: step1MockOutputDir,
@@ -320,13 +331,79 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await expect(pageErrors, '一部失敗の複数PDF取込で JS 例外が発生しない').toEqual([]);
   });
 
-  test('TC-E2E-S1-020 PDF以外と存在しないパスは一覧へ不正反映せず復旧できる', async ({ page }) => {
-    // TC: TC-E2E-S1-020 | Risk: PDF以外や存在しないパスが一覧に混入して後続処理を壊す
+  test('TC-E2E-S1-025 複数PDFを同時選択して全件成功時に一覧順・件数・プレビューが反映される', async ({ page }) => {
+    // TC: TC-E2E-S1-025 | Risk: 複数PDF全件成功時に一覧順や初回プレビューが崩れる
     const pageErrors = [];
     page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
     await installStep1Harness(page, {
-      failedPdfPaths: [step1MissingPdfPath],
-      openResults: [[step1TextPath, step1MissingPdfPath], [step1MockPdfPath]],
+      openResults: [[step1MockPdfPath, step1SecondMockPdfPath]],
+    });
+
+    await page.goto('/?e2e=step1', { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+
+    await expect(page.locator('.queue-row')).toHaveCount(2);
+    await expect(page.locator('.queue-row').nth(0)).toContainText('sample-step1.pdf');
+    await expect(page.locator('.queue-row').nth(1)).toContainText('second-step1.pdf');
+    await expect(page.locator('.queue-row.selected')).toContainText('sample-step1.pdf');
+    await expect(page.getByText('3ページ').first()).toBeVisible();
+    await expect(page.locator('[role="status"]')).toContainText('2件のPDFを読み込みました。');
+    await expect(page.locator('[role="status"]')).not.toContainText('読み込めませんでした');
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const calls = window.__PDF_TOOL_E2E_CALLS__ ?? [];
+          return {
+            pdfInfoCount: calls.filter((call) => call === 'pdf_info').length,
+            previewCount: calls.filter((call) => call === 'page_preview').length,
+          };
+        })
+      )
+      .toEqual({ pdfInfoCount: 2, previewCount: 1 });
+    await page.getByRole('button', { name: '出力フォルダ' }).click();
+    const nextButton = page.getByRole('button', { name: '分割へ進む' });
+    await expect(nextButton).toBeEnabled();
+    await nextButton.click();
+    await expect(page.locator('[data-testid="step-split"][aria-current="step"]')).toBeAttached();
+    await expect(page.getByAltText('PDFページプレビュー')).toBeVisible();
+    await expect(pageErrors, '複数PDF全件成功の取込で JS 例外が発生しない').toEqual([]);
+  });
+
+  test('TC-E2E-S1-026 初回プレビュー失敗時もPDFは一覧に残り取込済みとして切り分けできる', async ({ page }) => {
+    // TC: TC-E2E-S1-026 | Risk: PDF情報取得後のプレビュー失敗がPDF取込失敗に見えて原因切り分けできない
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await installStep1Harness(page, {
+      failedPreviewPaths: [step1MockPdfPath],
+      openResults: [[step1MockPdfPath]],
+    });
+
+    await page.goto('/?e2e=step1', { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+
+    await expect(page.locator('.queue-row')).toHaveCount(1);
+    await expect(page.locator('.queue-row')).toContainText('sample-step1.pdf');
+    await expect(page.locator('.queue-row')).toContainText('3ページ');
+    await expect(page.locator('.queue-row.selected')).toContainText('sample-step1.pdf');
+    await expect(page.locator('[role="status"]')).toContainText('1件のPDFを読み込みましたが、プレビューを表示できませんでした');
+    await expect(page.locator('[role="status"]')).toContainText('プレビュー画像を生成できませんでした');
+    await expect(page.locator('[role="status"]')).not.toContainText('PDF取込エラー');
+    await expect(page.getByRole('button', { name: '分割へ進む' })).toBeDisabled();
+    await expect.poll(() => page.evaluate(() => (window.__PDF_TOOL_E2E_CALLS__ ?? []).slice(0, 3))).toEqual([
+      'open:pdf',
+      'pdf_info',
+      'page_preview',
+    ]);
+    await expect(pageErrors, '初回プレビュー失敗で JS 例外が発生しない').toEqual([]);
+  });
+
+  test('TC-E2E-S1-020 PDF以外と存在しないパスは一覧へ不正反映せず復旧できる', async ({ page }) => {
+    // TC: TC-E2E-S1-020 | Risk: PDF以外や存在しない/アクセス不可パスが一覧に混入して後続処理を壊す
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await installStep1Harness(page, {
+      failedPdfPaths: [step1MissingPdfPath, step1AccessDeniedPdfPath],
+      openResults: [[step1TextPath, step1MissingPdfPath, step1AccessDeniedPdfPath], [step1MockPdfPath]],
     });
 
     await page.goto('/?e2e=step1', { waitUntil: 'networkidle' });
@@ -336,6 +413,7 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await expect(page.locator('[role="status"]')).toContainText('not-pdf.txt');
     await expect(page.locator('[role="status"]')).toContainText('PDFファイルではありません。');
     await expect(page.locator('[role="status"]')).toContainText('missing-step1.pdf');
+    await expect(page.locator('[role="status"]')).toContainText('access-denied-step1.pdf');
     await expect(page.locator('.queue-row')).toHaveCount(0);
     await expect(page.getByText('PDFが未選択です')).toBeVisible();
     await expect(page.getByRole('button', { name: '分割へ進む' })).toBeDisabled();

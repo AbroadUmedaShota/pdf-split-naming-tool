@@ -2,7 +2,7 @@
 
 ## 1. レビュー対象
 
-- apps/desktop/e2e/desktop-shell.e2e.spec.js（TC-E2E-S1-001〜006 / TC-E2E-S1-011 / TC-E2E-S1-012 / TC-E2E-S1-020〜023 / TC-E2E-011 / TC-E2E-B6 / TC-E2E-B8 / TC-E2E-C1 / TC-E2E-C2 実装）
+- apps/desktop/e2e/desktop-shell.e2e.spec.js（TC-E2E-S1-001〜006 / TC-E2E-S1-011 / TC-E2E-S1-012 / TC-E2E-S1-020〜023 / TC-E2E-S1-025〜026 / TC-E2E-011 / TC-E2E-B6 / TC-E2E-B8 / TC-E2E-C1 / TC-E2E-C2 実装）
 - apps/desktop/e2e/helpers.js（dev preview 共通ヘルパ）
 - apps/desktop/playwright.config.js（Playwright 構成・webServer）
 - apps/desktop/package.json（test:e2e スクリプト）
@@ -53,8 +53,8 @@
 主要な確認点:
 
 - テスト対象妥当性: テストは baseURL=http://localhost:3000 の `?e2e=step1` と dev preview（?dev=split）を開き、対象アプリの実コードパス（openDialog / runSidecar test seam / selectPageForPreview / clearSearchHighlights）を駆動している。誤ターゲットなし。
-- トレーサビリティ: TC-E2E-S1-001〜006、TC-E2E-S1-011、TC-E2E-S1-012、TC-E2E-S1-020〜023、TC-E2E-011、TC-E2E-B6、TC-E2E-B8、TC-E2E-C1、TC-E2E-C2 のタイトルに TC-ID、近傍コメントに TC/Risk または TC/TD/TV/TA/Risk/Spec を保持。
-- 網羅・退避: STEP1優先/追加はブラウザE2E 12件を実装、実機E2E系8件を別管理。既存E2Eレーン 18 件のうち実装 1（TC-E2E-011）・退避 17（TC-E2E-001〜010, 012〜018）。STEP2/STEP3操作系は4件をdev previewで実装。退避は `未実装テストケース_E2E自動.md` に具体理由（dev preview の静的 early-return で invoke モック注入不可・確認ダイアログ非発火・ステップガードのバイパス等）と必要対応・関連質問 ID（DQ03）付きで記載。質問待ち/要確認を unsupported assertion にすり替えていない。
+- トレーサビリティ: TC-E2E-S1-001〜006、TC-E2E-S1-011、TC-E2E-S1-012、TC-E2E-S1-020〜023、TC-E2E-S1-025〜026、TC-E2E-011、TC-E2E-B6、TC-E2E-B8、TC-E2E-C1、TC-E2E-C2 のタイトルに TC-ID、近傍コメントに TC/Risk または TC/TD/TV/TA/Risk/Spec を保持。
+- 網羅・退避: STEP1優先/追加はブラウザE2E 14件を実装、実機E2E系8件を別管理。既存E2Eレーン 18 件のうち実装 1（TC-E2E-011）・退避 17（TC-E2E-001〜010, 012〜018）。STEP2/STEP3操作系は4件をdev previewで実装。退避は `未実装テストケース_E2E自動.md` に具体理由（dev preview の静的 early-return で invoke モック注入不可・確認ダイアログ非発火・ステップガードのバイパス等）と必要対応・関連質問 ID（DQ03）付きで記載。質問待ち/要確認を unsupported assertion にすり替えていない。
 - アサーション妥当性: 「ページ移動が完結（4→8）」かつ「前ページのハイライト矩形・レイヤーが残らない」を独立に判定。期待結果（NF-U5）に直結。
 - flake 耐性: `waitForTimeout` は不使用。すべて `expect.poll` / locator 待機。
 - 独立性: 単一テストで、`openDevStep` が毎回クリーンな goto から開始。
@@ -70,14 +70,14 @@ npm run test:e2e
 最終結果:
 
 ```text
-Running 17 tests using 1 worker
-17 passed
+Running 19 tests using 1 worker
+19 passed
 ```
 
-- TC-E2E-S1-001〜006、TC-E2E-S1-011、TC-E2E-S1-012、TC-E2E-S1-020〜023、TC-E2E-011、TC-E2E-B6、TC-E2E-B8、TC-E2E-C1、TC-E2E-C2: Pass。
+- TC-E2E-S1-001〜006、TC-E2E-S1-011、TC-E2E-S1-012、TC-E2E-S1-020〜023、TC-E2E-S1-025〜026、TC-E2E-011、TC-E2E-B6、TC-E2E-B8、TC-E2E-C1、TC-E2E-C2: Pass。
 - webServer は既存 dev server（ポート3000）を再利用（reuseExistingServer）。テスト実行で常駐プロセスを増やさない。
 
-最終件数: ブラウザE2E 17件 Pass。既存E2Eレーン 実装 1（Pass 1）／退避 17、STEP1優先/追加のブラウザE2E 12件、STEP2/STEP3操作系 4件。
+最終件数: ブラウザE2E 19件 Pass。既存E2Eレーン 実装 1（Pass 1）／退避 17、STEP1優先/追加のブラウザE2E 14件、STEP2/STEP3操作系 4件。
 
 ## 7. 残課題
 
