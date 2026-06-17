@@ -122,6 +122,7 @@ type SelectedSearchHit = {
   pdfPath: string;
 };
 type E2eHarness = {
+  desktopDir?: () => Promise<string> | string;
   invokeSidecar?: (request: SidecarRequest) => Promise<SidecarResponse> | SidecarResponse;
   openDialog?: (options: unknown) => Promise<unknown> | unknown;
 };
@@ -460,6 +461,14 @@ async function openDialog(options: unknown): Promise<unknown> {
   return open(options as Parameters<typeof open>[0]);
 }
 
+async function resolveDesktopDir(): Promise<string> {
+  const harness = e2eHarness();
+  if (harness?.desktopDir) {
+    return harness.desktopDir();
+  }
+  return desktopDir();
+}
+
 async function runSidecar(request: SidecarRequest): Promise<SidecarResponse> {
   const harness = e2eHarness();
   if (harness?.invokeSidecar) {
@@ -574,6 +583,7 @@ export default function Page() {
   const [isPreflighting, setIsPreflighting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isImportingPdfs, setIsImportingPdfs] = useState(false);
+  const isImportingPdfsRef = useRef(false);
   // 出力中の経過秒。1秒以上かかった異常系（権限/ロック/容量で停滞）で「固まっていない」ことを示す。
   const [exportElapsedSec, setExportElapsedSec] = useState(0);
   const [isSavingState, setIsSavingState] = useState(false);
@@ -1007,7 +1017,7 @@ export default function Page() {
 
     async function initializeDefaultOutputDir(): Promise<void> {
       try {
-        const defaultOutputDir = await desktopDir();
+        const defaultOutputDir = await resolveDesktopDir();
         if (!disposed) {
           setOutputDir((current) => current || defaultOutputDir);
         }
@@ -1382,11 +1392,12 @@ export default function Page() {
   }
 
   async function choosePdfs(): Promise<void> {
-    if (isImportingPdfs) {
+    if (isImportingPdfsRef.current) {
       return;
     }
     let requestId = 0;
     const previousStatus = statusState;
+    isImportingPdfsRef.current = true;
     setIsImportingPdfs(true);
     setStatus("PDFを選択しています…");
     try {
@@ -1500,6 +1511,7 @@ export default function Page() {
       }
       setStatus(`PDF取込エラー: ${displayError(error)}`, "danger");
     } finally {
+      isImportingPdfsRef.current = false;
       setIsImportingPdfs(false);
     }
   }
@@ -1634,7 +1646,7 @@ export default function Page() {
   async function resetOutputDir(): Promise<void> {
     invalidateWorkspaceRequests();
     try {
-      setOutputDir(await desktopDir());
+      setOutputDir(await resolveDesktopDir());
     } catch {
       setOutputDir("");
     }

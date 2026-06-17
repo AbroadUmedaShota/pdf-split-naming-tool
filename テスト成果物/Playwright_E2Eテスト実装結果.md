@@ -3,8 +3,8 @@
 ## 1. 実装対象
 
 - 対象アプリ: apps/desktop（Next.js）http://localhost:3000
-- 実行手段: STEP1取込E2Eハーネス（`?e2e=step1`）と dev preview モード（`?dev=<stepId>`）。Tauri/Python サイドカー無しで、ファイル選択・sidecar応答を差し替えたUI状態遷移と、dev preview の決定論的UIを確認する。
-- 実装範囲: STEP1優先テストケース TC-E2E-S1-001〜006 / TC-E2E-S1-011 / TC-E2E-S1-012 / TC-E2E-S1-020〜023 / TC-E2E-S1-025〜026、および dev preview で決定論的に再現できる TC-E2E-011 / TC-E2E-B6 / TC-E2E-B8 / TC-E2E-C1 / TC-E2E-C2。
+- 実行手段: STEP1取込E2Eハーネス（`?e2e=step1`）と dev preview モード（`?dev=<stepId>`）。Tauri/Python サイドカー無しで、ファイル選択・desktopDir・sidecar応答を差し替えたUI状態遷移と、dev preview の決定論的UIを確認する。
+- 実装範囲: STEP1優先テストケース TC-E2E-S1-001〜006 / TC-E2E-S1-011 / TC-E2E-S1-012 / TC-E2E-S1-020〜023 / TC-E2E-S1-025〜029、および dev preview で決定論的に再現できる TC-E2E-011 / TC-E2E-B6 / TC-E2E-B8 / TC-E2E-C1 / TC-E2E-C2。
 
 ## 2. 参照資料
 
@@ -49,6 +49,9 @@
 | TC-E2E-S1-023 | 取込失敗時の画面表示とコンソール状態を証跡化できる | apps/desktop/e2e/desktop-shell.e2e.spec.js | http://localhost:3000/?e2e=step1 | E2E | E2Eテスト一覧_STEP1優先.md | R-STEP1 | 作成済み |
 | TC-E2E-S1-025 | 複数PDFを同時選択して全件成功時に一覧順・件数・プレビューが反映される | apps/desktop/e2e/desktop-shell.e2e.spec.js | http://localhost:3000/?e2e=step1 | E2E | E2Eテスト一覧_STEP1優先.md | R-STEP1/R002 | 作成済み |
 | TC-E2E-S1-026 | 初回プレビュー失敗時もPDFは一覧に残り取込済みとして切り分けできる | apps/desktop/e2e/desktop-shell.e2e.spec.js | http://localhost:3000/?e2e=step1 | E2E | E2Eテスト一覧_STEP1優先.md | R-STEP1/R001 | 作成済み |
+| TC-E2E-S1-027 | 出力先のキャンセル・再設定・デスクトップ戻しでSTEP1完了条件が壊れない | apps/desktop/e2e/desktop-shell.e2e.spec.js | http://localhost:3000/?e2e=step1 | E2E | E2Eテスト一覧_STEP1優先.md | R-STEP1/R007 | 作成済み |
+| TC-E2E-S1-028 | PDF選択中に再クリックしても取込ダイアログが二重起動しない | apps/desktop/e2e/desktop-shell.e2e.spec.js | http://localhost:3000/?e2e=step1 | E2E | E2Eテスト一覧_STEP1優先.md | R-STEP1/R007 | 作成済み |
+| TC-E2E-S1-029 | PDF追加後も出力先と共通項目を維持する | apps/desktop/e2e/desktop-shell.e2e.spec.js | http://localhost:3000/?e2e=step1 | E2E | E2Eテスト一覧_STEP1優先.md | R-STEP1 | 作成済み |
 | TC-E2E-011 | 検索ハイライト表示中にページ移動すると前ページのハイライトが残らない | apps/desktop/e2e/desktop-shell.e2e.spec.js | http://localhost:3000/?dev=split | E2E | テスト設計.md TD049 / ISS-030 NF-U5（page.tsx clearSearchHighlights） | R011 | 作成済み |
 | TC-E2E-B6 | プレビューの表示モード・スライダー・Ctrlホイールでズーム状態が反映される | apps/desktop/e2e/desktop-shell.e2e.spec.js | http://localhost:3000/?dev=split | E2E | 手動受入チェックリスト.md B6/B7 | R001/R011 | 作成済み |
 | TC-E2E-B8 | STEP2/STEP3の矢印ナビと入力欄フォーカス中のガードが動作する | apps/desktop/e2e/desktop-shell.e2e.spec.js | http://localhost:3000/?dev=split / ?dev=input | E2E | 手動受入チェックリスト.md B8 | R001/R012 | 作成済み |
@@ -59,7 +62,7 @@
 
 dev preview の挙動を Playwright で実機調査（ステッパー `data-testid=step-<id>` 全4ステップ確認、各ステップの UI 要素・ハイライト矩形・出力サンプル・pageerror 無しを確認）した結果、自動化可能なのは「dev preview で決定論的に再現できる UI 観点」に限られる。
 
-- **TC-E2E-S1-001〜006 / TC-E2E-S1-011 / TC-E2E-S1-012 / TC-E2E-S1-020〜023 / TC-E2E-S1-025〜026 を実装**: `?e2e=step1` では dev preview を無効化し、`window.__PDF_TOOL_E2E__` で Tauri dialog と sidecar 応答を差し替える。初期表示、ファイル選択呼び出し、正常取込、出力先設定後のSTEP2遷移、選択キャンセル、`pdf_info` 失敗、複数PDF選択時の一部失敗復旧、PDF選択待ち中のボタン無効化、PDF以外/存在しない/アクセス不可相当パスの未混入、連続追加/重複排除、削除/全クリア/再取込、取込失敗時の証跡添付、複数PDF全件成功、初回プレビュー失敗時の切り分け表示を実DOMで判定する。
+- **TC-E2E-S1-001〜006 / TC-E2E-S1-011 / TC-E2E-S1-012 / TC-E2E-S1-020〜023 / TC-E2E-S1-025〜029 を実装**: `?e2e=step1` では dev preview を無効化し、`window.__PDF_TOOL_E2E__` で Tauri dialog、desktopDir、sidecar 応答を差し替える。初期表示、ファイル選択呼び出し、正常取込、出力先設定後のSTEP2遷移、選択キャンセル、`pdf_info` 失敗、複数PDF選択時の一部失敗復旧、PDF選択待ち中のボタン無効化、PDF以外/存在しない/アクセス不可相当パスの未混入、連続追加/重複排除、削除/全クリア/再取込、取込失敗時の証跡添付、複数PDF全件成功、初回プレビュー失敗時の切り分け表示、出力先キャンセル/再設定/デスクトップ戻し、PDF選択中の二重起動防止、PDF追加後の出力先・共通項目維持を実DOMで判定する。
 - **TC-E2E-011 を実装**: split ステップ（4ページ目）で検索ハイライト矩形（`.search-highlight-rect` / `.search-highlight-layer`）が描画されることを確認し、4ページ目以外の検索結果（8ページ目）をクリックして実際にページを移動（現在ページ表示 4→8）させ、移動後に前ページのハイライトが DOM に残らないことを判定した。`selectSearchResult → selectPageForPreview → clearSearchHighlights` は dev preview でも実コードパスで動作するため、期待結果「前ページのハイライトが残らない（NF-U5）」を直接判定できる。
 - **TC-E2E-B6 / TC-E2E-B8 / TC-E2E-C1 / TC-E2E-C2 を実装**: dev preview の固定データで、表示モード・ズーム・Ctrl+ホイール、STEP2/STEP3矢印ナビ、入力欄フォーカス中ガード、検索支援、インデックス候補、白紙候補を実DOMで判定する。
 
@@ -80,15 +83,15 @@ npm run test:e2e
 結果:
 
 ```
-Running 19 tests using 1 worker
-19 passed
+Running 22 tests using 1 worker
+22 passed
 ```
 
-- TC-E2E-S1-001〜006、TC-E2E-S1-011、TC-E2E-S1-012、TC-E2E-S1-020〜023、TC-E2E-S1-025〜026、TC-E2E-011、TC-E2E-B6、TC-E2E-B8、TC-E2E-C1、TC-E2E-C2: **Pass**。
+- TC-E2E-S1-001〜006、TC-E2E-S1-011、TC-E2E-S1-012、TC-E2E-S1-020〜023、TC-E2E-S1-025〜029、TC-E2E-011、TC-E2E-B6、TC-E2E-B8、TC-E2E-C1、TC-E2E-C2: **Pass**。
 - webServer は既存 dev server（ポート3000）を再利用。常駐プロセスはテスト後に残さない設計（reuseExistingServer・本フェーズ終了時に手動起動分も停止）。
 
 ## 7. トレーサビリティ確認
 
-- 実装テスト（TC-E2E-S1-001〜006、TC-E2E-S1-011、TC-E2E-S1-012、TC-E2E-S1-020〜023、TC-E2E-S1-025〜026、TC-E2E-011、TC-E2E-B6、TC-E2E-B8、TC-E2E-C1、TC-E2E-C2）: テスト関数タイトルに TC-ID を含み、近傍コメントに `TC / Risk` または `TC / TD / TV / TA / Risk / Spec` を保持。
+- 実装テスト（TC-E2E-S1-001〜006、TC-E2E-S1-011、TC-E2E-S1-012、TC-E2E-S1-020〜023、TC-E2E-S1-025〜029、TC-E2E-011、TC-E2E-B6、TC-E2E-B8、TC-E2E-C1、TC-E2E-C2）: テスト関数タイトルに TC-ID を含み、近傍コメントに `TC / Risk` または `TC / TD / TV / TA / Risk / Spec` を保持。
 - 退避テスト（17件）: `未実装テストケース_E2E自動.md` に元 TD/TV/TA/Risk・退避理由・必要対応・関連質問 ID（DQ03）付きで記載。
-- E2E レーン 18 件（TC-E2E-001〜018）の内訳: 実装 1・退避 17。STEP1優先/追加のブラウザE2E 14件、実機E2E系 8件、STEP2/STEP3操作系 4件を現行資料に反映済み。欠落・取りこぼしなし。
+- E2E レーン 18 件（TC-E2E-001〜018）の内訳: 実装 1・退避 17。STEP1優先/追加のブラウザE2E 17件、実機E2E系 8件、STEP2/STEP3操作系 4件を現行資料に反映済み。欠落・取りこぼしなし。
