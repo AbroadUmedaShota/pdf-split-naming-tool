@@ -2,7 +2,7 @@ import { chromium, expect } from "@playwright/test";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import net from "node:net";
 
 const appPath =
@@ -12,6 +12,8 @@ const keepTemp = process.env.PDF_ORGANIZER_KEEP_INSTALLED_CORE_TMP === "1";
 const screenshotPath =
   process.env.PDF_ORGANIZER_INSTALLED_CORE_SCREENSHOT ??
   join(tmpdir(), `pdf-tool-installed-core-smoke-${Date.now()}.png`);
+const providedPdfPath = process.env.PDF_ORGANIZER_INSTALLED_CORE_PDF_PATH?.trim();
+const expectedPageCount = process.env.PDF_ORGANIZER_INSTALLED_CORE_EXPECTED_PAGES?.trim();
 
 function buildPdf(objects) {
   let body = "%PDF-1.4\n";
@@ -119,10 +121,17 @@ async function main() {
   }
 
   const tempRoot = mkdtempSync(join(tmpdir(), "pdf-tool-installed-core-"));
-  const pdfPath = join(tempRoot, "Core Smoke 日本語 path.pdf");
+  const pdfPath = providedPdfPath ? resolve(providedPdfPath) : join(tempRoot, "Core Smoke 日本語 path.pdf");
+  const pdfName = basename(pdfPath);
   const outputDir = join(tempRoot, "output folder");
   mkdirSync(outputDir, { recursive: true });
-  writeSamplePdf(pdfPath);
+  if (providedPdfPath) {
+    if (!existsSync(pdfPath)) {
+      throw new Error(`Provided PDF was not found: ${pdfPath}`);
+    }
+  } else {
+    writeSamplePdf(pdfPath);
+  }
 
   const port = await freePort();
   let browser = null;
@@ -166,8 +175,13 @@ async function main() {
     await expect(page.getByRole("heading", { name: "PDF整理ツール" })).toBeVisible({ timeout: 30_000 });
 
     await page.getByRole("button", { name: "PDFを選択" }).first().click();
-    await expect(page.getByText("Core Smoke 日本語 path.pdf").first()).toBeVisible({ timeout: 120_000 });
-    await expect(page.getByText("2ページ").first()).toBeVisible({ timeout: 120_000 });
+    await expect(page.getByText(pdfName).first()).toBeVisible({ timeout: 120_000 });
+    const pageCountText = expectedPageCount || (providedPdfPath ? null : "2");
+    if (pageCountText) {
+      await expect(page.getByText(`${pageCountText}ページ`).first()).toBeVisible({ timeout: 120_000 });
+    } else {
+      await expect(page.locator(".queue-row").first()).toContainText(/\d+ページ/, { timeout: 120_000 });
+    }
     await expect(page.locator('[role="status"]')).toContainText("1件のPDFを読み込みました。", { timeout: 120_000 });
 
     await page.getByRole("button", { name: "出力フォルダ" }).click();
@@ -211,6 +225,7 @@ async function main() {
         {
           ok: true,
           appPath,
+          pdfPath,
           outputDir: keepTemp ? outputDir : undefined,
           outputs,
           screenshotPath,
