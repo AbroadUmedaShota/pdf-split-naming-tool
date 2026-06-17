@@ -130,6 +130,23 @@ async function pressWindowShortcut(page, key) {
   }, key);
 }
 
+async function expectNoHorizontalOverflow(page, label) {
+  const overflow = await page.evaluate(() => {
+    const width = Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth ?? 0);
+    return width - document.documentElement.clientWidth;
+  });
+  expect(overflow, `${label} はページ全体の横スクロールを発生させない`).toBeLessThanOrEqual(2);
+}
+
+async function expectInsideViewport(locator, label) {
+  const box = await locator.boundingBox();
+  expect(box, `${label} が表示領域を持つ`).not.toBeNull();
+  const viewport = locator.page().viewportSize();
+  expect(viewport, 'viewport が取得できる').not.toBeNull();
+  expect(box.x, `${label} の左端が画面外にはみ出さない`).toBeGreaterThanOrEqual(-1);
+  expect(box.x + box.width, `${label} の右端が画面外にはみ出さない`).toBeLessThanOrEqual(viewport.width + 1);
+}
+
 // 対象: apps/desktop（Next.js）http://localhost:3000 を STEP1 ハーネス（?e2e=step1）と
 // dev preview モード（?dev=<stepId>）で検証する。
 //
@@ -137,11 +154,10 @@ async function pressWindowShortcut(page, key) {
 //   - STEP1 はファイル選択とsidecar応答をハーネス化し、PDF取込のUI遷移を自動化する。
 //   - dev preview では「決定論的に再現できる UI 観点」のみ自動化する。
 //   - 処理中状態の注入・旧応答破棄・部分失敗 summary 注入・確認ダイアログ発火・リクエストゲート・
-//     再採番/affix 編集の動的動作・ステップ遷移ガード（dev preview ではバイパスされる）は dev preview の
+//     再採番・ステップ遷移ガード（dev preview ではバイパスされる）は dev preview の
 //     静的 early-return 設計で再現できないため、本ファイルでは自動化せず未実装テストケースへ退避する。
-//   - dev preview で自動化したのは TC-E2E-011（検索ハイライトのページ移動後残留なし・NF-U5）。
-//     dev preview のページ移動（selectPageForPreview→clearSearchHighlights）は実コードパスで動作するため、
-//     期待結果「前ページのハイライトが残らない」を実 DOM で判定できる。
+//   - dev preview で自動化したのは TC-E2E-011（検索ハイライト残留なし）、TC-E2E-B6/B8/C1/C2/C3/C4。
+//     dev preview でも実コードパスで動くページ移動、入力編集、候補選択、表示モード、レイアウトを実 DOM で判定する。
 
 test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
   test('TC-E2E-S1-001 STEP1初期表示でPDF未選択状態とPDF選択ボタンが表示される', async ({ page }) => {
@@ -787,5 +803,70 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await expect.poll(async () => await readCurrentPage(page)).toBe('11');
 
     expect(pageErrors, '候補表示操作で JS 例外が発生しない').toEqual([]);
+  });
+
+  test('TC-E2E-C3 STEP3追加項目を追加・削除・再追加して出力名へ反映できる', async ({ page }) => {
+    // TC: manual C3 / TD069 | Risk: 追加項目の削除・再追加で旧値が復活し誤命名する
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+
+    await openDevStep(page, 'input');
+
+    const filenamePreview = page.locator('.filename-preview strong');
+    await expect(filenamePreview).toHaveText('01_01_002.pdf');
+
+    await page.getByRole('button', { name: /追加（最大2件）/ }).click();
+    await page.getByLabel('追加項目1の値').fill('契約A');
+    await expect(filenamePreview).toHaveText('01_01_002_契約A.pdf');
+
+    await page.getByLabel('追加項目1の挿入位置').selectOption('prefix');
+    await expect(filenamePreview).toHaveText('契約A_01_01_002.pdf');
+    await page.getByRole('button', { name: '一括適用' }).click();
+    await expect(page.locator('.status-pill')).toContainText('全セグメントへ適用しました');
+
+    page.once('dialog', async (dialog) => {
+      await dialog.accept();
+    });
+    await page.getByRole('button', { name: '追加項目1を削除' }).click();
+    await expect(page.getByLabel('追加項目1の値')).toHaveCount(0);
+    await expect(filenamePreview).toHaveText('01_01_002.pdf');
+
+    await page.getByRole('button', { name: /追加（最大2件）/ }).click();
+    await expect(page.getByLabel('追加項目1の値')).toHaveValue('');
+    await expect(filenamePreview).not.toContainText('契約A');
+
+    await page.locator('.mini-row').filter({ hasText: '8-11' }).click();
+    await expect(page.getByLabel('追加項目1の値')).toHaveValue('');
+    await expect(filenamePreview).toHaveText('01_01_003.pdf');
+
+    await page.getByLabel('追加項目1の値').fill('再追加');
+    await expect(filenamePreview).toHaveText('01_01_003_再追加.pdf');
+
+    expect(pageErrors, '追加項目の追加・削除・再追加で JS 例外が発生しない').toEqual([]);
+  });
+
+  test('TC-E2E-C4 1366px幅でSTEP2/STEP3の主要操作面が画面内に収まる', async ({ page }) => {
+    // TC: manual C4 / TD065 | Risk: 業務PC幅でプレビュー・操作群・右ペインが見切れる
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await page.setViewportSize({ width: 1366, height: 768 });
+
+    await openDevStep(page, 'split');
+    await expectNoHorizontalOverflow(page, 'STEP2 1366px');
+    await expectInsideViewport(page.locator('.task-layout.split-focused-layout'), 'STEP2 レイアウト');
+    await expectInsideViewport(page.locator('.split-list'), 'STEP2 左ペイン');
+    await expectInsideViewport(page.locator('.split-work'), 'STEP2 プレビュー');
+    await expectInsideViewport(page.getByLabel('STEP2詳細操作'), 'STEP2 右ペイン');
+    await expect(page.getByRole('button', { name: '現在ページの前で分割' })).toBeVisible();
+
+    await openDevStep(page, 'input');
+    await expectNoHorizontalOverflow(page, 'STEP3 1366px');
+    await expectInsideViewport(page.locator('.task-layout.input-focused-layout'), 'STEP3 レイアウト');
+    await expectInsideViewport(page.locator('.pane.stack').first(), 'STEP3 セグメント一覧');
+    await expectInsideViewport(page.locator('.input-work'), 'STEP3 入力プレビュー');
+    await expectInsideViewport(page.getByLabel('STEP3命名入力'), 'STEP3 命名入力');
+    await expect(page.locator('.filename-preview strong')).toBeVisible();
+
+    expect(pageErrors, '1366px幅レイアウト確認で JS 例外が発生しない').toEqual([]);
   });
 });

@@ -12,12 +12,12 @@ dev preview モード（app/page.tsx `shouldUseDevPreviewMode()`）は、Tauri/P
 - sidecar 応答（部分失敗 summary、欠落エラー応答、旧応答到着）のモック注入
 - 破壊的操作の確認ダイアログ（confirmAction）の発火（dev preview では対象操作が早期 return する）
 - リクエストゲート・連打ガード・世代カウンタの動的検証
-- 再採番・affix 追加削除の動的な状態遷移
+- 再採番の動的な状態遷移
 - ステップ遷移ガード（`requestStepChange` は dev preview では `switchDevPreviewStep` を呼ぶだけでガードをバイパスする）
 
 これらは設計（テスト設計.md TD043-050/047b/056/068/069）でも測定手段が「Playwright（invoke モック）／未導入時は手動」と定義されており、invoke モック注入の test seam が前提である。現状の dev preview には invoke モック注入口が無く、製品コードを変更しない限り注入できない。よって自動化せず退避する。
 
-> 既存E2Eレーン（TC-E2E-001〜018）で実装済みは TC-E2E-011（検索ハイライトのページ移動後残留なし）の1件。STEP1優先/追加E2Eは TC-E2E-S1-001〜006、TC-E2E-S1-011、TC-E2E-S1-012、TC-E2E-S1-020〜023、TC-E2E-S1-025〜029、STEP2/STEP3操作系の追加E2Eは TC-E2E-B6、TC-E2E-B8、TC-E2E-C1、TC-E2E-C2 を `apps/desktop/e2e/desktop-shell.e2e.spec.js` に実装済み。dev preview のページ移動でも `clearSearchHighlights` が実行されるため、TC-E2E-011 の期待結果を実 DOM で判定できる。
+> 既存E2Eレーン（TC-E2E-001〜018）で実装済みは TC-E2E-011（検索ハイライトのページ移動後残留なし）と TC-E2E-C3（TD069 追加項目削除再追加の旧値非復活）の2件。STEP1優先/追加E2Eは TC-E2E-S1-001〜006、TC-E2E-S1-011、TC-E2E-S1-012、TC-E2E-S1-020〜023、TC-E2E-S1-025〜029、STEP2/STEP3操作系の追加E2Eは TC-E2E-B6、TC-E2E-B8、TC-E2E-C1、TC-E2E-C2、TC-E2E-C3、TC-E2E-C4 を `apps/desktop/e2e/desktop-shell.e2e.spec.js` に実装済み。dev preview のページ移動でも `clearSearchHighlights` が実行されるため、TC-E2E-011 の期待結果を実 DOM で判定できる。
 
 ## 2. 参照資料
 
@@ -49,18 +49,17 @@ dev preview モード（app/page.tsx `shouldUseDevPreviewMode()`）は、Tauri/P
 | TC-E2E-015 | TD056 | TV056 | TA010 | E2E | 中 | index_candidates実行中のリクエストゲート・連打ガード・PDF切替後旧結果非残留 | 自動化困難: 同上（invoke 非発火） | invoke モック注入が必要 | DQ03 | page.tsx リクエストゲート | R010/R011 | 未実装 |
 | TC-E2E-016 | TD056 | TV056 | TA010 | E2E | 中 | blank_candidates実行中のリクエストゲート・連打ガード・PDF切替後旧結果非残留 | 自動化困難: 同上（invoke 非発火） | invoke モック注入が必要 | DQ03 | page.tsx リクエストゲート | R010/R011 | 未実装 |
 | TC-E2E-017 | TD068 | TV068 | TA009 | E2E | 中 | 連番入力→空欄化→再採番で連番が再び埋まる（手動固定にならない） | 自動化困難: dev preview は採番入力・再採番ハンドラの動的編集を反映しない（サンプル状態固定） | 非 dev preview の入力編集経路を駆動できる test seam または実機手動確認 | DQ03 | ISS-030 NF-U16、page.tsx | R012 | 未実装 |
-| TC-E2E-018 | TD069 | TV069 | TA009 | E2E | 中 | affix追加→削除→再追加で旧値が全セグメントに復活しない | 自動化困難: dev preview は affix 編集の動的状態遷移を再現しない（サンプル状態固定） | 非 dev preview の affix 編集経路を駆動できる test seam または実機手動確認 | DQ03 | page.tsx affix 復元抑止 | R012 | 未実装 |
 
 ## 4. 実装に必要な確認・対応
 
 1. **invoke モック注入口の整備（最大の前提）**: TD043/044/045/046/047b/056 系（処理中・旧応答破棄・部分失敗・欠落応答・リクエストゲート）は、Playwright から sidecar 応答を差し替えられる test seam が必要。dev preview は invoke を呼ばない設計のため、別途「invoke をモックする dev フラグ」や `window.__E2E_INVOKE_MOCK__` 相当の注入口を製品側に用意する判断（製品コード変更を伴う）が要る。本フェーズの制約「製品コードを変更しない」に抵触するため未実装。
 2. **確認ダイアログ経路（TD048）**: dev preview ではなく invoke モックで実 UI フローを動かす必要がある。確認ダイアログ自体は Playwright の `page.on('dialog')`（window.confirm）または Tauri confirm のフックで検証できるが、発火させる前段の操作が dev preview で早期 return する。
 3. **ステップガード・空状態（TD050）**: dev preview がガードをバイパスするため、非 dev preview かつサンプル状態を空にできる初期化経路が要る。
-4. **採番・affix 編集（TD068/069）**: 動的編集を反映する非 dev preview 経路が要る。
+4. **採番編集（TD068）**: 動的編集を反映する非 dev preview 経路が要る。
 5. 上記いずれも DQ03（Playwright 導入＝確定済み）に加えて「invoke モック test seam の追加可否」というより踏み込んだ判断が前提になる。製品コード変更可否を PM/建設部で確認後に再分類する。
 
 ## 5. トレーサビリティ確認
 
-- 退避 17 件（TC-E2E-001〜010, 012〜018）はすべて元テスト設計 ID（TD043-050/047b/056/068/069）・TV・TA・Risk を保持。
-- 実装 1 件（TC-E2E-011 / TD049 / TV049 / TA009 / R011）、STEP1優先/追加 17 件（TC-E2E-S1-001〜006, TC-E2E-S1-011, TC-E2E-S1-012, TC-E2E-S1-020〜023, TC-E2E-S1-025〜029）、STEP2/STEP3操作系 4 件（TC-E2E-B6, TC-E2E-B8, TC-E2E-C1, TC-E2E-C2）は `apps/desktop/e2e/desktop-shell.e2e.spec.js` に実装し、トレースコメントを保持。
-- E2E レーンの元 18 件（TC-E2E-001〜018）の内訳: 実装 1・退避 17。STEP1優先/追加のブラウザE2E 17件、実機E2E系 8件、STEP2/STEP3操作系 4件を現行資料に反映済み。欠落なし。
+- 退避 16 件（TC-E2E-001〜010, 012〜017）はすべて元テスト設計 ID（TD043-050/047b/056/068）・TV・TA・Risk を保持。
+- 実装 2 件（TC-E2E-011 / TD049 / TV049 / TA009 / R011、TC-E2E-C3 / TD069 / TV069 / TA009 / R012）、STEP1優先/追加 17 件（TC-E2E-S1-001〜006, TC-E2E-S1-011, TC-E2E-S1-012, TC-E2E-S1-020〜023, TC-E2E-S1-025〜029）、STEP2/STEP3操作系 6 件（TC-E2E-B6, TC-E2E-B8, TC-E2E-C1, TC-E2E-C2, TC-E2E-C3, TC-E2E-C4）は `apps/desktop/e2e/desktop-shell.e2e.spec.js` に実装し、トレースコメントを保持。
+- E2E レーンの元 18 件（TC-E2E-001〜018）の内訳: 実装 2・退避 16。STEP1優先/追加のブラウザE2E 17件、実機E2E系 8件、STEP2/STEP3操作系 6件を現行資料に反映済み。欠落なし。

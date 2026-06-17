@@ -10,13 +10,13 @@
 
 - テスト成果物/テスト設計.md（3.10節 E2Eレーン、TD043-TD050, TD056, TD068, TD069, TD047b）
 - テスト成果物/テスト設計_質問票.md（DQ03）
-- テスト成果物/テストケース_質問待ち.md（TC-E2E-001〜TC-E2E-018 を格納）
+- テスト成果物/テストケース_質問待ち.md（TC-E2E-001〜010, TC-E2E-012〜017 を格納）
 
 ## 3. E2E自動テストで実行するテストケース
 
 **Playwright 導入確定（@playwright/test 1.60.0・chromium 導入済み）。実行手段は STEP1 取込E2Eハーネス（`?e2e=step1`）と dev preview モード（`?dev=<stepId>`）を併用する。**
 
-STEP1のPDF取込は、Tauriのファイル選択とsidecar応答をハーネスで差し替えて自動化した。dev preview で決定論的に確認できる検索ハイライト残留なし、表示モード/ズーム/Ctrl+ホイール、STEP2/STEP3矢印ナビ、検索支援、インデックス候補、白紙候補も自動化した。dev preview の静的 early-return 設計で再現できない 17 件（処理中状態注入・旧応答破棄・部分失敗注入・確認ダイアログ発火・リクエストゲート・再採番/affix の動的編集・ステップ遷移ガード）は `未実装テストケース_E2E自動.md` に退避済み（DQ03 は導入確定だが invoke モック test seam が別途必要なため）。
+STEP1のPDF取込は、Tauriのファイル選択とsidecar応答をハーネスで差し替えて自動化した。dev preview で決定論的に確認できる検索ハイライト残留なし、表示モード/ズーム/Ctrl+ホイール、STEP2/STEP3矢印ナビ、検索支援、インデックス候補、白紙候補、STEP3追加項目、1366px幅レイアウトも自動化した。dev preview の静的 early-return 設計で再現できない 16 件（処理中状態注入・旧応答破棄・部分失敗注入・確認ダイアログ発火・リクエストゲート・再採番の動的編集・ステップ遷移ガード）は `未実装テストケース_E2E自動.md` に退避済み（DQ03 は導入確定だが invoke モック test seam が別途必要なため）。
 
 | テストケースID | 元テスト設計ID | テスト観点ID | テストアプローチID | 実行区分 | テストレベル/タイプ | 優先度 | テストケース名 | 前提条件 | 入力/データ | 手順 | 期待結果 | 確認方法/証跡 | 関連質問ID | 仕様 | リスクID | 状態 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -42,8 +42,10 @@ STEP1のPDF取込は、Tauriのファイル選択とsidecar応答をハーネス
 | TC-E2E-B8 | 手動受入B8 | TV-B8 | TA009 | E2E自動 | E2E | 中 | STEP2/STEP3の矢印ナビと入力欄フォーカス中ガードが動作すること | dev preview（?dev=split / ?dev=input）でサンプルPDFとセグメントが描画されている状態 | ArrowLeft / ArrowRight / ArrowUp / ArrowDown、入力欄フォーカス | 1. STEP2で←/→を送る 2. STEP3で↑/↓と←/→を送る 3. 入力欄フォーカス中に→を送る | STEP2/STEP3のページ移動、STEP3のセグメント移動が反映され、入力欄フォーカス中はナビしない | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | - | 手動受入チェックリスト.md B8 | R001/R012 | 作成済み |
 | TC-E2E-C1 | 手動受入C1 | TV-C1 | TA009 | E2E自動 | E2E | 中 | STEP2検索支援で用語選択・検索結果・OCR強調・ハイライトが表示されること | dev preview（?dev=split）で検索用語と検索可能テキストが描画されている状態 | 用語選択モーダル、検索/ハイライト、検索結果、OCR本文 | 1. 選択済み用語を確認する 2. 用語選択モーダルを開閉する 3. 検索/ハイライトを実行する 4. 検索結果、OCR強調、プレビューハイライトを確認する | 用語、検索結果、OCR強調、プレビューハイライトが表示され、JS例外が発生しない | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | - | 手動受入チェックリスト.md C1 | R010/R011 | 作成済み |
 | TC-E2E-C2 | 手動受入C2 | TV-C2 | TA009 | E2E自動 | E2E | 中 | STEP2候補表示でインデックス候補と白紙候補から該当ページへ移動できること | dev preview（?dev=split）で候補データが描画されている状態 | 候補取得、インデックス候補、白紙候補 | 1. 候補取得を実行する 2. インデックス候補と白紙候補を確認する 3. 候補をクリックする | 候補行が表示され、クリックした候補ページへページ番号が移動する | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | - | 手動受入チェックリスト.md C2 | R010/R011 | 作成済み |
+| TC-E2E-C3 | 手動受入C3/TD069 | TV-C3 | TA009 | E2E自動 | E2E | 中 | STEP3追加項目を追加・削除・再追加して出力名へ反映できること | dev preview（?dev=input）でセグメントと命名プレビューが描画されている状態 | 追加項目、prefix/suffix、削除/再追加、セグメント切替 | 1. 追加項目を追加し末尾反映を確認する 2. 位置を先頭へ変更し先頭反映を確認する 3. 一括適用後に削除する 4. 再追加してセグメントを切り替える | prefix/suffix が出力名プレビューへ反映され、削除後の再追加で旧値が復活しない | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | - | 手動受入チェックリスト.md C3 / テスト設計.md TD069 | R002/R012 | 作成済み |
+| TC-E2E-C4 | 手動受入C4/TD065 | TV-C4 | TA015 | E2E自動 | E2E | 中 | 1366px幅でSTEP2/STEP3の主要操作面が画面内に収まること | dev preview（?dev=split / ?dev=input）でサンプルPDFと主要ペインが描画されている状態 | viewport 1366x768 | 1. 1366x768でSTEP2を開く 2. 横スクロールと主要ペインの画面内収まりを確認する 3. STEP3でも同じ確認を行う | ページ横方向のはみ出しがなく、主要カラム・操作ボタン・プレビューが画面内に収まる | Playwright実行ログ・DOM評価（apps/desktop/e2e/desktop-shell.e2e.spec.js） | - | 手動受入チェックリスト.md C4 / テスト設計.md TD065 | R013 | 作成済み |
 
-**測定手段の注記**: TC-E2E-S1 系は `window.__PDF_TOOL_E2E__` でファイル選択、desktopDir、sidecar応答を差し替える。TC-E2E-011 / TC-E2E-B6 / TC-E2E-B8 / TC-E2E-C1 / TC-E2E-C2 は設計記載の「invoke モック」ではなく dev preview を測定手段とする。page.tsx の `clearSearchHighlights` は dev preview のページ移動でも実行されるため、期待結果「前ページのハイライトが残らない（NF-U5）」を実 DOM で判定できる。残り 17 件は invoke モック注入口が無いと再現できず退避。
+**測定手段の注記**: TC-E2E-S1 系は `window.__PDF_TOOL_E2E__` でファイル選択、desktopDir、sidecar応答を差し替える。TC-E2E-011 / TC-E2E-B6 / TC-E2E-B8 / TC-E2E-C1 / TC-E2E-C2 / TC-E2E-C3 / TC-E2E-C4 は設計記載の「invoke モック」ではなく dev preview を測定手段とする。page.tsx の `clearSearchHighlights` は dev preview のページ移動でも実行されるため、期待結果「前ページのハイライトが残らない（NF-U5）」を実 DOM で判定できる。残り 16 件は invoke モック注入口が無いと再現できず退避。
 
 ## 4. 上流成果物への追記・更新
 
@@ -54,7 +56,7 @@ STEP1取込不具合の切り分けを優先するため、`E2Eテスト一覧_S
 | テスト設計ID | 対応テストケースID | 実行区分 | 状態 | 出力ファイル | カバー状況 |
 |---|---|---|---|---|---|
 | STEP1優先 | TC-E2E-S1-001〜TC-E2E-S1-006, TC-E2E-S1-011, TC-E2E-S1-012, TC-E2E-S1-020〜023, TC-E2E-S1-025〜029 | E2E自動 | 作成済み | テストケース_E2E自動.md / E2Eテスト一覧_STEP1優先.md | 実装済み（E2Eハーネス） |
-| 手動受入B6/B7/B8/C1/C2 | TC-E2E-B6, TC-E2E-B8, TC-E2E-C1, TC-E2E-C2 | E2E自動 | 作成済み | テストケース_E2E自動.md / E2Eテスト一覧_STEP1優先.md | 実装済み（dev preview） |
+| 手動受入B6/B7/B8/C1/C2/C3/C4 | TC-E2E-B6, TC-E2E-B8, TC-E2E-C1, TC-E2E-C2, TC-E2E-C3, TC-E2E-C4 | E2E自動 | 作成済み | テストケース_E2E自動.md / E2Eテスト一覧_STEP1優先.md | 実装済み（dev preview） |
 | TD043 | TC-E2E-001 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |
 | TD044 | TC-E2E-002 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |
 | TD045 | TC-E2E-003, TC-E2E-004 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |
@@ -65,7 +67,7 @@ STEP1取込不具合の切り分けを優先するため、`E2Eテスト一覧_S
 | TD050 | TC-E2E-012, TC-E2E-013 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |
 | TD056 | TC-E2E-014〜TC-E2E-016 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |
 | TD068 | TC-E2E-017 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |
-| TD069 | TC-E2E-018 | E2E自動 | 質問待ち | テストケース_質問待ち.md | DQ03待ち |
+| TD069 | TC-E2E-C3 | E2E自動 | 作成済み | テストケース_E2E自動.md | 実装済み（dev preview） |
 
 ## 6. Case Expansion Ledger（ケース展開台帳）
 
@@ -81,4 +83,4 @@ STEP1取込不具合の切り分けを優先するため、`E2Eテスト一覧_S
 | TD050 | 2 | 2 | 0 | TC-E2E-012, TC-E2E-013 | 未完了直行抑止/空状態提示 | — | — | 質問待ち |
 | TD056 | 3 | 3 | 0 | TC-E2E-014〜TC-E2E-016 | search_text/index_candidates/blank_candidatesの切替 | — | — | 質問待ち |
 | TD068 | 1 | 1 | 0 | TC-E2E-017 | 質問待ち | — | — | 質問待ち |
-| TD069 | 1 | 1 | 0 | TC-E2E-018 | 質問待ち | — | — | 質問待ち |
+| TD069 | 1 | 1 | 0 | TC-E2E-C3 | affix削除再追加 | — | 旧値非復活をDOMで判定 | 作成済み |
