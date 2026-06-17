@@ -249,6 +249,48 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await expect(pageErrors, 'pdf_info失敗時に JS 例外が発生しない').toEqual([]);
   });
 
+  test('TC-E2E-S1-023 取込失敗時の画面表示とコンソール状態を証跡化できる', async ({ page }, testInfo) => {
+    // TC: TC-E2E-S1-023 | Risk: 取込失敗時の証跡不足で原因確認や受入判断ができない
+    const consoleErrors = [];
+    const pageErrors = [];
+    page.on('console', (message) => {
+      if (message.type() === 'error') {
+        consoleErrors.push(message.text());
+      }
+    });
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await installStep1Harness(page, { failPdfInfo: true, pdfPath: step1BrokenPdfPath });
+
+    await page.goto('/?e2e=step1', { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'PDFを選択' }).first().click();
+
+    const status = page.locator('[role="status"]');
+    await expect(status).toContainText('PDF取込エラー');
+    await expect(status).toContainText('PDFを開けませんでした');
+    await expect(status).not.toContainText('Error:');
+    await expect(page.locator('.queue-row')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '分割へ進む' })).toBeDisabled();
+
+    const evidence = {
+      consoleErrors,
+      nextDisabled: await page.getByRole('button', { name: '分割へ進む' }).isDisabled(),
+      pageErrors,
+      queueRows: await page.locator('.queue-row').count(),
+      statusText: await status.innerText(),
+    };
+    await testInfo.attach('TC-E2E-S1-023-error-state.json', {
+      body: JSON.stringify(evidence, null, 2),
+      contentType: 'application/json',
+    });
+    await testInfo.attach('TC-E2E-S1-023-error-state.png', {
+      body: await page.screenshot({ fullPage: false }),
+      contentType: 'image/png',
+    });
+
+    expect(consoleErrors, '取込失敗表示でブラウザ console error が発生しない').toEqual([]);
+    expect(pageErrors, '取込失敗表示で JS 例外が発生しない').toEqual([]);
+  });
+
   test('TC-E2E-S1-011 複数PDF選択時に一部失敗しても読めるPDFを取り込む', async ({ page }) => {
     // TC: TC-E2E-S1-011 | Risk: 複数選択時に1件の不正PDFで全件取り込みが失敗する
     const pageErrors = [];
@@ -527,5 +569,60 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     }).toBe('5');
 
     expect(pageErrors, '矢印ナビ操作で JS 例外が発生しない').toEqual([]);
+  });
+
+  test('TC-E2E-C1 STEP2検索支援で用語選択・検索結果・OCR強調・ハイライトが表示される', async ({ page }) => {
+    // TC: manual C1 | Risk: 検索支援が分割判断の補助として使えない
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+
+    await openDevStep(page, 'split');
+
+    const selectedTerms = page.getByLabel('選択中のハイライト用語');
+    await expect(selectedTerms).toContainText('契約書');
+    await expect(selectedTerms).toContainText('請求書');
+
+    await page.getByRole('button', { name: '用語を選択' }).click();
+    await expect(page.getByRole('dialog', { name: 'ハイライト対象用語' })).toBeVisible();
+    await page.getByRole('button', { name: '閉じる' }).click();
+
+    await page.getByRole('button', { name: '検索/ハイライト' }).click();
+    await expect(page.locator('[role="status"]')).toContainText('DEVプレビューの検索結果を表示しました。');
+    await expect(page.locator('.search-result-row')).toHaveCount(2);
+    await expect(page.locator('.search-result-row').nth(0)).toContainText('4ページ');
+    await expect(page.locator('.search-result-row').nth(0)).toContainText('契約書 / 請求書');
+    await expect(page.locator('.ocr-search-mark')).toHaveCount(2);
+    await expect
+      .poll(async () => (await countSearchHighlights(page)).total, {
+        message: '検索後にプレビュー上のハイライトが表示される',
+        timeout: 5000,
+      })
+      .toBeGreaterThan(0);
+
+    expect(pageErrors, '検索支援操作で JS 例外が発生しない').toEqual([]);
+  });
+
+  test('TC-E2E-C2 STEP2候補表示でインデックス候補と白紙候補から該当ページへ移動できる', async ({ page }) => {
+    // TC: manual C2 | Risk: 候補ページを分割判断の起点として確認できない
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+
+    await openDevStep(page, 'split');
+
+    await page.getByRole('button', { name: '候補取得' }).click();
+    await expect(page.locator('[role="status"]')).toContainText('DEVプレビューの候補検索結果を表示しました。');
+    await expect(page.locator('.index-candidate-row')).toHaveCount(3);
+    await expect(page.locator('.index-candidate-row').nth(0)).toContainText('1ページ');
+    await expect(page.locator('.index-candidate-row').nth(0)).toContainText('表紙');
+    await expect(page.locator('.blank-candidate-row')).toHaveCount(1);
+    await expect(page.locator('.blank-candidate-row')).toContainText('11ページ');
+
+    await page.locator('.index-candidate-row').filter({ hasText: '1ページ' }).click();
+    await expect.poll(async () => await readCurrentPage(page)).toBe('1');
+
+    await page.locator('.blank-candidate-row').filter({ hasText: '11ページ' }).click();
+    await expect.poll(async () => await readCurrentPage(page)).toBe('11');
+
+    expect(pageErrors, '候補表示操作で JS 例外が発生しない').toEqual([]);
   });
 });
