@@ -4,9 +4,8 @@ import { dirname } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// E2E は Tauri/Python サイドカー無しで動かすため、dev preview モード（?dev=<stepId>）を使う。
-// shouldUseDevPreviewMode()（app/page.tsx）が「非Tauri ＆ localhost ＆ NODE_ENV=development」で
-// サンプル状態の本番想定 UI を描画する。baseURL=http://localhost:3000、chromium のみ。
+// E2E は Tauri/Python サイドカー無しで動かすため、STEP1 ハーネス（?e2e=step1）と
+// dev preview モード（?dev=<stepId>）を使う。baseURL=http://localhost:3000、chromium のみ。
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
@@ -34,7 +33,7 @@ export default defineConfig({
     url: 'http://localhost:3000',
     cwd: __dirname,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 240_000,
     stdout: 'pipe',
     stderr: 'pipe',
   },

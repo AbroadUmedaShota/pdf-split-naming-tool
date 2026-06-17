@@ -1,11 +1,13 @@
 {
   "name": "pdf-organizer-desktop",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:sidecar": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-sidecar.ps1",
+    "build:bundle": "npm run build:sidecar && npm run build",
     "typecheck": "tsc --noEmit",
     "test:desktop": "node scripts/check-all.mjs",
     "test:step-render": "node scripts/check-step-render.mjs",
@@ -15,8 +17,13 @@
     "test:output-state": "node scripts/check-output-state.mjs",
     "test:segment-state": "node scripts/check-segment-state.mjs",
     "test:e2e": "playwright test",
+    "test:installed-step1": "node scripts/installed-step1-smoke.mjs",
+    "test:installed-core": "node scripts/installed-core-smoke.mjs",
+    "test:installed-state": "node scripts/installed-state-smoke.mjs",
+    "test:installed-native-dialog": "node scripts/installed-native-dialog-smoke.mjs",
     "tauri": "tauri",
-    "release:manifest": "node scripts/create-updater-manifest.mjs"
+    "release:manifest": "node scripts/create-updater-manifest.mjs",
+    "release:check": "node scripts/check-release-assets.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",
