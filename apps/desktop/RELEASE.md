@@ -55,13 +55,30 @@ $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$null
 4. `src-tauri\target\release\bundle\` 配下に生成された Windows installer、
    updater artifact、`.sig` を確認します。
 5. GitHub Releases 用の `latest.json` を生成します。
+   `release:manifest` は `release-assets` を現行バージョンの3ファイルだけで再生成します。
 
 ```powershell
 cd apps\desktop
 npm run release:manifest
+npm run release:check
 ```
 
-6. GitHub Releases に installer、`.sig`、`latest.json` をアップロードします。
+6. PR を `main` へ取り込み、公開承認後に Git tag と GitHub Release を作成します。
+   既に tag / Release がある場合は作成をスキップし、asset の差し替えだけ行います。
+
+```powershell
+$repo = "AbroadUmedaShota/pdf-split-naming-tool"
+$version = "0.1.4"
+$tag = "v$version"
+
+gh release create $tag `
+  --repo $repo `
+  --target main `
+  --title "PDF整理ツール $tag" `
+  --notes "PDF整理ツール $version"
+```
+
+7. GitHub Releases に installer、`.sig`、`latest.json` をアップロードします。
    アップロードには `src-tauri\target\release\bundle\release-assets\` 配下の ASCII 名ファイルを使います。
    installer と `.sig` はそのままアップロードします。
 
@@ -73,7 +90,8 @@ $tag = "v$version"
 gh release upload $tag `
   "src-tauri\target\release\bundle\release-assets\pdf-organizer-desktop_${version}_x64-setup.exe" `
   "src-tauri\target\release\bundle\release-assets\pdf-organizer-desktop_${version}_x64-setup.exe.sig" `
-  --repo $repo
+  --repo $repo `
+  --clobber
 ```
 
 `latest.json` は GitHub の `releases/latest/download/latest.json` 経路で
@@ -106,7 +124,7 @@ gh api -X PATCH "repos/$repo/releases/assets/$assetId" -f name="latest.json" | O
 https://github.com/AbroadUmedaShota/pdf-split-naming-tool/releases/latest/download/latest.json
 ```
 
-7. 公開後に配信 URL と manifest の中身を確認します。
+8. 公開後に配信 URL と manifest の中身を確認します。
 
 ```powershell
 $repo = "AbroadUmedaShota/pdf-split-naming-tool"

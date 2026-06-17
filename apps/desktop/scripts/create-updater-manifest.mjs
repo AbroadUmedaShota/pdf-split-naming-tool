@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -46,10 +46,22 @@ function releaseAssetNameFor(sourceName) {
   return `pdf-organizer-desktop_${packageJson.version}${suffix}`;
 }
 
+function cleanReleaseAssets() {
+  mkdirSync(releaseAssetRoot, { recursive: true });
+  for (const entry of readdirSync(releaseAssetRoot, { withFileTypes: true })) {
+    if (!entry.isFile()) {
+      continue;
+    }
+    if (entry.name === "latest.json" || entry.name.startsWith("pdf-organizer-desktop_")) {
+      unlinkSync(join(releaseAssetRoot, entry.name));
+    }
+  }
+}
+
 const { assetName, assetPath, signaturePath } = findUpdaterAsset();
 const releaseAssetName = releaseAssetNameFor(assetName);
 const releaseSignatureName = `${releaseAssetName}.sig`;
-mkdirSync(releaseAssetRoot, { recursive: true });
+cleanReleaseAssets();
 copyFileSync(assetPath, join(releaseAssetRoot, releaseAssetName));
 copyFileSync(signaturePath, join(releaseAssetRoot, releaseSignatureName));
 

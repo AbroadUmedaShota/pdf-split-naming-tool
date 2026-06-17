@@ -22,7 +22,8 @@
     "test:installed-state": "node scripts/installed-state-smoke.mjs",
     "test:installed-native-dialog": "node scripts/installed-native-dialog-smoke.mjs",
     "tauri": "tauri",
-    "release:manifest": "node scripts/create-updater-manifest.mjs"
+    "release:manifest": "node scripts/create-updater-manifest.mjs",
+    "release:check": "node scripts/check-release-assets.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",
