@@ -7,7 +7,8 @@
 ## 状態
 
 - 作成日: 2026-05-19
-- 現在の段階: Tauri/Next.js のデスクトップアプリ本体と、Python sidecar のPDF処理部品へ整理済み。現行MVP仕様を基準に、STEP2検索支援、STEP3追加項目命名、Tauri updater 配布ラインまで実装済み
+- 現在のバージョン: v0.1.4（GitHub Release 公開済み）
+- 現在の段階: Tauri/Next.js のデスクトップアプリ本体と、Python sidecar のPDF処理部品へ整理済み。現行MVP仕様を基準に、STEP2検索支援、STEP3追加項目命名、Tauri updater 配布ライン、sidecar 常駐プロセス化（`--sidecar-serve`）、PyInstaller による sidecar exe のインストーラ同梱まで実装済み。主要フローの受入は Pass 済み（詳細は `docs/05_実装状況.md`）
 - 元ソース: 主要なローカル開発置き場では未発見
 - ビルド済み配布物: `\\ao100\103_共有\アプリケーション\自社開発シリーズ\PDF分割命名ツール_v3_1_1`
 - 解析済み入口モジュール: `pdf_splitter_app.py`
@@ -62,7 +63,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\sample-pdf-smoke.ps1
 
 ## 次に決めること
 
-1. 現場PDFで、PDF取込、手動分割、検索支援、追加項目命名、出力が成立するか人間が受入確認する。
-2. updater配布は `apps/desktop/RELEASE.md` に沿って、旧バージョンからの検出、インストール、再起動後のバージョン表示まで確認する。
-3. `recovery/` のフォルダ名を将来 `sidecar/` または `backend/` へ変更するか判断する。
+1. 現場PDFでの手動受入（PDF取込・手動分割・検索支援・追加項目命名・出力の通し確認）は v0.1.4 インストール版で確認済み。次回リリース前に同じスモークを再実施する。
+2. updater配布は v0.1.3 → v0.1.4 の更新検出・インストール・再起動後バージョン表示を確認済み（`npm run test:installed-updater`）。次回リリース時は同じ手順で再確認する。
+3. `recovery/` のフォルダ名を将来 `sidecar/` または `backend/` へ変更するか判断する（後続課題）。
 4. 画像PDFへのOCRエンジン内蔵、検索/白紙候補からの自動分割、プリセット管理、履歴などの拡張機能は、現行MVPの運用確認後に別Issueで判断する。
+5. 現行 Tauri 版と次期 PySide6 版のリリースライン分離は `docs/04_移行ロードマップ.md` に方針を記載済み。移行判断はそのロードマップのフェーズゲートに従う。

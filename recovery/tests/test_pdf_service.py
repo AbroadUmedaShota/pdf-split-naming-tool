@@ -92,7 +92,7 @@ def test_page_preview_rejects_page_after_document_page_count(tmp_path: Path) -> 
     source = tmp_path / "source.pdf"
     make_pdf(source, 3)
 
-    with pytest.raises(ValueError, match="exceeds document page count"):
+    with pytest.raises(ValueError, match="page_no must be between"):
         PdfService.page_preview_data_url(source, 4)
 
 
@@ -159,7 +159,7 @@ def test_page_preview_rejects_zero_page_number(tmp_path: Path) -> None:
     source = tmp_path / "source.pdf"
     make_pdf(source, 1)
 
-    with pytest.raises(ValueError, match="1-based"):
+    with pytest.raises(ValueError, match="page_no must be between"):
         PdfService.page_preview_data_url(source, 0)
 
 

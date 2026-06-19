@@ -5,6 +5,10 @@ on:
   pull_request:
 
 jobs:
+  # ------------------------------------------------------------------
+  # Job 1: Python recovery tests + Node desktop tests + TypeScript check
+  # (既存の verify.ps1 をそのまま実行)
+  # ------------------------------------------------------------------
   verify:
     runs-on: windows-2025-vs2026
 
@@ -34,3 +38,75 @@ jobs:
 
       - name: Run verification
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify.ps1
+
+  # ------------------------------------------------------------------
+  # Job 2: Rust unit tests (pure-logic, no Python subprocess)
+  # py -3.12 を必要とする統合テスト 5 件は #[ignore] で除外済み。
+  # Cargo.lock を使って再現性を確保し、~/.cargo をキャッシュする。
+  # ------------------------------------------------------------------
+  cargo-test:
+    runs-on: windows-2025-vs2026
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Run Rust tests (pure-logic subset)
+        working-directory: apps/desktop/src-tauri
+        # --lib: lib crate のみ対象（bin がある場合でも lib テストに絞る）
+        # デフォルト動作で #[ignore] が付いたテストはスキップされる。
+        run: cargo test --lib
+        timeout-minutes: 15
+
+  # ------------------------------------------------------------------
+  # Job 3: Playwright E2E (chromium / Next.js dev server)
+  # playwright.config.js で CI=true のとき reuseExistingServer:false に
+  # なっており、dev server を自動起動してテスト後に停止する。
+  # ------------------------------------------------------------------
+  e2e:
+    runs-on: windows-2025-vs2026
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Install Playwright browsers (chromium only)
+        working-directory: apps/desktop
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E tests
+        working-directory: apps/desktop
+        run: npm run test:e2e
+        env:
+          CI: 'true'
+        timeout-minutes: 15
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/desktop/e2e/.report/
+          retention-days: 7

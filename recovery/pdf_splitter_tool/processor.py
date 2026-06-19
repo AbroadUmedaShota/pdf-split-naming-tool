@@ -41,12 +41,24 @@ class PdfProcessor:
         return PdfService.page_preview_data_url(pdf_path, page_no, zoom)
 
     @staticmethod
+    def page_preview_data_url_with_count(pdf_path: Path, page_no: int, zoom: float = 1.2) -> tuple[str, int]:
+        return PdfService.page_preview_data_url_with_count(pdf_path, page_no, zoom)
+
+    @staticmethod
     def page_thumbnail_data_url(pdf_path: Path, page_no: int, zoom: float = 0.22) -> str:
         return PdfService.page_thumbnail_data_url(pdf_path, page_no, zoom)
 
     @staticmethod
+    def page_thumbnail_data_url_with_count(pdf_path: Path, page_no: int, zoom: float = 0.22) -> tuple[str, int]:
+        return PdfService.page_thumbnail_data_url_with_count(pdf_path, page_no, zoom)
+
+    @staticmethod
     def page_text(pdf_path: Path, page_no: int) -> str:
         return PdfService.page_text(pdf_path, page_no)
+
+    @staticmethod
+    def page_text_with_count(pdf_path: Path, page_no: int) -> tuple[str, int]:
+        return PdfService.page_text_with_count(pdf_path, page_no)
 
     @staticmethod
     def search_text(
@@ -60,6 +72,10 @@ class PdfProcessor:
     @staticmethod
     def search_highlights(pdf_path: Path, page_no: int, query: str) -> list[dict[str, float]]:
         return PdfService.search_highlights(pdf_path, page_no, query)
+
+    @staticmethod
+    def search_highlights_with_count(pdf_path: Path, page_no: int, query: str) -> tuple[list[dict[str, float]], int]:
+        return PdfService.search_highlights_with_count(pdf_path, page_no, query)
 
     @staticmethod
     def index_candidates(pdf_paths: list[Path], keywords: list[str] | None = None) -> list[dict[str, object]]:

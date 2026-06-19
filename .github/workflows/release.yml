@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # ------------------------------------------------------------------
+  # Build sidecar (PyInstaller --onefile) + Next.js production build,
+  # then verify the expected release assets are in place.
+  #
+  # build:sidecar は PyInstaller を使い数分かかるため、per-PR の verify
+  # job には含めず、タグ push 時のここでのみ実行する。
+  # ------------------------------------------------------------------
+  build-and-check:
+    runs-on: windows-2025-vs2026
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install sidecar build dependencies
+        working-directory: recovery
+        run: python -m pip install -e ".[build]"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Build sidecar + Next.js (build:bundle)
+        working-directory: apps/desktop
+        # build:sidecar: PyInstaller で pdf-splitter-sidecar.exe を生成
+        # build: Next.js 本番ビルド
+        run: npm run build:bundle
+        timeout-minutes: 20
+
+      - name: Verify release assets
+        working-directory: apps/desktop
+        run: node scripts/check-release-assets.mjs
