@@ -1131,7 +1131,6 @@ export default function Page() {
             return;
           }
           if (!response.ok || response.command !== "blank_candidates") {
-            setBlankScanProgress("");
             setStatus("白紙ページの判定に失敗しました", "warning");
             return;
           }
@@ -1143,13 +1142,16 @@ export default function Page() {
             startPage = scannedUntil + 1;
             continue;
           }
-          setBlankScanProgress("");
           return;
         }
       } catch {
         if (pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
-          setBlankScanProgress("");
           setStatus("白紙ページの判定に失敗しました", "warning");
+        }
+      } finally {
+        // 最新リクエストのみがクリアする（古いリクエストのfinallyが新リクエストの進捗を消す退行を防ぐ）。
+        if (pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
+          setBlankScanProgress("");
         }
       }
     }
@@ -1162,44 +1164,50 @@ export default function Page() {
       const pendingPages = Array.from({ length: Math.min(pageCount, MAX_THUMBNAILS) }, (_value, index) => index + 1).filter(
         (pageNo) => !loadedThumbnailKeysRef.current.has(`${pdfPath}#${pageNo}`)
       );
-      if (pendingPages.length) {
-        setThumbnailProgress({ loaded: 0, total: pendingPages.length });
-      }
-      let loadedCount = 0;
-      for (let offset = 0; offset < pendingPages.length; offset += THUMBNAIL_CONCURRENCY) {
-        if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
-          return;
+      try {
+        if (pendingPages.length) {
+          setThumbnailProgress({ loaded: 0, total: pendingPages.length });
         }
-        const chunk = pendingPages.slice(offset, offset + THUMBNAIL_CONCURRENCY);
-        const responses = await Promise.all(
-          chunk.map((pageNo) =>
-            runSidecar({ command: "page_thumbnail", pdf_path: pdfPath, page_no: pageNo })
-              .then((response) => (response.ok && response.command === "page_thumbnail" ? response : null))
-              .catch(() => null)
-          )
-        );
-        if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
-          return;
-        }
-        const batch: Record<string, string> = {};
-        for (const response of responses) {
-          if (response) {
-            const key = `${response.pdf_path}#${response.page_no}`;
-            // 取得試行済みとして記録（無限リトライ防止）。ただし不正な data URL はキャッシュしない。
-            loadedThumbnailKeysRef.current.add(key);
-            if (hasPreviewImageData(response.image_data_url)) {
-              batch[key] = response.image_data_url;
+        let loadedCount = 0;
+        for (let offset = 0; offset < pendingPages.length; offset += THUMBNAIL_CONCURRENCY) {
+          if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
+            return;
+          }
+          const chunk = pendingPages.slice(offset, offset + THUMBNAIL_CONCURRENCY);
+          const responses = await Promise.all(
+            chunk.map((pageNo) =>
+              runSidecar({ command: "page_thumbnail", pdf_path: pdfPath, page_no: pageNo })
+                .then((response) => (response.ok && response.command === "page_thumbnail" ? response : null))
+                .catch(() => null)
+            )
+          );
+          if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
+            return;
+          }
+          const batch: Record<string, string> = {};
+          for (const response of responses) {
+            if (response) {
+              const key = `${response.pdf_path}#${response.page_no}`;
+              // 取得試行済みとして記録（無限リトライ防止）。ただし不正な data URL はキャッシュしない。
+              loadedThumbnailKeysRef.current.add(key);
+              if (hasPreviewImageData(response.image_data_url)) {
+                batch[key] = response.image_data_url;
+              }
             }
           }
+          if (Object.keys(batch).length) {
+            setPageThumbnails((current) => ({ ...current, ...batch }));
+          }
+          loadedCount += chunk.length;
+          setThumbnailProgress({ loaded: loadedCount, total: pendingPages.length });
         }
-        if (Object.keys(batch).length) {
-          setPageThumbnails((current) => ({ ...current, ...batch }));
+      } finally {
+        // 中断（リクエストゲートによる return）・正常完了・例外のいずれの出口でも進捗をクリアする。
+        // ただし最新リクエストのみがクリアする（古いリクエストのfinallyが新リクエストの進捗を消す退行を防ぐ）。
+        // 最新リクエストは pendingPages=0 でも必ずこのfinallyに到達するため、残留はここで解消される。
+        if (pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
+          setThumbnailProgress(null);
         }
-        loadedCount += chunk.length;
-        setThumbnailProgress({ loaded: loadedCount, total: pendingPages.length });
-      }
-      if (pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
-        setThumbnailProgress(null);
       }
 
       await blankPromise;
@@ -2593,7 +2601,7 @@ export default function Page() {
       return;
     }
     try {
-      await revealPath(outputDir);
+      await revealPath(outputDir, outputDir);
     } catch (error) {
       setStatus(`出力フォルダを開けませんでした: ${String(error)}`, "danger");
     }

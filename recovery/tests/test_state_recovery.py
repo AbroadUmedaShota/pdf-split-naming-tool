@@ -89,7 +89,11 @@ def test_state_save_archives_readable_primary_as_backup(tmp_path: Path) -> None:
 
     assert json.loads(manager.state_path.read_text(encoding="utf-8")) == next_state
     assert json.loads(manager.backup_path.read_text(encoding="utf-8")) == original_state
-    assert not manager.tmp_path.exists()
+    # pid 付き tmp は state_path へ replace されて消えているはず。
+    # manager.tmp_path（固定名）ではなく、save() が実際に使う _pid_tmp_path() を確認する。
+    assert not manager._pid_tmp_path().exists()
+    # work_dir 内に *.tmp パターンのファイルが残らないことも合わせて確認する。
+    assert list(tmp_path.glob("*.tmp")) == []
     assert not (tmp_path / f"{STATE_FILENAME}.corrupt").exists()
 
 
@@ -103,7 +107,11 @@ def test_state_save_archives_corrupt_primary_as_corrupt(tmp_path: Path) -> None:
     assert json.loads(manager.state_path.read_text(encoding="utf-8")) == next_state
     assert (tmp_path / f"{STATE_FILENAME}.corrupt").read_text(encoding="utf-8") == "{not valid json"
     assert not manager.backup_path.exists()
-    assert not manager.tmp_path.exists()
+    # pid 付き tmp は state_path へ replace されて消えているはず。
+    # manager.tmp_path（固定名）ではなく、save() が実際に使う _pid_tmp_path() を確認する。
+    assert not manager._pid_tmp_path().exists()
+    # work_dir 内に *.tmp パターンのファイルが残らないことも合わせて確認する。
+    assert list(tmp_path.glob("*.tmp")) == []
 
 
 def test_state_save_validates_tmp_json_before_replacing_primary(monkeypatch, tmp_path: Path) -> None:

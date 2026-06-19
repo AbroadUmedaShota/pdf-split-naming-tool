@@ -33,20 +33,27 @@ def test_load_keeps_readable_backup_when_restore_write_fails(monkeypatch, tmp_pa
 def test_load_keeps_tmp_when_promotion_replace_fails(monkeypatch, tmp_path: Path) -> None:
     manager = StateManager(tmp_path)
     tmp_state = {"schema_version": 1, "input_paths": ["tmp.pdf"], "current_page": 8}
-    write_json(manager.tmp_path, tmp_state)
+    # save() は _pid_tmp_path()（pid 付き名）へ書く。_best_valid_tmp() は iterdir で
+    # STATE_TMP_PREFIX/STATE_TMP_SUFFIX に一致するファイルを収集するため、
+    # テスト側も pid 付き名でファイルを用意しないと _promote_tmp が呼ばれない。
+    pid_tmp = manager._pid_tmp_path()
+    write_json(pid_tmp, tmp_state)
     original_replace = Path.replace
 
     def fail_tmp_promotion(path: Path, target: Path):
-        if path == manager.tmp_path and target == manager.state_path:
+        # target が state_path への replace なら昇格失敗を模擬する。
+        # path == manager.tmp_path（固定名）では pid 付き tmp にマッチしない。
+        if target == manager.state_path and path != manager.state_path:
             raise OSError("simulated tmp promotion failure")
         return original_replace(path, target)
 
     monkeypatch.setattr(Path, "replace", fail_tmp_promotion)
 
     assert manager.load() == tmp_state
-    assert manager.tmp_path.exists()
-    assert json.loads(manager.tmp_path.read_text(encoding="utf-8")) == tmp_state
-    assert not (tmp_path / f"{STATE_TMP_FILENAME}.corrupt").exists()
+    # 昇格 replace が失敗したので pid 付き tmp が残っているはず。
+    assert pid_tmp.exists()
+    assert json.loads(pid_tmp.read_text(encoding="utf-8")) == tmp_state
+    assert not (tmp_path / f"{pid_tmp.name}.corrupt").exists()
     assert not manager.state_path.exists()
 
 
@@ -57,19 +64,24 @@ def test_load_keeps_tmp_when_promotion_replace_fails_after_primary_and_backup_ar
     manager.state_path.write_text("{broken primary", encoding="utf-8")
     manager.backup_path.write_text("{broken backup", encoding="utf-8")
     tmp_state = {"schema_version": 1, "input_paths": ["tmp-after-corrupt.pdf"], "current_page": 9}
-    write_json(manager.tmp_path, tmp_state)
+    # _best_valid_tmp() は iterdir + pid 付き名パターンで収集するため pid 付き名で書く。
+    pid_tmp = manager._pid_tmp_path()
+    write_json(pid_tmp, tmp_state)
     original_replace = Path.replace
 
     def fail_tmp_promotion(path: Path, target: Path):
-        if path == manager.tmp_path and target == manager.state_path:
+        # target が state_path への replace なら昇格失敗を模擬する。
+        # path == manager.tmp_path（固定名）では pid 付き tmp にマッチしない。
+        if target == manager.state_path and path != manager.state_path:
             raise OSError("simulated tmp promotion failure")
         return original_replace(path, target)
 
     monkeypatch.setattr(Path, "replace", fail_tmp_promotion)
 
     assert manager.load() == tmp_state
-    assert manager.tmp_path.exists()
-    assert json.loads(manager.tmp_path.read_text(encoding="utf-8")) == tmp_state
+    # 昇格 replace が失敗したので pid 付き tmp が残っているはず。
+    assert pid_tmp.exists()
+    assert json.loads(pid_tmp.read_text(encoding="utf-8")) == tmp_state
     assert (tmp_path / f"{STATE_FILENAME}.corrupt").exists()
     assert (tmp_path / f"{STATE_BAK_FILENAME}.corrupt").exists()
-    assert not (tmp_path / f"{STATE_TMP_FILENAME}.corrupt").exists()
+    assert not (tmp_path / f"{pid_tmp.name}.corrupt").exists()
