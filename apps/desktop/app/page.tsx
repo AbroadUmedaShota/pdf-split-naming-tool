@@ -48,6 +48,7 @@ import {
   type SidecarSegment
 } from "../lib/sidecar";
 import { resolveMissingSavedPdfRestore, restorableInputPaths } from "../lib/restore-state";
+import { buildSaveStateFilter, shouldRetainSegmentKey } from "../lib/save-state";
 import {
   AFFIX_POSITIONS,
   type AffixDef,
@@ -563,6 +564,11 @@ function segmentPreviewPages(segment: SegmentView): number[] {
 export default function Page() {
   const [activeStep, setActiveStep] = useState<StepId>("import");
   const [pdfFiles, setPdfFiles] = useState<PdfFile[]>([]);
+  // loadState で復元した入力パスの完全リスト（欠損中のパスを含む）。
+  // saveState のフィルタ基準として使い、欠損PDF由来のメタデータを誤って削除しないようにする。
+  // choosePdfs（新規追加）では更新しない: 新規パスは buildSaveStateFilter 側で
+  // 現在ロード中PDF(pdfFiles)として取り込まれるため、ここに足す必要はない。
+  const [savedInputPaths, setSavedInputPaths] = useState<string[]>([]);
   const [currentPdf, setCurrentPdf] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [previewDataUrl, setPreviewDataUrl] = useState("");
@@ -830,6 +836,7 @@ export default function Page() {
     previewCache.clear();
     setActiveStep(step);
     setPdfFiles([{ path: step2ReviewPdfPath, pageCount: 11 }]);
+    setSavedInputPaths([]);
     setCurrentPdf(step2ReviewPdfPath);
     requestedPageRef.current = currentPageForStep;
     setCurrentPage(currentPageForStep);
@@ -1587,6 +1594,9 @@ export default function Page() {
     previewCache.clearPdf(path);
     purgeThumbnailKeysForPath(path);
     setPdfFiles(remaining);
+    // ユーザーが明示的に除去したPDFは savedInputPaths からも除去し、
+    // 以降の saveState でそのPDF由来のメタデータを保持しない。
+    setSavedInputPaths((current) => current.filter((p) => p !== path));
     setSplitPointsByPdf((current) => {
       const next = { ...current };
       delete next[path];
@@ -1638,6 +1648,7 @@ export default function Page() {
     invalidateWorkspaceAndPreviewRequests();
     previewCache.clear();
     setPdfFiles([]);
+    setSavedInputPaths([]);
     setCurrentPdf("");
     requestedPageRef.current = 1;
     setCurrentPage(1);
@@ -2615,24 +2626,37 @@ export default function Page() {
     setIsSavingState(true);
     setStatus("状態を保存しています…");
     try {
-      // 現在のPDF・セグメント構成に存在しないキー（orphan）は永続化しない。
+      // フィルタ基準: 現在ロード中のPDF + 欠損中だが savedInputPaths に保持されているPDF。
+      // これにより欠損PDF由来の segment_metadata / split_points / manual_seq_keys を
+      // 誤って削除しない（PDFを元に戻して再読込すれば値が復活する）。
+      // savedInputPaths に存在しないキーは真のorphanとして従来通り除外する。
+      const loadedPdfPathSet = new Set(pdfFiles.map((file) => file.path));
+      const { allowedPdfPaths, orderedInputPaths } = buildSaveStateFilter({
+        loadedPdfPaths: pdfFiles.map((f) => f.path),
+        savedInputPaths,
+      });
+      // セグメントキーは現在ロード中のPDFからのみ生成されるため、そのまま使う。
+      // 欠損PDF由来のキーは allSegments には存在しないが、segment_metadata 側で allowedPdfPaths で守る。
       const currentSegmentKeys = new Set(allSegments.map((segment) => segment.key));
-      const currentPdfPaths = new Set(pdfFiles.map((file) => file.path));
       const state: AppPersistedState = {
         version: 1,
-        input_paths: pdfFiles.map((file) => file.path),
+        input_paths: orderedInputPaths,
         output_dir: outputDir,
         split_points_by_pdf: Object.fromEntries(
-          Object.entries(splitPointsByPdf).filter(([path]) => currentPdfPaths.has(path))
+          Object.entries(splitPointsByPdf).filter(([path]) => allowedPdfPaths.has(path))
         ),
         segment_metadata: Object.fromEntries(
-          Object.entries(segmentMetadata).filter(([key]) => currentSegmentKeys.has(key))
+          Object.entries(segmentMetadata).filter(([key]) =>
+            shouldRetainSegmentKey(key, currentSegmentKeys, allowedPdfPaths, loadedPdfPathSet)
+          )
         ),
         common_metadata: commonMetadata,
         affix_defs: affixDefs,
         seq_start: seqStart,
         seq_digits: seqDigits,
-        manual_seq_keys: [...manualSeqKeysRef.current].filter((key) => currentSegmentKeys.has(key)),
+        manual_seq_keys: [...manualSeqKeysRef.current].filter((key) =>
+          shouldRetainSegmentKey(key, currentSegmentKeys, allowedPdfPaths, loadedPdfPathSet)
+        ),
         current_pdf: currentPdf,
         current_page: currentPage
       };
@@ -2711,6 +2735,8 @@ export default function Page() {
       // 復元後の分割ステップは未訪問扱いに戻す（分割点があれば done 判定は維持される）。
       setSplitStepVisited(false);
       setPdfFiles(loaded);
+      // 欠損PDFを含む完全な入力パスリストを保持し、次回 saveState のフィルタ基準に使う。
+      setSavedInputPaths(state.input_paths);
       setOutputDir(state.output_dir || outputDir);
       setSplitPointsByPdf(state.split_points_by_pdf ?? {});
       setSegmentMetadata(state.segment_metadata ?? {});

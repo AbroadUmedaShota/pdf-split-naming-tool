@@ -1,5 +1,12 @@
 const requiredMetadata = ["box_no", "binder_no", "seq"] as const;
 const invalidFilenameChars = /[<>:"/\\|?*]/g;
+// Full-width variants of the ASCII forbidden characters above (U+FF1C … U+FF0A).
+// NFKC normalization would also convert these, but it would inadvertently transform
+// unrelated full-width characters (e.g. full-width alphanumerics, Japanese punctuation).
+// Listing only the forbidden characters keeps user-intended full-width text intact.
+const invalidFilenameCharsFullwidth = /[＜＞：＂／＼｜？＊]/g;
+// Control characters U+0000–U+001F (includes \n, \r, \t) are not valid in Windows filenames.
+const controlChars = /[\x00-\x1f]/g;
 
 // 箱No・バインダーNoのゼロ埋め桁数（固定）。seqの桁数は seqDigits で可変。
 const fixedTokenPads: ReadonlyArray<readonly [string, number]> = [
@@ -50,10 +57,35 @@ const windowsReservedStems = new Set([
 ]);
 
 export function sanitizeFilename(filename: string): string {
-  const sanitized = filename.replace(invalidFilenameChars, "_").trim().replace(/[. ]+$/g, "").replace(/\s+/g, " ");
+  // Remove control characters U+0000–U+001F (includes \n, \r, \t).
+  let sanitized = filename.replace(controlChars, "_");
+  // Replace ASCII forbidden characters.
+  sanitized = sanitized.replace(invalidFilenameChars, "_");
+  // Replace full-width variants of the forbidden characters.
+  sanitized = sanitized.replace(invalidFilenameCharsFullwidth, "_");
+  sanitized = sanitized.trim();
+  // Strip trailing dots/spaces from the stem only, keeping the extension intact.
+  // Strategy: split on the last dot, strip trailing ". " from the stem, then
+  // reassemble. If the extension is blank (trailing dot after trim) we drop it.
+  // A bare /[. ]+$/ on the full string would stop at "f" in ".pdf" and miss
+  // a dot that sits between the stem and extension (e.g. "name..pdf" → "name.").
+  const dotIndex = sanitized.lastIndexOf(".");
+  if (dotIndex !== -1) {
+    const stem = sanitized.slice(0, dotIndex).replace(/[. ]+$/, "");
+    const ext = sanitized.slice(dotIndex + 1);
+    if (ext) {
+      sanitized = stem ? `${stem}.${ext}` : ext;
+    } else {
+      // Trailing dot after trim (e.g. "report.pdf." or "name.") — drop it.
+      sanitized = stem;
+    }
+  } else {
+    sanitized = sanitized.replace(/[. ]+$/, "");
+  }
+  sanitized = sanitized.replace(/\s+/g, " ");
   const result = sanitized || "output.pdf";
-  const stem = result.includes(".") ? result.replace(/\.[^.]*$/, "") : result;
-  if (windowsReservedStems.has(stem.toUpperCase())) {
+  const stemForReserved = result.includes(".") ? result.replace(/\.[^.]*$/, "") : result;
+  if (windowsReservedStems.has(stemForReserved.toUpperCase())) {
     return `_${result}`;
   }
   return result;
