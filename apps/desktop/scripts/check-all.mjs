@@ -8,6 +8,7 @@ const desktopRoot = join(__dirname, "..");
 const checks = [
   "check-preview-cache.mjs",
   "check-restore-state.mjs",
+  "check-save-state.mjs",
   "check-filename-policy.mjs",
   "check-output-state.mjs",
   "check-segment-state.mjs",

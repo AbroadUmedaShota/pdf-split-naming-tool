@@ -68,3 +68,32 @@ assert.equal(
   previewFilename({ box_no: "1", binder_no: "2", seq: "3", company: "A商事" }, [companyPrefix], 4),
   "A商事_01_02_0003.pdf"
 );
+
+// --- #84: 制御文字・全角禁止文字・stem末尾ドット ---
+
+// 制御文字 U+0000-U+001F → "_" に置換
+assert.equal(sanitizeFilename("name\x00file.pdf"), "name_file.pdf");  // null byte
+assert.equal(sanitizeFilename("name\nfile.pdf"), "name_file.pdf");    // newline
+assert.equal(sanitizeFilename("name\rfile.pdf"), "name_file.pdf");    // carriage return
+assert.equal(sanitizeFilename("name\tfile.pdf"), "name_file.pdf");    // tab
+assert.equal(sanitizeFilename("name\x1efile.pdf"), "name_file.pdf"); // RS (0x1E)
+
+// 全角禁止文字 → "_" に置換（日本語など意図した全角文字はそのまま）
+assert.equal(sanitizeFilename("A商事＜＞.pdf"), "A商事__.pdf");   // ＜＞
+assert.equal(sanitizeFilename("name：.pdf"), "name_.pdf");             // ：
+assert.equal(sanitizeFilename("name＂.pdf"), "name_.pdf");             // ＂
+assert.equal(sanitizeFilename("name／.pdf"), "name_.pdf");             // ／
+assert.equal(sanitizeFilename("name＼.pdf"), "name_.pdf");             // ＼
+assert.equal(sanitizeFilename("name｜.pdf"), "name_.pdf");             // ｜
+assert.equal(sanitizeFilename("name？.pdf"), "name_.pdf");             // ？
+assert.equal(sanitizeFilename("name＊.pdf"), "name_.pdf");             // ＊
+
+// 全角禁止文字でない全角文字（全角英数・日本語）はそのまま
+assert.equal(sanitizeFilename("日本語テスト_ＡＢＣ.pdf"), "日本語テスト_ＡＢＣ.pdf");
+
+// stem末尾のドット/スペース除去（Windowsでstem末尾ドットは不正）
+assert.equal(sanitizeFilename("name..pdf"), "name.pdf");        // stem trailing dot
+assert.equal(sanitizeFilename("name. .pdf"), "name.pdf");       // stem trailing dot-space
+assert.equal(sanitizeFilename("name   .pdf"), "name.pdf");      // stem trailing spaces
+assert.equal(sanitizeFilename("report.pdf."), "report.pdf");    // trailing dot after ext
+assert.equal(sanitizeFilename("report.pdf. "), "report.pdf");   // trailing space-dot after ext (already existed)

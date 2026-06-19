@@ -48,6 +48,7 @@ import {
   type SidecarSegment
 } from "../lib/sidecar";
 import { resolveMissingSavedPdfRestore, restorableInputPaths } from "../lib/restore-state";
+import { buildSaveStateFilter, shouldRetainSegmentKey } from "../lib/save-state";
 import {
   AFFIX_POSITIONS,
   type AffixDef,
@@ -563,6 +564,11 @@ function segmentPreviewPages(segment: SegmentView): number[] {
 export default function Page() {
   const [activeStep, setActiveStep] = useState<StepId>("import");
   const [pdfFiles, setPdfFiles] = useState<PdfFile[]>([]);
+  // loadState で復元した入力パスの完全リスト（欠損中のパスを含む）。
+  // saveState のフィルタ基準として使い、欠損PDF由来のメタデータを誤って削除しないようにする。
+  // choosePdfs（新規追加）では更新しない: 新規パスは buildSaveStateFilter 側で
+  // 現在ロード中PDF(pdfFiles)として取り込まれるため、ここに足す必要はない。
+  const [savedInputPaths, setSavedInputPaths] = useState<string[]>([]);
   const [currentPdf, setCurrentPdf] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [previewDataUrl, setPreviewDataUrl] = useState("");
@@ -830,6 +836,7 @@ export default function Page() {
     previewCache.clear();
     setActiveStep(step);
     setPdfFiles([{ path: step2ReviewPdfPath, pageCount: 11 }]);
+    setSavedInputPaths([]);
     setCurrentPdf(step2ReviewPdfPath);
     requestedPageRef.current = currentPageForStep;
     setCurrentPage(currentPageForStep);
@@ -1131,7 +1138,6 @@ export default function Page() {
             return;
           }
           if (!response.ok || response.command !== "blank_candidates") {
-            setBlankScanProgress("");
             setStatus("白紙ページの判定に失敗しました", "warning");
             return;
           }
@@ -1143,13 +1149,16 @@ export default function Page() {
             startPage = scannedUntil + 1;
             continue;
           }
-          setBlankScanProgress("");
           return;
         }
       } catch {
         if (pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
-          setBlankScanProgress("");
           setStatus("白紙ページの判定に失敗しました", "warning");
+        }
+      } finally {
+        // 最新リクエストのみがクリアする（古いリクエストのfinallyが新リクエストの進捗を消す退行を防ぐ）。
+        if (pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
+          setBlankScanProgress("");
         }
       }
     }
@@ -1162,44 +1171,50 @@ export default function Page() {
       const pendingPages = Array.from({ length: Math.min(pageCount, MAX_THUMBNAILS) }, (_value, index) => index + 1).filter(
         (pageNo) => !loadedThumbnailKeysRef.current.has(`${pdfPath}#${pageNo}`)
       );
-      if (pendingPages.length) {
-        setThumbnailProgress({ loaded: 0, total: pendingPages.length });
-      }
-      let loadedCount = 0;
-      for (let offset = 0; offset < pendingPages.length; offset += THUMBNAIL_CONCURRENCY) {
-        if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
-          return;
+      try {
+        if (pendingPages.length) {
+          setThumbnailProgress({ loaded: 0, total: pendingPages.length });
         }
-        const chunk = pendingPages.slice(offset, offset + THUMBNAIL_CONCURRENCY);
-        const responses = await Promise.all(
-          chunk.map((pageNo) =>
-            runSidecar({ command: "page_thumbnail", pdf_path: pdfPath, page_no: pageNo })
-              .then((response) => (response.ok && response.command === "page_thumbnail" ? response : null))
-              .catch(() => null)
-          )
-        );
-        if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
-          return;
-        }
-        const batch: Record<string, string> = {};
-        for (const response of responses) {
-          if (response) {
-            const key = `${response.pdf_path}#${response.page_no}`;
-            // 取得試行済みとして記録（無限リトライ防止）。ただし不正な data URL はキャッシュしない。
-            loadedThumbnailKeysRef.current.add(key);
-            if (hasPreviewImageData(response.image_data_url)) {
-              batch[key] = response.image_data_url;
+        let loadedCount = 0;
+        for (let offset = 0; offset < pendingPages.length; offset += THUMBNAIL_CONCURRENCY) {
+          if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
+            return;
+          }
+          const chunk = pendingPages.slice(offset, offset + THUMBNAIL_CONCURRENCY);
+          const responses = await Promise.all(
+            chunk.map((pageNo) =>
+              runSidecar({ command: "page_thumbnail", pdf_path: pdfPath, page_no: pageNo })
+                .then((response) => (response.ok && response.command === "page_thumbnail" ? response : null))
+                .catch(() => null)
+            )
+          );
+          if (!pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
+            return;
+          }
+          const batch: Record<string, string> = {};
+          for (const response of responses) {
+            if (response) {
+              const key = `${response.pdf_path}#${response.page_no}`;
+              // 取得試行済みとして記録（無限リトライ防止）。ただし不正な data URL はキャッシュしない。
+              loadedThumbnailKeysRef.current.add(key);
+              if (hasPreviewImageData(response.image_data_url)) {
+                batch[key] = response.image_data_url;
+              }
             }
           }
+          if (Object.keys(batch).length) {
+            setPageThumbnails((current) => ({ ...current, ...batch }));
+          }
+          loadedCount += chunk.length;
+          setThumbnailProgress({ loaded: loadedCount, total: pendingPages.length });
         }
-        if (Object.keys(batch).length) {
-          setPageThumbnails((current) => ({ ...current, ...batch }));
+      } finally {
+        // 中断（リクエストゲートによる return）・正常完了・例外のいずれの出口でも進捗をクリアする。
+        // ただし最新リクエストのみがクリアする（古いリクエストのfinallyが新リクエストの進捗を消す退行を防ぐ）。
+        // 最新リクエストは pendingPages=0 でも必ずこのfinallyに到達するため、残留はここで解消される。
+        if (pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
+          setThumbnailProgress(null);
         }
-        loadedCount += chunk.length;
-        setThumbnailProgress({ loaded: loadedCount, total: pendingPages.length });
-      }
-      if (pdfAuxiliaryRequestGateRef.current.isCurrent(requestId)) {
-        setThumbnailProgress(null);
       }
 
       await blankPromise;
@@ -1579,6 +1594,9 @@ export default function Page() {
     previewCache.clearPdf(path);
     purgeThumbnailKeysForPath(path);
     setPdfFiles(remaining);
+    // ユーザーが明示的に除去したPDFは savedInputPaths からも除去し、
+    // 以降の saveState でそのPDF由来のメタデータを保持しない。
+    setSavedInputPaths((current) => current.filter((p) => p !== path));
     setSplitPointsByPdf((current) => {
       const next = { ...current };
       delete next[path];
@@ -1630,6 +1648,7 @@ export default function Page() {
     invalidateWorkspaceAndPreviewRequests();
     previewCache.clear();
     setPdfFiles([]);
+    setSavedInputPaths([]);
     setCurrentPdf("");
     requestedPageRef.current = 1;
     setCurrentPage(1);
@@ -2593,7 +2612,7 @@ export default function Page() {
       return;
     }
     try {
-      await revealPath(outputDir);
+      await revealPath(outputDir, outputDir);
     } catch (error) {
       setStatus(`出力フォルダを開けませんでした: ${String(error)}`, "danger");
     }
@@ -2607,24 +2626,37 @@ export default function Page() {
     setIsSavingState(true);
     setStatus("状態を保存しています…");
     try {
-      // 現在のPDF・セグメント構成に存在しないキー（orphan）は永続化しない。
+      // フィルタ基準: 現在ロード中のPDF + 欠損中だが savedInputPaths に保持されているPDF。
+      // これにより欠損PDF由来の segment_metadata / split_points / manual_seq_keys を
+      // 誤って削除しない（PDFを元に戻して再読込すれば値が復活する）。
+      // savedInputPaths に存在しないキーは真のorphanとして従来通り除外する。
+      const loadedPdfPathSet = new Set(pdfFiles.map((file) => file.path));
+      const { allowedPdfPaths, orderedInputPaths } = buildSaveStateFilter({
+        loadedPdfPaths: pdfFiles.map((f) => f.path),
+        savedInputPaths,
+      });
+      // セグメントキーは現在ロード中のPDFからのみ生成されるため、そのまま使う。
+      // 欠損PDF由来のキーは allSegments には存在しないが、segment_metadata 側で allowedPdfPaths で守る。
       const currentSegmentKeys = new Set(allSegments.map((segment) => segment.key));
-      const currentPdfPaths = new Set(pdfFiles.map((file) => file.path));
       const state: AppPersistedState = {
         version: 1,
-        input_paths: pdfFiles.map((file) => file.path),
+        input_paths: orderedInputPaths,
         output_dir: outputDir,
         split_points_by_pdf: Object.fromEntries(
-          Object.entries(splitPointsByPdf).filter(([path]) => currentPdfPaths.has(path))
+          Object.entries(splitPointsByPdf).filter(([path]) => allowedPdfPaths.has(path))
         ),
         segment_metadata: Object.fromEntries(
-          Object.entries(segmentMetadata).filter(([key]) => currentSegmentKeys.has(key))
+          Object.entries(segmentMetadata).filter(([key]) =>
+            shouldRetainSegmentKey(key, currentSegmentKeys, allowedPdfPaths, loadedPdfPathSet)
+          )
         ),
         common_metadata: commonMetadata,
         affix_defs: affixDefs,
         seq_start: seqStart,
         seq_digits: seqDigits,
-        manual_seq_keys: [...manualSeqKeysRef.current].filter((key) => currentSegmentKeys.has(key)),
+        manual_seq_keys: [...manualSeqKeysRef.current].filter((key) =>
+          shouldRetainSegmentKey(key, currentSegmentKeys, allowedPdfPaths, loadedPdfPathSet)
+        ),
         current_pdf: currentPdf,
         current_page: currentPage
       };
@@ -2703,6 +2735,8 @@ export default function Page() {
       // 復元後の分割ステップは未訪問扱いに戻す（分割点があれば done 判定は維持される）。
       setSplitStepVisited(false);
       setPdfFiles(loaded);
+      // 欠損PDFを含む完全な入力パスリストを保持し、次回 saveState のフィルタ基準に使う。
+      setSavedInputPaths(state.input_paths);
       setOutputDir(state.output_dir || outputDir);
       setSplitPointsByPdf(state.split_points_by_pdf ?? {});
       setSegmentMetadata(state.segment_metadata ?? {});

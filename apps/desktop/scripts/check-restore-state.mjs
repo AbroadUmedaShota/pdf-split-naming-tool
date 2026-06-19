@@ -171,10 +171,10 @@ assert.deepEqual(
 
 assert.equal(
   missingPdfStatus({ allMissing: false, paths: ["C:\\docs\\a.pdf", "C:\\docs\\b.pdf", "C:\\docs\\c.pdf"] }),
-  "一部の保存済みPDFが見つかりません（a.pdf、b.pdf ほか1件）。再選択してください。このまま保存すると読み込めなかったPDFの入力値は失われます。",
+  "一部の保存済みPDFが見つかりません（a.pdf、b.pdf ほか1件）。再選択してください。",
 );
 
 assert.equal(
   missingPdfStatus({ allMissing: true, paths: ["C:\\docs\\a.pdf"] }),
-  "保存済みPDFが見つかりません（a.pdf）。再選択してください。このまま保存すると読み込めなかったPDFの入力値は失われます。",
+  "保存済みPDFが見つかりません（a.pdf）。再選択してください。",
 );

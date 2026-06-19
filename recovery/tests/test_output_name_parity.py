@@ -73,6 +73,24 @@ def test_preview_and_preflight_use_same_normalized_output_name_for_invalid_chars
     assert check.output_path == tmp_path / "1_2_3_4_5_6.pdf"
 
 
+def test_preview_and_preflight_use_same_normalized_output_name_for_fullwidth_and_control_chars(
+    tmp_path: Path,
+) -> None:
+    # #84: 全角禁止文字(＜＊)・制御文字(タブ)も preview と preflight で同一にサニタイズされることを保証する。
+    # 半角版(1/2,3:4,5*6 -> 1_2_3_4_5_6.pdf)と同一結果になる。
+    metadata = {"box_no": "1＜2", "binder_no": "3\t4", "seq": "5＊6"}
+    preview = build_yoshida_filename_preview(metadata)
+    segment = Segment(tmp_path / "source.pdf", 1, 1, metadata)
+
+    [check] = check_segment_outputs([segment], tmp_path, processor=PageCountProcessor(page_count=1))
+
+    assert preview.ok
+    assert preview.normalized_filename == "1_2_3_4_5_6.pdf"
+    assert check.requested_filename == preview.normalized_filename
+    assert check.filename == "1_2_3_4_5_6.pdf"
+    assert check.output_path == tmp_path / "1_2_3_4_5_6.pdf"
+
+
 def test_preflight_keeps_preview_requested_name_when_batch_duplicates_are_numbered(tmp_path: Path) -> None:
     metadata = {"box_no": "1", "binder_no": "2", "seq": "3"}
     preview = build_yoshida_filename_preview(metadata)

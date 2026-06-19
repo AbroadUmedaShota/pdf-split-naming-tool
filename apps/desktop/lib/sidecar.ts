@@ -22,8 +22,10 @@ export async function invokeSidecar(request: SidecarRequest): Promise<SidecarRes
 }
 
 // 出力先フォルダを OS のファイルマネージャで開く。出力後に生成PDFを確認する後工程への導線。
-export async function revealPath(path: string): Promise<void> {
-  await invoke<void>("reveal_path", { path });
+// allowedBase: バックエンドのスコープ検証に渡す許可ベースパス（通常 outputDir と同じ値）。
+// 空文字を渡した場合は検証をスキップする（後方互換用）。
+export async function revealPath(path: string, allowedBase: string = ""): Promise<void> {
+  await invoke<void>("reveal_path", { path, allowedBase });
 }
 
 export type AppAffixDef = {

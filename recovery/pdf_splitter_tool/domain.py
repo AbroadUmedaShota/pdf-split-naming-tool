@@ -20,6 +20,22 @@ MAX_AFFIX_COUNT = 2
 # 参考: 旧来の固定テンプレ（追加項目なしのときの生成結果と一致する）。
 YOSHIDA_FILENAME_TEMPLATE = "{box_no:0>2}_{binder_no:0>2}_{seq:0>3}.pdf"
 INVALID_FILENAME_CHARS = r'<>:"/\|?*'
+# Full-width variants of the ASCII forbidden characters above (U+FF1C … U+FF0A).
+# NFKC normalization would also convert these, but it would inadvertently transform
+# unrelated full-width characters (e.g. full-width alphanumerics, Japanese punctuation).
+# Listing only the forbidden characters keeps user-intended full-width text intact.
+INVALID_FILENAME_CHARS_FULLWIDTH = (
+    "＜"  # fullwidth less-than sign
+    "＞"  # fullwidth greater-than sign
+    "："  # fullwidth colon
+    "＂"  # fullwidth quotation mark
+    "／"  # fullwidth solidus
+    "＼"  # fullwidth reverse solidus
+    "｜"  # fullwidth vertical line
+    "？"  # fullwidth question mark
+    "＊"  # fullwidth asterisk
+)
+# Control characters U+0000–U+001F (includes \n, \r, \t) are not valid in Windows filenames.
 MAX_FILENAME_LENGTH = 180
 # Windows MAX_PATH limit. Paths at or beyond this length cause OSError on open/mkdir/save.
 MAX_OUTPUT_PATH_LENGTH = 260
@@ -103,8 +119,28 @@ WINDOWS_RESERVED_STEMS = frozenset(
 
 def sanitize_filename_with_warnings(filename: str) -> tuple[str, tuple[str, ...]]:
     warnings: list[str] = []
-    sanitized = re.sub(f"[{re.escape(INVALID_FILENAME_CHARS)}]", "_", filename)
-    sanitized = sanitized.strip().rstrip(". ")
+    # Remove control characters U+0000–U+001F (includes \n, \r, \t).
+    sanitized = re.sub(r"[\x00-\x1f]", "_", filename)
+    # Replace ASCII forbidden characters.
+    sanitized = re.sub(f"[{re.escape(INVALID_FILENAME_CHARS)}]", "_", sanitized)
+    # Replace full-width variants of the forbidden characters.
+    sanitized = re.sub(f"[{re.escape(INVALID_FILENAME_CHARS_FULLWIDTH)}]", "_", sanitized)
+    sanitized = sanitized.strip()
+    # Strip trailing dots/spaces from the stem only, keeping the extension intact.
+    # Strategy: split on the last dot, strip trailing ". " from the stem, then
+    # reassemble. If the extension is blank (trailing dot after strip) we drop it.
+    # A bare rstrip(". ") on the full string would stop at "f" in ".pdf" and miss
+    # a dot that sits between the stem and extension (e.g. "name..pdf" → "name.").
+    if "." in sanitized:
+        stem, ext = sanitized.rsplit(".", 1)
+        stem = stem.rstrip(". ")
+        if ext:
+            sanitized = f"{stem}.{ext}" if stem else ext
+        else:
+            # Trailing dot after strip (e.g. "report.pdf." or "name.") — drop it.
+            sanitized = stem
+    else:
+        sanitized = sanitized.rstrip(". ")
     sanitized = re.sub(r"\s+", " ", sanitized)
     if sanitized != filename:
         warnings.append("filename_sanitized")

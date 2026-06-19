@@ -6,6 +6,7 @@ from pdf_splitter_tool.domain import (
     METADATA_REQUIRED_KEYS,
     YOSHIDA_FILENAME_TEMPLATE,
     build_yoshida_filename_preview,
+    sanitize_filename_with_warnings,
 )
 
 
@@ -129,3 +130,67 @@ def test_seq_digits_invalid_or_out_of_range_is_clamped() -> None:
     assert build_yoshida_filename_preview(metadata, (), 0).raw_filename == "01_02_3.pdf"  # 下限1
     # box/binderの桁数(2)はseq_digitsの影響を受けない
     assert build_yoshida_filename_preview({"box_no": "1", "binder_no": "2", "seq": "3"}, (), 5).raw_filename == "01_02_00003.pdf"
+
+
+# --- sanitize_filename_with_warnings: 制御文字・全角禁止文字・stem末尾ドット (#84) ---
+
+
+@pytest.mark.parametrize(
+    "char,label",
+    [
+        ("\x00", "null byte"),
+        ("\n", "newline"),
+        ("\r", "carriage return"),
+        ("\t", "tab"),
+        ("\x01", "SOH control char"),
+        ("\x1f", "US control char (highest in 0x00-0x1f range)"),
+    ],
+)
+def test_sanitize_replaces_control_characters_with_underscore(char: str, label: str) -> None:
+    filename = f"name{char}file.pdf"
+    result, warnings = sanitize_filename_with_warnings(filename)
+    assert result == "name_file.pdf", f"Failed for {label}: got {result!r}"
+    assert "filename_sanitized" in warnings
+
+
+@pytest.mark.parametrize(
+    "char,label",
+    [
+        ("＜", "fullwidth less-than sign"),
+        ("＞", "fullwidth greater-than sign"),
+        ("：", "fullwidth colon"),
+        ("＂", "fullwidth quotation mark"),
+        ("／", "fullwidth solidus"),
+        ("＼", "fullwidth reverse solidus"),
+        ("｜", "fullwidth vertical line"),
+        ("？", "fullwidth question mark"),
+        ("＊", "fullwidth asterisk"),
+    ],
+)
+def test_sanitize_replaces_fullwidth_forbidden_chars_with_underscore(char: str, label: str) -> None:
+    filename = f"name{char}file.pdf"
+    result, warnings = sanitize_filename_with_warnings(filename)
+    assert result == "name_file.pdf", f"Failed for {label} (U+{ord(char):04X}): got {result!r}"
+    assert "filename_sanitized" in warnings
+
+
+def test_sanitize_keeps_non_forbidden_fullwidth_chars_intact() -> None:
+    # Full-width alphanumerics and Japanese text must not be altered.
+    filename = "日本語テスト_ＡＢＣ.pdf"
+    result, _ = sanitize_filename_with_warnings(filename)
+    assert result == filename
+
+
+@pytest.mark.parametrize(
+    "filename,expected,label",
+    [
+        ("name..pdf", "name.pdf", "single trailing dot on stem"),
+        ("name. .pdf", "name.pdf", "trailing dot-space on stem"),
+        ("name   .pdf", "name.pdf", "trailing spaces on stem"),
+        ("report.pdf. ", "report.pdf", "trailing space-dot after extension"),
+        ("report.pdf.", "report.pdf", "trailing dot after extension"),
+    ],
+)
+def test_sanitize_strips_trailing_dot_space_from_stem(filename: str, expected: str, label: str) -> None:
+    result, _ = sanitize_filename_with_warnings(filename)
+    assert result == expected, f"Failed for {label!r}: got {result!r}"

@@ -86,8 +86,8 @@ async fn run_sidecar(
     request: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     let runtime = sidecar_runtime(&app)?;
-    let timeout_override = std::env::var("PDF_ORGANIZER_SIDECAR_TIMEOUT_MS").ok();
-    let timeout = sidecar_timeout_from(timeout_override.as_deref());
+    // タイムアウトはコマンド別に決定する（export等の長時間コマンドは大きめの枠を使う）。
+    let timeout = resolve_command_timeout(&request);
     let mode_override = std::env::var("PDF_ORGANIZER_SIDECAR_MODE").ok();
     let mode = sidecar_mode_from(mode_override.as_deref());
     let shared_slot = std::sync::Arc::clone(&state.0);
@@ -114,13 +114,16 @@ async fn run_sidecar(
 /// manager so the operator can move straight from export to checking the
 /// generated PDFs. Validation is factored into `reveal_target` for testing;
 /// the spawn itself is fire-and-forget (we do not wait on the file manager).
+///
+/// `allowed_base` には呼び出し元が output_dir を渡す。対象が allowed_base 配下でない
+/// 場合は拒否する（スコープ外のディレクトリを開かせないため）。
 #[tauri::command]
-fn reveal_path(path: String) -> Result<(), String> {
-    let target = reveal_target(&path)?;
+fn reveal_path(path: String, allowed_base: String) -> Result<(), String> {
+    let target = reveal_target(&path, &allowed_base)?;
     open_in_file_manager(&target)
 }
 
-fn reveal_target(path: &str) -> Result<std::path::PathBuf, String> {
+fn reveal_target(path: &str, allowed_base: &str) -> Result<std::path::PathBuf, String> {
     if path.trim().is_empty() {
         return Err("reveal path is empty".to_string());
     }
@@ -129,6 +132,21 @@ fn reveal_target(path: &str) -> Result<std::path::PathBuf, String> {
     // that is not an existing directory rather than merely an existing path.
     if !target.is_dir() {
         return Err(format!("path does not exist or is not a directory: {path}"));
+    }
+    // スコープ検証: 対象が allowed_base 配下であることを canonicalize 後に確認する。
+    // allowed_base が空の場合は検証をスキップする（既存の呼び出しパターンとの互換維持）。
+    if !allowed_base.trim().is_empty() {
+        let canonical_base = std::path::PathBuf::from(allowed_base)
+            .canonicalize()
+            .map_err(|e| format!("allowed_base cannot be resolved: {e}"))?;
+        let canonical_target = target
+            .canonicalize()
+            .map_err(|e| format!("target path cannot be resolved: {e}"))?;
+        if !canonical_target.starts_with(&canonical_base) {
+            return Err(format!(
+                "path is outside the allowed output directory: {path}"
+            ));
+        }
     }
     Ok(target)
 }
@@ -162,9 +180,14 @@ fn sidecar_mode_from(value: Option<&str>) -> SidecarMode {
 }
 
 fn sidecar_runtime(app: &tauri::AppHandle) -> Result<SidecarRuntime, String> {
-    let explicit_exe = std::env::var_os("PDF_ORGANIZER_SIDECAR_EXE").map(std::path::PathBuf::from);
-    if let Some(path) = explicit_exe.filter(|path| !path.as_os_str().is_empty()) {
-        return sidecar_executable_runtime(path);
+    // PDF_ORGANIZER_SIDECAR_EXE は開発専用。リリースビルドでは無視する。
+    #[cfg(debug_assertions)]
+    {
+        let explicit_exe =
+            std::env::var_os("PDF_ORGANIZER_SIDECAR_EXE").map(std::path::PathBuf::from);
+        if let Some(path) = explicit_exe.filter(|path| !path.as_os_str().is_empty()) {
+            return sidecar_executable_runtime(path);
+        }
     }
 
     let explicit_python = std::env::var_os("PDF_ORGANIZER_PYTHON").map(std::path::PathBuf::from);
@@ -416,12 +439,21 @@ fn parse_sidecar_response_line(
 
 /// Kills the resident sidecar (if any), clears the slot, and returns a
 /// snapshot of its recent stderr lines for diagnostics.
+///
+/// child.wait() は kill 後に別スレッドへデタッチする。kill が失敗/遅延した場合でも
+/// 呼び出し元スレッドが Mutex を保持したまま wait() でブロックするのを防ぐため。
+/// stderr_tail のスナップショットは wait() の前に取得する（wait() 後はアクセス不可）。
 fn kill_resident_sidecar(slot: &mut Option<ResidentSidecar>) -> String {
     match slot.take() {
         Some(mut sidecar) => {
+            // wait() 前にスナップショットを取る（move 後はアクセス不可になるため）
+            let tail = stderr_tail_snapshot(&sidecar.stderr_tail);
             let _ = sidecar.child.kill();
-            let _ = sidecar.child.wait();
-            stderr_tail_snapshot(&sidecar.stderr_tail)
+            // wait() をバックグラウンドスレッドにデタッチして呼び出し元をブロックしない
+            std::thread::spawn(move || {
+                let _ = sidecar.child.wait();
+            });
+            tail
         }
         None => String::new(),
     }
@@ -444,6 +476,33 @@ fn append_stderr_tail(message: String, stderr_tail: &str) -> String {
         message
     } else {
         format!("{message}\nPython sidecar stderr (recent lines):\n{stderr_tail}")
+    }
+}
+
+/// コマンド別タイムアウトを解決する。
+///
+/// - 長時間コマンド（export / blank_candidates / index_candidates / search_text）:
+///   既定 300,000 ms。環境変数 `PDF_ORGANIZER_LONG_TIMEOUT_MS` で上書き可。
+/// - 短時間コマンド（page_preview 等）:
+///   既定 30,000 ms。環境変数 `PDF_ORGANIZER_SIDECAR_TIMEOUT_MS` で上書き可。
+///
+/// NOTE: Mutex を使った head-of-line blocking 問題（長時間コマンドが後続を詰まらせる件）
+/// は今回スコープ外。タイムアウト別枠化で「export が kill される」実害のみ解消する。
+fn resolve_command_timeout(request: &serde_json::Value) -> std::time::Duration {
+    let command = request
+        .get("command")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let is_long = matches!(
+        command,
+        "export" | "blank_candidates" | "index_candidates" | "search_text"
+    );
+    if is_long {
+        let override_val = std::env::var("PDF_ORGANIZER_LONG_TIMEOUT_MS").ok();
+        sidecar_timeout_from_with_default(override_val.as_deref(), 300_000)
+    } else {
+        let override_val = std::env::var("PDF_ORGANIZER_SIDECAR_TIMEOUT_MS").ok();
+        sidecar_timeout_from(override_val.as_deref())
     }
 }
 
@@ -555,11 +614,15 @@ fn sidecar_python_launcher_from(explicit_python: Option<&std::path::Path>) -> Py
 }
 
 fn sidecar_timeout_from(value: Option<&str>) -> std::time::Duration {
+    sidecar_timeout_from_with_default(value, 30_000)
+}
+
+fn sidecar_timeout_from_with_default(value: Option<&str>, default_ms: u64) -> std::time::Duration {
     value
         .and_then(|raw| raw.trim().parse::<u64>().ok())
         .filter(|milliseconds| *milliseconds > 0)
         .map(std::time::Duration::from_millis)
-        .unwrap_or_else(|| std::time::Duration::from_secs(30))
+        .unwrap_or_else(|| std::time::Duration::from_millis(default_ms))
 }
 
 fn wait_for_sidecar_output(
@@ -743,23 +806,113 @@ mod tests {
 
     #[test]
     fn reveal_target_rejects_empty_or_blank_path() {
-        assert!(reveal_target("").is_err());
-        assert!(reveal_target("   ").is_err());
+        assert!(reveal_target("", "").is_err());
+        assert!(reveal_target("   ", "").is_err());
     }
 
     #[test]
     fn reveal_target_rejects_missing_path() {
         let missing = unique_test_dir("reveal-missing").join("does-not-exist");
-        assert!(reveal_target(&missing.to_string_lossy()).is_err());
+        assert!(reveal_target(&missing.to_string_lossy(), "").is_err());
     }
 
     #[test]
     fn reveal_target_accepts_existing_directory() {
         let dir = unique_test_dir("reveal-ok");
 
-        let resolved = reveal_target(&dir.to_string_lossy()).unwrap();
+        let resolved = reveal_target(&dir.to_string_lossy(), "").unwrap();
 
         assert_eq!(resolved, dir);
+    }
+
+    // #109: スコープ検証のテスト
+    #[test]
+    fn reveal_target_accepts_path_within_allowed_base() {
+        let base = unique_test_dir("reveal-scope-base");
+        let subdir = base.join("output");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        let resolved =
+            reveal_target(&subdir.to_string_lossy(), &base.to_string_lossy()).unwrap();
+
+        assert_eq!(resolved.canonicalize().unwrap(), subdir.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn reveal_target_rejects_path_outside_allowed_base() {
+        let base = unique_test_dir("reveal-scope-allowed");
+        let outside = unique_test_dir("reveal-scope-outside");
+        // base, outside ともに実在するディレクトリ
+        let _ = std::fs::create_dir_all(&base);
+        let _ = std::fs::create_dir_all(&outside);
+
+        let result = reveal_target(&outside.to_string_lossy(), &base.to_string_lossy());
+
+        assert!(result.is_err(), "expected scope violation error");
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("outside"),
+            "error should mention 'outside': {msg}"
+        );
+    }
+
+    #[test]
+    fn reveal_target_skips_scope_check_when_allowed_base_is_empty() {
+        let dir = unique_test_dir("reveal-scope-nocheck");
+
+        // allowed_base が空文字のときはスコープ検証をスキップして素通りする
+        let resolved = reveal_target(&dir.to_string_lossy(), "").unwrap();
+        assert_eq!(resolved, dir);
+    }
+
+    // #104: コマンド別タイムアウトのテスト
+    #[test]
+    fn resolve_command_timeout_long_commands_use_300s() {
+        for cmd in &["export", "blank_candidates", "index_candidates", "search_text"] {
+            let request = serde_json::json!({ "command": cmd });
+            let timeout = resolve_command_timeout(&request);
+            assert_eq!(
+                timeout,
+                std::time::Duration::from_millis(300_000),
+                "command={cmd} should use 300s timeout"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_command_timeout_short_commands_use_30s() {
+        for cmd in &["page_preview", "page_thumbnail", "page_text", "pdf_info", "preflight"] {
+            let request = serde_json::json!({ "command": cmd });
+            let timeout = resolve_command_timeout(&request);
+            assert_eq!(
+                timeout,
+                std::time::Duration::from_secs(30),
+                "command={cmd} should use 30s timeout"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_command_timeout_unknown_command_uses_30s() {
+        let request = serde_json::json!({ "command": "something_new" });
+        let timeout = resolve_command_timeout(&request);
+        assert_eq!(timeout, std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn resolve_command_timeout_missing_command_field_uses_30s() {
+        let request = serde_json::json!({ "foo": "bar" });
+        let timeout = resolve_command_timeout(&request);
+        assert_eq!(timeout, std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn sidecar_timeout_with_default_uses_provided_default() {
+        let timeout = sidecar_timeout_from_with_default(None, 60_000);
+        assert_eq!(timeout, std::time::Duration::from_millis(60_000));
+
+        let timeout = sidecar_timeout_from_with_default(Some("5000"), 60_000);
+        assert_eq!(timeout, std::time::Duration::from_millis(5_000));
     }
 
     #[test]
