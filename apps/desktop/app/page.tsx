@@ -139,7 +139,6 @@ type PageState = {
   isCurrent: boolean;
   pageNo: number;
   segment: SegmentView | null;
-  thumbnail?: string;
 };
 
 const steps: Array<{ id: StepId; label: string; hint: string; icon: LucideIcon }> = [
@@ -681,6 +680,9 @@ export default function Page() {
   // プレビューの Ctrl+ホイール拡大縮小。要素にネイティブリスナーを張り、最新ハンドラを ref 経由で呼ぶ。
   const previewFrameRef = useRef<HTMLDivElement | null>(null);
   const previewWheelHandlerRef = useRef<(event: WheelEvent) => void>(() => {});
+  // 検索用語モーダルのフォーカストラップ用。モーダルルートと起動元ボタンを ref で保持する。
+  const searchTermModalRef = useRef<HTMLElement | null>(null);
+  const searchTermModalTriggerRef = useRef<HTMLElement | null>(null);
 
   const currentFile = pdfFiles.find((file) => file.path === currentPdf);
   const allSegments = useMemo(
@@ -705,6 +707,8 @@ export default function Page() {
     () => selectedSearchTerms.map((item) => item.term),
     [selectedSearchTerms]
   );
+  // pageThumbnails はチャンク(4枚)ごとに追加されるため、依存に含めると全ページ再計算が頻発する。
+  // thumbnail はレンダリング時に pageThumbnails[key] を直接参照するため、ここでは除外する。
   const currentPageStates = useMemo<PageState[]>(() => {
     if (!currentFile) {
       return [];
@@ -719,11 +723,10 @@ export default function Page() {
         hasSplitBefore: currentSplitPoints.includes(pageNo),
         isCurrent: pageNo === currentPage,
         pageNo,
-        segment,
-        thumbnail: pageThumbnails[`${currentFile.path}#${pageNo}`]
+        segment
       };
     });
-  }, [blankCandidates, currentFile, currentPage, currentPdfSegments, currentSplitPoints, pageThumbnails]);
+  }, [blankCandidates, currentFile, currentPage, currentPdfSegments, currentSplitPoints]);
   const totalPages = useMemo(() => pdfFiles.reduce((total, file) => total + file.pageCount, 0), [pdfFiles]);
   const incompleteSegments = useMemo(
     () => allSegments.filter((segment) => missingMetadata(segment.metadata).length > 0).length,
@@ -2166,6 +2169,21 @@ export default function Page() {
     };
   }, [activeStep]);
 
+  // 検索用語モーダルが開いた時、最初のフォーカス可能要素へ自動フォーカスする（フォーカストラップ初期化）。
+  useEffect(() => {
+    if (!searchTermModalOpen) {
+      return;
+    }
+    const modal = searchTermModalRef.current;
+    if (!modal) {
+      return;
+    }
+    const focusable = modal.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    focusable[0]?.focus();
+  }, [searchTermModalOpen]);
+
   // セグメント構成が変わったら、空の連番を表示順(PDF単位)で自動補完する。
   // 既存値(手動・採番済み)は変更しないので、保存状態の復元値も保持される。
   useEffect(() => {
@@ -2892,14 +2910,20 @@ export default function Page() {
         <div className="compact-group">
           <span className="group-label">
             ページ状態一覧
-            {thumbnailProgress ? (
-              <small className="muted-line page-state-note">
-                サムネイル取得中 {thumbnailProgress.loaded}/{thumbnailProgress.total}
-              </small>
-            ) : null}
-            {currentFile && currentFile.pageCount > MAX_THUMBNAILS ? (
-              <small className="muted-line page-state-note">{MAX_THUMBNAILS + 1}ページ以降はサムネイル省略</small>
-            ) : null}
+            {/* 常設のライブリージョンにして内部テキストだけ差し替える。
+                条件付きマウントにすると出現時に即読み上げされ毎カウントで連打になるため。
+                role="status" は付けない（ステータスpillの [role="status"] と重複し
+                一意特定を壊すため）。aria-live のみでライブリージョンとして成立する。 */}
+            <small
+              aria-live="polite"
+              className="muted-line page-state-note"
+            >
+              {thumbnailProgress
+                ? `サムネイル取得中 ${thumbnailProgress.loaded}/${thumbnailProgress.total}`
+                : currentFile && currentFile.pageCount > MAX_THUMBNAILS
+                  ? `${MAX_THUMBNAILS + 1}ページ以降はサムネイル省略`
+                  : null}
+            </small>
           </span>
           <div className="page-state-list">
             {currentPageStates.length ? (
@@ -2934,7 +2958,9 @@ export default function Page() {
                     tabIndex={0}
                   >
                     <span className="page-thumb mini">
-                      {page.thumbnail ? <img alt="" src={page.thumbnail} /> : <span>{page.pageNo}</span>}
+                      {pageThumbnails[`${currentPdf}#${page.pageNo}`]
+                        ? <img alt="" src={pageThumbnails[`${currentPdf}#${page.pageNo}`]} />
+                        : <span>{page.pageNo}</span>}
                     </span>
                     <span className="page-state-main">
                       <strong>{page.pageNo}ページ</strong>
@@ -3401,7 +3427,7 @@ export default function Page() {
         <div
           className="ocr-text-scroll"
           aria-label="テキスト層"
-          tabIndex={transcribeArmed ? 0 : -1}
+          tabIndex={0}
           onKeyDown={(event) => {
             if (!transcribeArmed) {
               return;
@@ -3801,10 +3827,19 @@ export default function Page() {
   }
 
   function openSearchTermModal(): void {
+    // フォーカストラップ: 起動元ボタンを退避しておき、閉じた時に戻す。
+    searchTermModalTriggerRef.current = document.activeElement as HTMLElement | null;
     setDraftSelectedSearchTerms(selectedSearchTermValues);
     setDraftCustomSearchTerms(customSearchTerms);
     setCustomSearchTermInput("");
     setSearchTermModalOpen(true);
+  }
+
+  function closeSearchTermModal(): void {
+    // フォーカストラップ: モーダルを閉じた後、起動元ボタンへフォーカスを戻す。
+    setSearchTermModalOpen(false);
+    searchTermModalTriggerRef.current?.focus();
+    searchTermModalTriggerRef.current = null;
   }
 
   function toggleDraftSearchTerm(term: string): void {
@@ -3836,7 +3871,7 @@ export default function Page() {
     setCustomSearchTerms(preset.customTerms);
     setSelectedSearchTerms(selectedSearchTermsFromPreset(preset));
     saveSearchTermPreset(preset);
-    setSearchTermModalOpen(false);
+    closeSearchTermModal();
     setSearchResults([]);
     setSelectedSearchHit(null);
     setSearchHighlights([]);
@@ -3890,13 +3925,56 @@ export default function Page() {
     const draftAllTerms = uniqueSearchTerms([...CONTRACT_SEARCH_TERMS, ...draftCustomSearchTerms]);
     return (
       <div className="modal-backdrop" role="presentation">
-        <section className="search-term-modal" aria-label="ハイライト対象用語" role="dialog" aria-modal="true">
+        <section
+          aria-label="ハイライト対象用語"
+          aria-modal="true"
+          className="search-term-modal"
+          ref={searchTermModalRef}
+          role="dialog"
+          onKeyDown={(event) => {
+            // Escape でモーダルを閉じて起動元へフォーカスを戻す。
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closeSearchTermModal();
+              return;
+            }
+            // Tab / Shift+Tab でモーダル内を循環する（フォーカストラップ）。
+            if (event.key !== "Tab") {
+              return;
+            }
+            const modal = searchTermModalRef.current;
+            if (!modal) {
+              return;
+            }
+            const focusable = Array.from(
+              modal.querySelectorAll<HTMLElement>(
+                'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+              )
+            );
+            if (focusable.length === 0) {
+              return;
+            }
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey) {
+              if (document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+              }
+            } else {
+              if (document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+              }
+            }
+          }}
+        >
           <div className="modal-header">
             <div>
               <h3>ハイライト対象用語</h3>
               <p>現在操作中PDFだけを検索します。</p>
             </div>
-            <button aria-label="閉じる" className="icon-button" onClick={() => setSearchTermModalOpen(false)} type="button">
+            <button aria-label="閉じる" className="icon-button" onClick={closeSearchTermModal} type="button">
               <XCircle aria-hidden="true" size={18} />
             </button>
           </div>
@@ -3953,7 +4031,7 @@ export default function Page() {
             </div>
           </div>
           <div className="modal-actions">
-            <button onClick={() => setSearchTermModalOpen(false)} type="button">
+            <button onClick={closeSearchTermModal} type="button">
               キャンセル
             </button>
             <button className="primary" onClick={applySearchTermPreset} type="button">
@@ -4116,7 +4194,13 @@ export default function Page() {
         </div>
         <div className="legacy-panel-section assist-section">
           <span className="group-label">白紙候補</span>
-          {blankScanProgress ? <small className="muted-line">{blankScanProgress}</small> : null}
+          {/* 常設のライブリージョンにして内部テキストだけ差し替える。
+              条件付きマウントにするとスキャン開始時のメッセージが即読み上げされずに流れるため。
+              role="status" は付けない（ステータスpillの [role="status"] と重複するため）。
+              aria-live のみでライブリージョンとして成立する。 */}
+          <small aria-live="polite" className="muted-line">
+            {blankScanProgress ?? null}
+          </small>
           <div className="blank-candidates">
             {blankCandidates.length ? (
               blankCandidates.map((candidate) => (
@@ -4205,7 +4289,14 @@ export default function Page() {
               ) : null}
             </div>
           </div>
-          <div className={`status-pill ${statusTone}`} role="status">
+          {/* role は status で固定（動的に alert へ切り替えると role="status" 前提のフロー/テストが壊れ、
+              SR の役割再アナウンスも増える）。深刻度は aria-live のみで出し分ける:
+              danger は assertive で即読み上げ、それ以外は polite（状態変化を邪魔しない）。 */}
+          <div
+            aria-live={statusTone === "danger" ? "assertive" : "polite"}
+            className={`status-pill ${statusTone}`}
+            role="status"
+          >
             {statusTone === "danger" || statusTone === "warning" ? (
               <AlertTriangle aria-hidden="true" size={16} />
             ) : statusTone === "ok" ? (

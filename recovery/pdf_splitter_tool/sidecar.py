@@ -118,16 +118,15 @@ def page_preview(request: dict[str, Any]) -> dict[str, Any]:
     pdf_path = Path(str(request.get("pdf_path", "")))
     page_no = int(request.get("page_no", 1))
     zoom = float(request.get("zoom", 1.2))
-    page_count = PdfProcessor.page_count(pdf_path)
-    if page_no < 1 or page_no > page_count:
-        raise ValueError(f"page_no must be between 1 and {page_count}")
+    # 1 open で画像取得と page_count 取得を同時に行う（2重 fitz.open を排除）
+    image_data_url, page_count = PdfProcessor.page_preview_data_url_with_count(pdf_path, page_no, zoom)
     return {
         "ok": True,
         "command": "page_preview",
         "pdf_path": str(pdf_path),
         "page_no": page_no,
         "page_count": page_count,
-        "image_data_url": PdfProcessor.page_preview_data_url(pdf_path, page_no, zoom),
+        "image_data_url": image_data_url,
     }
 
 
@@ -135,26 +134,23 @@ def page_thumbnail(request: dict[str, Any]) -> dict[str, Any]:
     pdf_path = Path(str(request.get("pdf_path", "")))
     page_no = int(request.get("page_no", 1))
     zoom = float(request.get("zoom", 0.22))
-    page_count = PdfProcessor.page_count(pdf_path)
-    if page_no < 1 or page_no > page_count:
-        raise ValueError(f"page_no must be between 1 and {page_count}")
+    # 1 open でサムネイル取得と page_count 取得を同時に行う（2重 fitz.open を排除）
+    image_data_url, page_count = PdfProcessor.page_thumbnail_data_url_with_count(pdf_path, page_no, zoom)
     return {
         "ok": True,
         "command": "page_thumbnail",
         "pdf_path": str(pdf_path),
         "page_no": page_no,
         "page_count": page_count,
-        "image_data_url": PdfProcessor.page_thumbnail_data_url(pdf_path, page_no, zoom),
+        "image_data_url": image_data_url,
     }
 
 
 def page_text(request: dict[str, Any]) -> dict[str, Any]:
     pdf_path = Path(str(request.get("pdf_path", "")))
     page_no = int(request.get("page_no", 1))
-    page_count = PdfProcessor.page_count(pdf_path)
-    if page_no < 1 or page_no > page_count:
-        raise ValueError(f"page_no must be between 1 and {page_count}")
-    text = PdfProcessor.page_text(pdf_path, page_no)
+    # 1 open でテキスト取得と page_count 取得を同時に行う（2重 fitz.open を排除）
+    text, page_count = PdfProcessor.page_text_with_count(pdf_path, page_no)
     return {
         "ok": True,
         "command": "page_text",
@@ -199,9 +195,8 @@ def search_highlights(request: dict[str, Any]) -> dict[str, Any]:
     pdf_path = Path(str(request.get("pdf_path", "")))
     page_no = int(request.get("page_no", 1))
     query = str(request.get("query", "")).strip()
-    page_count = PdfProcessor.page_count(pdf_path)
-    if page_no < 1 or page_no > page_count:
-        raise ValueError(f"page_no must be between 1 and {page_count}")
+    # 1 open でハイライト取得と page_count 取得を同時に行う（2重 fitz.open を排除）
+    rects, page_count = PdfProcessor.search_highlights_with_count(pdf_path, page_no, query)
     return {
         "ok": True,
         "command": "search_highlights",
@@ -209,7 +204,7 @@ def search_highlights(request: dict[str, Any]) -> dict[str, Any]:
         "page_no": page_no,
         "page_count": page_count,
         "query": query,
-        "rects": PdfProcessor.search_highlights(pdf_path, page_no, query),
+        "rects": rects,
     }
 
 

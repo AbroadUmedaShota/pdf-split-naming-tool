@@ -101,31 +101,60 @@ class PdfService:
 
     @staticmethod
     def page_preview_data_url(pdf_path: Path, page_no: int, zoom: float = 1.2) -> str:
+        data_url, _page_count = PdfService.page_preview_data_url_with_count(pdf_path, page_no, zoom)
+        return data_url
+
+    @staticmethod
+    def page_preview_data_url_with_count(pdf_path: Path, page_no: int, zoom: float = 1.2) -> tuple[str, int]:
+        """Return (data_url, page_count) using a single fitz.open call.
+
+        Raises ValueError for out-of-range page_no or password-protected files.
+        Error message uses "page_no must be between 1 and {page_count}" to preserve
+        the sidecar contract expected by existing tests.
+        """
         fitz_module = PdfService._require_fitz()
         with PdfService._open_doc(pdf_path, fitz_module) as doc:
-            page_index = PdfService.one_based_page_to_fitz_index(page_no)
-            if page_index >= doc.page_count:
-                raise ValueError("PDF page number exceeds document page count.")
+            page_count = doc.page_count
+            page_no = int(page_no)
+            if page_no < 1 or page_no > page_count:
+                raise ValueError(f"page_no must be between 1 and {page_count}")
+            page_index = page_no - 1
             page = doc.load_page(page_index)
             bounded_zoom = PdfService._bounded_preview_zoom(page.rect, zoom)
             pixmap = page.get_pixmap(matrix=fitz_module.Matrix(bounded_zoom, bounded_zoom), alpha=False)
         # JPEG にするとスキャン由来PDF（写真的な内容）でPNG比 数分の1 のペイロードになり、
         # sidecar との JSON パイプ転送が軽くなる。品質75は分割位置確認の用途に十分。
         encoded = base64.b64encode(pixmap.tobytes("jpg", jpg_quality=75)).decode("ascii")
-        return f"data:image/jpeg;base64,{encoded}"
+        return f"data:image/jpeg;base64,{encoded}", page_count
 
     @staticmethod
     def page_thumbnail_data_url(pdf_path: Path, page_no: int, zoom: float = THUMBNAIL_ZOOM) -> str:
         return PdfService.page_preview_data_url(pdf_path, page_no, zoom)
 
     @staticmethod
+    def page_thumbnail_data_url_with_count(pdf_path: Path, page_no: int, zoom: float = THUMBNAIL_ZOOM) -> tuple[str, int]:
+        """Return (data_url, page_count) using a single fitz.open call."""
+        return PdfService.page_preview_data_url_with_count(pdf_path, page_no, zoom)
+
+    @staticmethod
     def page_text(pdf_path: Path, page_no: int) -> str:
+        text, _page_count = PdfService.page_text_with_count(pdf_path, page_no)
+        return text
+
+    @staticmethod
+    def page_text_with_count(pdf_path: Path, page_no: int) -> tuple[str, int]:
+        """Return (text, page_count) using a single fitz.open call.
+
+        Raises ValueError for out-of-range page_no or password-protected files.
+        """
         fitz_module = PdfService._require_fitz()
         with PdfService._open_doc(pdf_path, fitz_module) as doc:
-            page_index = PdfService.one_based_page_to_fitz_index(page_no)
-            if page_index >= doc.page_count:
-                raise ValueError("PDF page number exceeds document page count.")
-            return doc.load_page(page_index).get_text("text").strip()
+            page_count = doc.page_count
+            page_no = int(page_no)
+            if page_no < 1 or page_no > page_count:
+                raise ValueError(f"page_no must be between 1 and {page_count}")
+            page_index = page_no - 1
+            return doc.load_page(page_index).get_text("text").strip(), page_count
 
     @staticmethod
     def search_text(
@@ -157,6 +186,9 @@ class PdfService:
         if not raw_terms:
             return [], False
 
+        # 用語ごとに1回だけコンパイル（ページ×用語ループ内での毎回 re.escape+compile を避ける）
+        term_patterns = [(term, re.compile(re.escape(term), re.IGNORECASE)) for term in raw_terms]
+
         fitz_module = PdfService._require_fitz()
         results: list[dict[str, object]] = []
         truncated = False
@@ -171,16 +203,18 @@ class PdfService:
                     # 1ページ1回のテキスト抽出で全用語を照合（NF-B1）
                     text = doc.load_page(page_index).get_text("text")
                     has_text = bool(text.strip())
-                    for term in raw_terms:
+                    for term, compiled in term_patterns:
                         if len(results) >= SEARCH_TEXT_MAX_RESULTS:
                             truncated = True
                             break
-                        # NF-B4: re.search で元文字列上の実際の位置からスニペットを取る
-                        match = re.search(re.escape(term), text, re.IGNORECASE)
-                        if match is None:
+                        # NF-B4: compiled.search で元文字列上の実際の位置からスニペットを取る
+                        # findall を先に取って matches を再利用し、search の重複呼び出しを避ける
+                        matches = compiled.findall(text)
+                        if not matches:
                             continue
-                        count = len(re.findall(re.escape(term), text, re.IGNORECASE))
-                        start = match.start()
+                        count = len(matches)
+                        match = compiled.search(text)
+                        start = match.start()  # type: ignore[union-attr]  # findall hit guarantees match
                         snippet_start = max(0, start - 28)
                         snippet_end = min(len(text), start + len(term) + 42)
                         snippet = " ".join(text[snippet_start:snippet_end].split())
@@ -204,15 +238,26 @@ class PdfService:
 
     @staticmethod
     def search_highlights(pdf_path: Path, page_no: int, query: str) -> list[dict[str, float]]:
-        query = query.strip()
-        if not query:
-            return []
+        rects, _page_count = PdfService.search_highlights_with_count(pdf_path, page_no, query)
+        return rects
 
+    @staticmethod
+    def search_highlights_with_count(pdf_path: Path, page_no: int, query: str) -> tuple[list[dict[str, float]], int]:
+        """Return (rects, page_count) using a single fitz.open call.
+
+        Raises ValueError for out-of-range page_no or password-protected files.
+        Returns ([], page_count) when query is empty.
+        """
+        query = query.strip()
         fitz_module = PdfService._require_fitz()
         with PdfService._open_doc(pdf_path, fitz_module) as doc:
-            page_index = PdfService.one_based_page_to_fitz_index(page_no)
-            if page_index >= doc.page_count:
-                raise ValueError("PDF page number exceeds document page count.")
+            page_count = doc.page_count
+            if not query:
+                return [], page_count
+            page_no = int(page_no)
+            if page_no < 1 or page_no > page_count:
+                raise ValueError(f"page_no must be between 1 and {page_count}")
+            page_index = page_no - 1
             page = doc.load_page(page_index)
             page_rect = page.rect
             rects = []
@@ -227,7 +272,7 @@ class PdfService:
                         "page_height": round(float(page_rect.height), 3),
                     }
                 )
-            return rects
+            return rects, page_count
 
     @staticmethod
     def index_candidates(pdf_paths: list[Path], keywords: list[str] | None = None) -> list[dict[str, object]]:
