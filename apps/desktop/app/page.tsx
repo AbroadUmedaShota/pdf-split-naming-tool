@@ -2911,11 +2911,12 @@ export default function Page() {
           <span className="group-label">
             ページ状態一覧
             {/* 常設のライブリージョンにして内部テキストだけ差し替える。
-                条件付きマウントにすると出現時に即読み上げされ毎カウントで連打になるため。 */}
+                条件付きマウントにすると出現時に即読み上げされ毎カウントで連打になるため。
+                role="status" は付けない（ステータスpillの [role="status"] と重複し
+                一意特定を壊すため）。aria-live のみでライブリージョンとして成立する。 */}
             <small
               aria-live="polite"
               className="muted-line page-state-note"
-              role="status"
             >
               {thumbnailProgress
                 ? `サムネイル取得中 ${thumbnailProgress.loaded}/${thumbnailProgress.total}`
@@ -4194,8 +4195,10 @@ export default function Page() {
         <div className="legacy-panel-section assist-section">
           <span className="group-label">白紙候補</span>
           {/* 常設のライブリージョンにして内部テキストだけ差し替える。
-              条件付きマウントにするとスキャン開始時のメッセージが即読み上げされずに流れるため。 */}
-          <small aria-live="polite" className="muted-line" role="status">
+              条件付きマウントにするとスキャン開始時のメッセージが即読み上げされずに流れるため。
+              role="status" は付けない（ステータスpillの [role="status"] と重複するため）。
+              aria-live のみでライブリージョンとして成立する。 */}
+          <small aria-live="polite" className="muted-line">
             {blankScanProgress ?? null}
           </small>
           <div className="blank-candidates">
@@ -4286,11 +4289,13 @@ export default function Page() {
               ) : null}
             </div>
           </div>
-          {/* danger 時は assertive で即読み上げ、それ以外は polite（状態変化を邪魔しない）。 */}
+          {/* role は status で固定（動的に alert へ切り替えると role="status" 前提のフロー/テストが壊れ、
+              SR の役割再アナウンスも増える）。深刻度は aria-live のみで出し分ける:
+              danger は assertive で即読み上げ、それ以外は polite（状態変化を邪魔しない）。 */}
           <div
             aria-live={statusTone === "danger" ? "assertive" : "polite"}
             className={`status-pill ${statusTone}`}
-            role={statusTone === "danger" ? "alert" : "status"}
+            role="status"
           >
             {statusTone === "danger" || statusTone === "warning" ? (
               <AlertTriangle aria-hidden="true" size={16} />
