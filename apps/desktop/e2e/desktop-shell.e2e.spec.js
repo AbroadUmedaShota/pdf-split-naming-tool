@@ -750,6 +750,43 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     expect(pageErrors, '矢印ナビ操作で JS 例外が発生しない').toEqual([]);
   });
 
+  test('TC-E2E-B9 STEP2でクリック位置に依存せず分割・移動ショートカットが効き一覧が追従する', async ({ page }) => {
+    // Risk: ボタン/入力欄をクリックした後にフォーカスが奪われ、Space/矢印の分割・移動が効かなくなる
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+
+    await openDevStep(page, 'split');
+    expect(await readCurrentPage(page), 'STEP2初期表示は4ページ目').toBe('4');
+
+    // ページ番号入力（テキスト入力）にフォーカス中は、従来どおり矢印でページ移動しない（入力編集を優先）。
+    await page.locator('input[aria-label="ページ番号"]').focus();
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(async () => await readCurrentPage(page), {
+      message: 'ページ番号入力フォーカス中は矢印でページ移動しない',
+    }).toBe('4');
+
+    // 入力欄以外（プレビュー枠）をクリックすると中立フォーカスへ逃げ、実キーの矢印でページ移動できる。
+    await page.locator('.preview-frame').click();
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(async () => await readCurrentPage(page)).toBe('5');
+
+    // 表示モードのボタン（フォーカス可能）をクリックした後でも、実キーの Space で分割を追加できる。
+    const markerCountBefore = await page.locator('.split-marker').count();
+    await page.getByRole('button', { name: '幅合わせ' }).click();
+    await page.keyboard.press(' ');
+    await expect(page.locator('.split-marker')).toHaveCount(markerCountBefore + 1);
+    await expect(page.locator('.page-state-row.split-before').filter({ hasText: '5ページ' })).toHaveCount(1);
+
+    // ページ状態一覧の追従: 最終ページへ移動しても現在行が表示領域内に留まる。
+    await page.locator('input[aria-label="ページ番号"]').fill('11');
+    await expect.poll(async () => await readCurrentPage(page)).toBe('11');
+    const selectedRow = page.locator('.page-state-row.selected');
+    await expect(selectedRow).toContainText('11ページ');
+    await expect(selectedRow).toBeInViewport();
+
+    expect(pageErrors, 'クリック位置非依存のショートカット操作で JS 例外が発生しない').toEqual([]);
+  });
+
   test('TC-E2E-C1 STEP2検索支援で用語選択・検索結果・OCR強調・ハイライトが表示される', async ({ page }) => {
     // TC: manual C1 | Risk: 検索支援が分割判断の補助として使えない
     const pageErrors = [];
@@ -814,6 +851,8 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
 
     const filenamePreview = page.locator('.filename-preview strong');
     await expect(filenamePreview).toHaveText('01_01_002.pdf');
+    // セグメント一覧の命名列は、出力名プレビューと同じ実ファイル名を表示する（表記ゆれ無し）。
+    await expect(page.locator('.mini-row.selected')).toContainText('01_01_002.pdf');
 
     await page.getByRole('button', { name: /追加（最大2件）/ }).click();
     await page.getByLabel('追加項目1の値').fill('契約A');
@@ -838,6 +877,7 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await page.locator('.mini-row').filter({ hasText: '8-11' }).click();
     await expect(page.getByLabel('追加項目1の値')).toHaveValue('');
     await expect(filenamePreview).toHaveText('01_01_003.pdf');
+    await expect(page.locator('.mini-row.selected')).toContainText('01_01_003.pdf');
 
     await page.getByLabel('追加項目1の値').fill('再追加');
     await expect(filenamePreview).toHaveText('01_01_003_再追加.pdf');

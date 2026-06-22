@@ -680,6 +680,8 @@ export default function Page() {
   // プレビューの Ctrl+ホイール拡大縮小。要素にネイティブリスナーを張り、最新ハンドラを ref 経由で呼ぶ。
   const previewFrameRef = useRef<HTMLDivElement | null>(null);
   const previewWheelHandlerRef = useRef<(event: WheelEvent) => void>(() => {});
+  // ページ状態一覧（スクロール領域）。表示ページが変わったとき現在行をビューへ追従させるのに使う。
+  const pageStateListRef = useRef<HTMLDivElement | null>(null);
   // 検索用語モーダルのフォーカストラップ用。モーダルルートと起動元ボタンを ref で保持する。
   const searchTermModalRef = useRef<HTMLElement | null>(null);
   const searchTermModalTriggerRef = useRef<HTMLElement | null>(null);
@@ -2045,6 +2047,20 @@ export default function Page() {
     }, 180);
   }
 
+  // ステップ2では、プレビュー・ページ状態一覧・各ボタンのどこをクリックしても、キーボード
+  // ショートカット（Space=分割／←→=ページ移動）が効き続けるようにする。クリックでフォーカスが
+  // ボタンや行へ移ると window ショートカットが Space/Enter を奪われるため、中立なプレビュー枠へ
+  // フォーカスを逃がす。ページ番号などのテキスト入力をクリックした時だけは通常どおり入力に渡す。
+  function keepSplitShortcutsFocus(event: React.MouseEvent): void {
+    if (activeStep !== "split" || isEditableKeyboardTarget(event.target)) {
+      return;
+    }
+    // mousedown の preventDefault はフォーカス移動だけを止め、click は発火させる（各ボタンの
+    // onClick は通常どおり動く）。既存のテキスト転記バー（onMouseDown で preventDefault）と同手法。
+    event.preventDefault();
+    previewFrameRef.current?.focus({ preventScroll: true });
+  }
+
   step2KeyHandlerRef.current = (event: KeyboardEvent): void => {
     if (activeStep !== "split" || isEditableKeyboardTarget(event.target)) {
       return;
@@ -2153,6 +2169,16 @@ export default function Page() {
       window.removeEventListener("keydown", listener);
     };
   }, []);
+
+  // ステップ2で表示ページが変わったら、ページ状態一覧の現在行を自動でビューに入れる
+  // （ショートカットでのページ移動・分割中もリストが現在ページに追従するように）。
+  useEffect(() => {
+    if (activeStep !== "split") {
+      return;
+    }
+    const selectedRow = pageStateListRef.current?.querySelector<HTMLElement>(".page-state-row.selected");
+    selectedRow?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeStep, currentPage, currentPdf]);
 
   // プレビュー枠の Ctrl+ホイール。passive:false でないと preventDefault が効かず webview 既定の
   // ズームが走るため、React の onWheel ではなくネイティブリスナーで張る。表示ステップ切替で
@@ -2925,7 +2951,7 @@ export default function Page() {
                   : null}
             </small>
           </span>
-          <div className="page-state-list">
+          <div className="page-state-list" ref={pageStateListRef}>
             {currentPageStates.length ? (
               currentPageStates.map((page) => {
                 const rowClassName = [
@@ -3023,6 +3049,9 @@ export default function Page() {
               </div>
             {allSegments.map((segment) => {
               const missing = missingMetadata(segment.metadata);
+              // 命名列は出力名プレビューと同じ実ファイル名を表示する（素のbox/binder/seqではなく
+              // ゼロ埋め・追加項目込みの最終名）。一覧と「出力名プレビュー」の表記ゆれを無くす。
+              const outputName = previewFilename(segment.metadata, affixDefs, seqDigits);
               // 共通項目と異なる値を持つ行は「個別」と示す（空欄は未入力として別表示）。
               const hasCustomCommonValue =
                 (segment.metadata.box_no && segment.metadata.box_no !== (commonMetadata.box_no ?? "")) ||
@@ -3038,10 +3067,8 @@ export default function Page() {
                     <strong>{segment.pages}</strong>
                     <small>{basename(segment.pdfPath)}</small>
                   </span>
-                  <span>
-                    {`${segment.metadata.box_no || "-"} / ${segment.metadata.binder_no || "-"} / ${
-                      segment.metadata.seq || "-"
-                    }`}
+                  <span title={outputName}>
+                    {outputName}
                     {hasCustomCommonValue ? <small className="state-pill">個別</small> : null}
                   </span>
                   <span className={missing.length ? "state-text warning" : "state-text ok"}>
@@ -3356,7 +3383,7 @@ export default function Page() {
   function renderPreviewFrame() {
     const previewClassName = `preview-frame ${previewFitMode}`;
     return (
-      <div className={previewClassName} ref={previewFrameRef}>
+      <div className={previewClassName} ref={previewFrameRef} tabIndex={-1}>
         {isPreviewLoading ? (
           <div aria-live="polite" className="preview-loading-indicator" role="status">
             読み込み中…
@@ -4346,6 +4373,7 @@ export default function Page() {
                 : "task-layout"
         }
         aria-label="PDF整理ワークスペース"
+        onMouseDown={keepSplitShortcutsFocus}
       >
         {renderLeftPane()}
         {renderWorkPane()}
