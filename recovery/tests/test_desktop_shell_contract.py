@@ -23,7 +23,10 @@ def test_desktop_shell_uses_next_static_export_for_tauri() -> None:
     assert tauri_config["build"]["beforeBuildCommand"] == "npm run build:bundle"
     assert tauri_config["bundle"]["icon"] == ["icons/icon.ico"]
     assert tauri_config["bundle"]["resources"] == ["resources/sidecar/"]
-    assert tauri_config["bundle"]["windows"]["wix"]["language"] == "ja-JP"
+    # 配布インストーラは NSIS の _x64-setup.exe ただ1つ（updater 正本）。
+    # MSI(wix) は配布しない（check-release-assets が非NSIS資産を stale 拒否）。
+    assert tauri_config["bundle"]["targets"] == ["nsis"]
+    assert "windows" not in tauri_config["bundle"]
 
 
 def test_desktop_tauri_exposes_python_sidecar_bridge() -> None:

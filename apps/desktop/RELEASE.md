@@ -68,7 +68,7 @@ npm run release:check
 
 ```powershell
 $repo = "AbroadUmedaShota/pdf-split-naming-tool"
-$version = "0.1.4"
+$version = "0.1.5"
 $tag = "v$version"
 
 gh release create $tag `
@@ -84,7 +84,7 @@ gh release create $tag `
 
 ```powershell
 $repo = "AbroadUmedaShota/pdf-split-naming-tool"
-$version = "0.1.4"
+$version = "0.1.5"
 $tag = "v$version"
 
 gh release upload $tag `
@@ -101,7 +101,7 @@ asset 名だけを `latest.json` に戻します。これにより GitHub Releas
 
 ```powershell
 $repo = "AbroadUmedaShota/pdf-split-naming-tool"
-$version = "0.1.4"
+$version = "0.1.5"
 $tag = "v$version"
 $tempDir = Join-Path $env:TEMP "pdf-updater-release"
 $tempAsset = Join-Path $tempDir "latest-json"
@@ -128,7 +128,7 @@ https://github.com/AbroadUmedaShota/pdf-split-naming-tool/releases/latest/downlo
 
 ```powershell
 $repo = "AbroadUmedaShota/pdf-split-naming-tool"
-$version = "0.1.4"
+$version = "0.1.5"
 $tag = "v$version"
 
 curl.exe -sS -L "https://github.com/AbroadUmedaShota/pdf-split-naming-tool/releases/latest/download/latest.json"
@@ -173,3 +173,47 @@ npm run test:installed-updater
 2026-06-18 の v0.1.4 公開確認では、`npm run test:installed-updater` により
 v0.1.3 から v0.1.4 への更新、再起動後の `現在のバージョン: 0.1.4`、
 再確認時の `最新版です。` 表示まで成功しています。
+
+> 各リリースで更新スモークの旧→新バージョンは変わります。例えば 0.1.5 の確認では
+> 旧 0.1.4 / 新 0.1.5 を、上記「動作確認」の環境変数（`PDF_ORGANIZER_UPDATER_OLD_*` /
+> `_NEW_VERSION`）で指定して実行します。
+
+## インストーラ形式（正本）
+
+配布する Windows インストーラは **NSIS の `pdf-organizer-desktop_<version>_x64-setup.exe` ただ1つ**で、
+これが updater のターゲットでもあります。`tauri.conf.json` の `bundle.targets` は `["nsis"]` に固定しています。
+
+- `check-release-assets` / `create-updater-manifest` / `installed-updater-smoke` はすべて NSIS の
+  `_x64-setup.exe` を前提にしています。
+- MSI は配布しません。`check-release-assets` は NSIS 以外の `pdf-organizer-desktop_*` 資産を
+  stale として拒否します。インストーラ種別を MSI 等へ変えるときは、これら3スクリプトと
+  `bundle.targets` を必ず同時に揃えてください（ズレると updater の asset 名が一致せず、
+  自動更新がサイレントで失敗します）。
+
+## 段階配信（デスクトップのカナリア相当）
+
+全ユーザーが単一の `latest.json` を参照するため、`latest.json` を差し替えた瞬間に全員が更新対象になります。
+不良版の影響範囲を絞るため、次の段階で配信します。
+
+1. GitHub Release を **draft / prerelease** で作成し、この時点では `latest.json` を新版へ差し替えない。
+2. 限定の確認者が NSIS installer を手動ダウンロードして実機検証（`installed-*-smoke` 相当・updater 往復）。
+3. 問題なければ Release を publish し、`latest.json` を新版へ差し替えて全体配信に移行する。
+
+## ロールバック手順（不良版を配信してしまった場合）
+
+ローカルファイル出力のみで DB マイグレーションが無いため、巻き戻しは Release asset の差し替えだけで完結します。
+
+1. 直前の正常版（例: v0.1.4）の installer・`.sig`・`latest.json` を手元に用意する（過去の Release からも取得可）。
+2. `latest.json` を旧版の内容へ戻し、`releases/latest/download/latest.json` の asset を旧版で `--clobber` 上書きする
+   （手順7の content-type 回避と同じやり方）。これで updater は旧版を「最新」と認識し、新規の更新適用を止められる。
+3. 不良版の Release を draft 化または削除し、`latest` が旧版 Release を指す状態にする。
+4. `curl` で `latest.json` の `version` が旧版へ戻ったことを確認する（手順8と同じ）。
+
+所要は手作業で約5〜10分（推定）。**既に不良版へ更新済みのユーザーには、updater は通常ダウングレードしないため、
+旧版 installer の手動再インストールを案内する**。
+
+## 既知の問題（リリースノートに記載）
+
+- **#113 常駐 sidecar の head-of-line blocking**: 長時間の出力（export）処理中は、後続コマンド
+  （プレビュー・検索など）が直列キューで待たされる。出力中は他操作が一時的に固まったように見えることがある。
+  機能的な誤りではなく、修正は次バージョン以降に検討。
