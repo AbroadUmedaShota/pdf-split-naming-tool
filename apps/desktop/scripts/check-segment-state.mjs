@@ -355,3 +355,39 @@ assert.deepEqual(splitPointsFor(5, [5, 2, 5, 1, 0, 6]), [2, 5]);
     affix2: "suffix-B",
   });
 }
+
+// regression: 自動採番(seq)だけ入った=box/binder未保持(共通値依存)の親を分割した時、
+// 空の box_no/binder_no を書き込まず、buildSegments で共通項目が反映され続けること。
+// （実機で「分割後はファイル名に箱/バインダーが入らず、一括適用を押すまでダメ」だった原因の修正）
+{
+  const reconciled = reconcileSegmentMetadataForPdf({
+    pageCount: 10,
+    pdfPath,
+    previousSplitPoints: [],
+    nextSplitPoints: [6],
+    segmentMetadata: {
+      [wholeKey]: { seq: "1" },
+    },
+  });
+
+  // 空の box_no/binder_no キーを作らない（seq のリセットのみ）。
+  assert.deepEqual(reconciled[firstSplitKey], { seq: "" });
+  assert.deepEqual(reconciled[secondSplitKey], { seq: "" });
+
+  // 共通項目を入れて buildSegments すると、分割後の全セグメントへ箱/バインダーが反映される。
+  const segments = buildSegments(
+    [{ path: pdfPath, pageCount: 10 }],
+    { [pdfPath]: [6] },
+    reconciled,
+    { box_no: "5", binder_no: "3" },
+  );
+  assert.deepEqual(
+    segments.map((segment) => ({ box_no: segment.metadata.box_no, binder_no: segment.metadata.binder_no })),
+    [
+      { box_no: "5", binder_no: "3" },
+      { box_no: "5", binder_no: "3" },
+    ],
+  );
+}
+
+console.log("[test:segment-state] all assertions passed");
