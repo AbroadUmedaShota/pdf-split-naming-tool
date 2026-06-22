@@ -2062,6 +2062,9 @@ button.split-marker:hover:not(:disabled) {
   display: grid;
   position: relative;
   min-height: 520px;
+  /* ショートカット維持のためマウス操作時に中立フォーカスを受ける（tabIndex=-1）。
+     クリック由来のフォーカスリングは見せない（キーボード Tab では到達しない要素）。 */
+  outline: none;
   max-height: calc(100vh - 320px);
   /* 収まる時は中央、はみ出す時だけ端寄せ（safe）。拡大時に上端へジャンプする違和感を防ぎ、
      かつ中央寄せで上端が見切れてスクロールできなくなる問題も避ける。 */

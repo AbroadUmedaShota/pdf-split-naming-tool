@@ -113,10 +113,12 @@ export function reconcileSegmentMetadataForPdf({
     const previousMetadata = containingPreviousSegment ? segmentMetadata[containingPreviousSegment.key] : undefined;
 
     if (previousMetadata) {
+      // 親セグメントが実際に持つ値（box/binder/追加項目）だけを引き継ぐ。
+      // box_no/binder_no を "" で固定すると、共通項目（commonMetadata）が buildSegments で
+      // 上書きされて反映されなくなる（分割後にファイル名へ箱/バインダーが入らず、
+      // 一括適用を押すまで反映されないバグの原因）。未保持のキーは作らず、共通値へフォールバックさせる。
       const { seq: _seq, ...rest } = previousMetadata;
       nextMetadata[nextSegment.key] = {
-        box_no: previousMetadata.box_no ?? "",
-        binder_no: previousMetadata.binder_no ?? "",
         ...rest,
         seq: ""
       };
