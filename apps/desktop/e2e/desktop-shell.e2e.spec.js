@@ -909,4 +909,26 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
 
     expect(pageErrors, '1366px幅レイアウト確認で JS 例外が発生しない').toEqual([]);
   });
+
+  test('TC-E2E-D1 STEP4で出力先変更導線・状態メッセージ全文・要修正ガイドが揃う', async ({ page }) => {
+    // Risk: 既存衝突時に「出力先を変更」と促されるのに、その場で変更できず・メッセージも見切れる
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+
+    await openDevStep(page, 'output');
+
+    // A1: 出力先を変更ボタンが STEP4 にある（STEP1 へ戻らず変更できる導線）。
+    await expect(page.getByRole('button', { name: '出力先を変更' })).toBeEnabled();
+
+    // A2: 既存衝突行の状態メッセージが見切れず、title でフル文を保持する。
+    const existingMsg = '同名ファイルが既存です。出力先を変更するか既存ファイルを削除してください';
+    const stateCell = page.locator('.check-row.error .check-state-cell');
+    await expect(stateCell).toHaveAttribute('title', existingMsg);
+    await expect(stateCell).toContainText('既存ファイルを削除してください');
+
+    // A3: 要修正がある時、次アクションの一行ガイドが出る。
+    await expect(page.locator('.output-issue-hint')).toContainText('要修正の行があります');
+
+    expect(pageErrors, 'STEP4出力UXで JS 例外が発生しない').toEqual([]);
+  });
 });

@@ -2354,6 +2354,26 @@ button.split-marker:hover:not(:disabled) {
   color: var(--ok);
 }
 
+/* 状態列は回復手順の長文（「同名ファイルが既存です…」等）が入るため、見切れさせず
+   折り返す（title 属性でフルテキストも保持）。他の列の ellipsis は維持する。 */
+.check-row span.check-state-cell {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.35;
+}
+
+/* 要修正がある時の次アクション誘導。warning 寄りの控えめな一行ヒント。 */
+.output-issue-hint {
+  margin: 0;
+  color: var(--warning);
+  background: var(--warning-bg);
+  border: 1px solid rgba(161, 92, 7, 0.22);
+  border-radius: var(--radius-2);
+  padding: 8px 10px;
+  font-size: var(--font-size-caption);
+}
+
 .log-box {
   border-left: 3px solid var(--accent);
   background: var(--surface-2);
