@@ -1742,6 +1742,31 @@ export default function Page() {
     setStatus("最後の分割を取り消しました。");
   }
 
+  // 現在表示中PDFの「分割点にできる検索ヒット」ページ（先頭ページ除く・重複排除）。
+  const searchHitSplitPages = useMemo(
+    () => [
+      ...new Set(
+        searchResults
+          .filter((result) => result.pdfPath === currentPdf && result.pageNo > 1)
+          .map((result) => result.pageNo)
+      )
+    ],
+    [searchResults, currentPdf]
+  );
+
+  // 検索ヒットのあった各ページの前に一括で分割点を打つ（例:「契約書」で検索→各契約書ページの前で分割）。
+  // 現在表示中PDFのヒットのみ対象。先頭ページのヒットは分割点にできないため除外。分割後は連番が自動採番される。
+  function splitAtSearchHits(): void {
+    if (!currentFile || !searchHitSplitPages.length) {
+      setStatus("現在のPDFに分割点にできる検索ヒットがありません（先頭ページのヒットは除外）。", "warning");
+      return;
+    }
+    invalidateWorkspaceRequests();
+    clearOutputState();
+    updateCurrentPdfSplitPoints((currentPoints) => [...currentPoints, ...searchHitSplitPages]);
+    setStatus(`検索ヒット ${searchHitSplitPages.length}件のページ前で一括分割しました（連番は自動採番）。`, "ok");
+  }
+
   async function clearCurrentPdfSplits(): Promise<void> {
     if (!currentFile || currentPdfSplitPointCount === 0) {
       return;
@@ -4300,6 +4325,17 @@ export default function Page() {
               renderSearchEmptyState()
             )}
           </div>
+          {searchResults.length ? (
+            <button
+              className="search-split-apply"
+              disabled={!searchHitSplitPages.length}
+              onClick={splitAtSearchHits}
+              title="検索ヒットのあった各ページの前で一括分割します（先頭ページは除外・連番は自動採番）"
+              type="button"
+            >
+              <IconLabel icon={Split}>ヒットのページ前で一括分割（{searchHitSplitPages.length}件）</IconLabel>
+            </button>
+          ) : null}
         </div>
         <div className="legacy-panel-section assist-section">
           <div className="section-title-row">
