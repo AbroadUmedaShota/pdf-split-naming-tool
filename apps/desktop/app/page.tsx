@@ -343,6 +343,11 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   return target.matches("input, textarea, select") || target.isContentEditable;
 }
 
+// 出力から除外したセグメント（白紙・区切り紙など）。除外は出力されず、連番の採番対象からも外す。
+function isMetadataExcluded(metadata: Record<string, string> | undefined): boolean {
+  return metadata?.excluded === "1";
+}
+
 function normalizeSearchTerm(term: string): string {
   return term.trim();
 }
@@ -730,15 +735,21 @@ export default function Page() {
     });
   }, [blankCandidates, currentFile, currentPage, currentPdfSegments, currentSplitPoints]);
   const totalPages = useMemo(() => pdfFiles.reduce((total, file) => total + file.pageCount, 0), [pdfFiles]);
-  const incompleteSegments = useMemo(
-    () => allSegments.filter((segment) => missingMetadata(segment.metadata).length > 0).length,
+  // 出力対象セグメント（除外したものを除く）。件数・採番・出力はこれを基準にする。
+  const outputSegments = useMemo(
+    () => allSegments.filter((segment) => !isMetadataExcluded(segment.metadata)),
     [allSegments]
   );
-  const readySegments = Math.max(0, allSegments.length - incompleteSegments);
+  const excludedSegmentCount = allSegments.length - outputSegments.length;
+  const incompleteSegments = useMemo(
+    () => outputSegments.filter((segment) => missingMetadata(segment.metadata).length > 0).length,
+    [outputSegments]
+  );
+  const readySegments = Math.max(0, outputSegments.length - incompleteSegments);
   const outputIssues = outputIssueCount(preflightChecks);
   const existingOutputs = preflightChecks.filter((check) => check.has_existing_output).length;
   const canContinueFromImport = pdfFiles.length > 0 && Boolean(outputDir);
-  const canRunPreflight = allSegments.length > 0 && Boolean(outputDir);
+  const canRunPreflight = outputSegments.length > 0 && Boolean(outputDir);
   const canExport =
     preflightChecks.length > 0 &&
     outputIssues === 0 &&
@@ -2337,6 +2348,10 @@ export default function Page() {
     const positionByPdf = new Map<string, number>();
     let changed = false;
     for (const segment of allSegments) {
+      // 除外セグメントは採番対象外。位置にも数えないので、残りの連番が詰まる（番号が飛ばない）。
+      if (isMetadataExcluded(next[segment.key])) {
+        continue;
+      }
       const position = positionByPdf.get(segment.pdfPath) ?? 0;
       positionByPdf.set(segment.pdfPath, position + 1);
       const storedSeq = next[segment.key]?.seq ?? "";
@@ -2361,6 +2376,34 @@ export default function Page() {
     clearOutputState();
     setSegmentMetadata((current) => numberSegmentsPerPdf(current, false));
     setStatus("連番を再採番しました（PDF単位・手動入力は保持）。", "ok");
+  }
+
+  // セグメント（分割後の1書類）を出力から除外/復帰する。白紙・区切り紙などを出力したくない時に使う。
+  // 除外すると出力されず、連番は詰めて採番し直す（番号が飛ばない）。
+  function toggleSegmentExcluded(segment: SegmentView): void {
+    const nowExcluded = !isMetadataExcluded(segment.metadata);
+    invalidateWorkspaceRequests();
+    clearOutputState();
+    // 除外/復帰した行の連番手動指定は解除し、自動採番に委ねる。
+    manualSeqKeysRef.current.delete(segment.key);
+    setSegmentMetadata((current) => {
+      const withFlag: SegmentMetadata = {
+        ...current,
+        [segment.key]: {
+          ...(current[segment.key] ?? {}),
+          excluded: nowExcluded ? "1" : "",
+          // 除外時は連番を空にする（復帰時は再採番で振り直す）。
+          seq: nowExcluded ? "" : (current[segment.key]?.seq ?? "")
+        }
+      };
+      return numberSegmentsPerPdf(withFlag, false);
+    });
+    setStatus(
+      nowExcluded
+        ? `${segment.pages}ページを出力から除外しました（連番を詰め直しました）。`
+        : `${segment.pages}ページを出力に戻しました（連番を詰め直しました）。`,
+      "ok"
+    );
   }
 
   function fillEmptySeqByRule(): void {
@@ -2479,7 +2522,8 @@ export default function Page() {
   }
 
   function requestSegments(): SidecarSegment[] {
-    return allSegments.map((segment) => ({
+    // 除外したセグメントは出力しない。
+    return outputSegments.map((segment) => ({
       pdf_path: segment.pdfPath,
       start_page: segment.startPage,
       end_page: segment.endPage,
@@ -3033,7 +3077,7 @@ export default function Page() {
       <div className="pane stack">
         <PaneHeader
           title="セグメント一覧"
-          description={`${readySegments}件 OK / ${incompleteSegments}件 未入力　（↑↓で移動）`}
+          description={`${readySegments}件 OK / ${incompleteSegments}件 未入力${excludedSegmentCount ? ` / ${excludedSegmentCount}件 除外` : ""}　（↑↓で移動）`}
         />
         {allSegments.length ? (
           <>
@@ -3054,34 +3098,64 @@ export default function Page() {
                 <span>状態</span>
               </div>
             {allSegments.map((segment) => {
-              const missing = missingMetadata(segment.metadata);
+              const excluded = isMetadataExcluded(segment.metadata);
+              const missing = excluded ? [] : missingMetadata(segment.metadata);
               // 命名列は出力名プレビューと同じ実ファイル名を表示する（素のbox/binder/seqではなく
               // ゼロ埋め・追加項目込みの最終名）。一覧と「出力名プレビュー」の表記ゆれを無くす。
               const outputName = previewFilename(segment.metadata, affixDefs, seqDigits);
               // 共通項目と異なる値を持つ行は「個別」と示す（空欄は未入力として別表示）。
               const hasCustomCommonValue =
-                (segment.metadata.box_no && segment.metadata.box_no !== (commonMetadata.box_no ?? "")) ||
-                (segment.metadata.binder_no && segment.metadata.binder_no !== (commonMetadata.binder_no ?? ""));
+                !excluded &&
+                ((segment.metadata.box_no && segment.metadata.box_no !== (commonMetadata.box_no ?? "")) ||
+                  (segment.metadata.binder_no && segment.metadata.binder_no !== (commonMetadata.binder_no ?? "")));
+              const rowClass = ["mini-row", segment.key === selectedSegment?.key ? "selected" : "", excluded ? "excluded" : ""]
+                .filter(Boolean)
+                .join(" ");
               return (
-                <button
-                  aria-label={`${segment.pages}ページ、${missing.length ? "未入力" : outputName}`}
-                  className={segment.key === selectedSegment?.key ? "mini-row selected" : "mini-row"}
+                // 内側に除外ボタンをネストするため button ではなく div[role=button]（HTML仕様）。
+                <div
+                  aria-label={`${segment.pages}ページ、${excluded ? "出力から除外" : missing.length ? "未入力" : outputName}`}
+                  className={rowClass}
                   key={segment.key}
                   onClick={() => void selectSegmentForPreview(segment)}
-                  type="button"
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) {
+                      return; // 内側の除外ボタン由来のキー操作で行選択まで発火させない
+                    }
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      void selectSegmentForPreview(segment);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
                 >
                   <span title={`${segment.pages}ページ / ${basename(segment.pdfPath)}`}>
                     <strong>{segment.pages}</strong>
                     <small>{basename(segment.pdfPath)}</small>
                   </span>
-                  <span title={outputName}>
-                    {outputName}
+                  <span title={excluded ? "出力から除外中" : outputName}>
+                    {excluded ? "（出力しない）" : outputName}
                     {hasCustomCommonValue ? <small className="state-pill">個別</small> : null}
                   </span>
-                  <span className={missing.length ? "state-text warning" : "state-text ok"}>
-                    {missing.length ? "未入力" : "OK"}
+                  <span className="mini-row-state">
+                    <span className={excluded ? "state-text muted" : missing.length ? "state-text warning" : "state-text ok"}>
+                      {excluded ? "除外" : missing.length ? "未入力" : "OK"}
+                    </span>
+                    <button
+                      aria-label={excluded ? `${segment.pages}ページを出力に戻す` : `${segment.pages}ページを出力から除外`}
+                      className="exclude-toggle"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleSegmentExcluded(segment);
+                      }}
+                      title={excluded ? "出力に戻す" : "出力から除外（白紙・区切り紙など）"}
+                      type="button"
+                    >
+                      {excluded ? <RotateCcw aria-hidden="true" size={14} /> : <Trash2 aria-hidden="true" size={14} />}
+                    </button>
                   </span>
-                </button>
+                </div>
               );
             })}
             </div>

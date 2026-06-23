@@ -1069,4 +1069,31 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
 
     expect(pageErrors, '全体表示フィット確認で JS 例外が発生しない').toEqual([]);
   });
+
+  test('TC-E2E-D8 セグメント除外で出力対象から外れ連番が詰まる', async ({ page }) => {
+    // Risk: 白紙等の不要セグメントを除外できず、または除外しても連番が飛ぶ
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await openDevStep(page, 'input');
+
+    const row47 = page.locator('.mini-row').filter({ hasText: '4-7' });
+    const row811 = page.locator('.mini-row').filter({ hasText: '8-11' });
+    // 初期: 3件・8-11 は 003。
+    await expect(row811).toContainText('01_01_003.pdf');
+
+    // 中間(4-7)を出力から除外。
+    await page.getByRole('button', { name: '4-7ページを出力から除外' }).click();
+
+    // 4-7 は除外表示／8-11 の連番は 002 に詰まる（番号が飛ばない）。
+    await expect(row47).toContainText('除外');
+    await expect(row47).toContainText('（出力しない）');
+    await expect(row811).toContainText('01_01_002.pdf');
+    await expect(page.getByText('1件 除外')).toBeVisible();
+
+    // 復帰すると 8-11 は 003 に戻る。
+    await page.getByRole('button', { name: '4-7ページを出力に戻す' }).click();
+    await expect(row811).toContainText('01_01_003.pdf');
+
+    expect(pageErrors, 'セグメント除外で JS 例外が発生しない').toEqual([]);
+  });
 });
