@@ -1037,4 +1037,36 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
 
     expect(pageErrors, '最小幅1200確認で JS 例外が発生しない').toEqual([]);
   });
+
+  test('TC-E2E-D7 全体表示はページ全体を枠にフィット（縦も収まる）', async ({ page }) => {
+    // Risk: 全体表示(page)が縦をフィットせず、縦長ページが枠から溢れてスクロールが要る
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await openDevStep(page, 'split');
+
+    const tall = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+      "<svg xmlns='http://www.w3.org/2000/svg' width='300' height='1500'><rect width='300' height='1500' fill='%23ddd'/></svg>"
+    );
+    const measure = async (src) =>
+      page.evaluate(async (src) => {
+        const img = document.querySelector('.preview-page-layer img');
+        img.src = src;
+        await img.decode().catch(() => {});
+        await new Promise((r) => setTimeout(r, 150));
+        const frame = document.querySelector('.preview-frame');
+        return { ih: img.getBoundingClientRect().height, fh: frame.clientHeight };
+      }, src);
+
+    // 全体表示（dev preview の既定）: 縦長ページでも枠の縦内寸に収まる（フィット）。
+    const fit = await measure(tall);
+    expect(fit.ih, '全体表示で画像高さが枠の内寸に収まる').toBeLessThanOrEqual(fit.fh + 1);
+
+    // 幅合わせ: 縦長ページは枠の縦を超える（モードが別挙動であることの確認）。
+    await page.getByRole('button', { name: '幅合わせ' }).click();
+    const widthMode = await measure(tall);
+    expect(widthMode.ih, '幅合わせは縦長ページで枠の縦を超える').toBeGreaterThan(widthMode.fh);
+
+    expect(pageErrors, '全体表示フィット確認で JS 例外が発生しない').toEqual([]);
+  });
 });

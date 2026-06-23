@@ -2166,9 +2166,13 @@ button.split-marker:hover:not(:disabled) {
   max-width: none;
 }
 
+/* 全体表示（page）＝ページ全体を枠にフィット（Ctrl+0 相当）。
+   親(layer)が高さautoだと % max-height は無効化されるため、枠の内寸高さ
+   (= 100vh - 308px。split/input とも実測で一定) から画像余白36pxを引いた
+   確定値で縦を拘束する。layer は画像にtightなまま＝検索ハイライトの整合も維持。 */
 .preview-frame.page .preview-page-layer {
   max-width: min(100%, 760px);
-  max-height: calc(100% - 28px);
+  max-height: calc(100vh - 346px);
 }
 
 .search-highlight-layer {
@@ -2192,7 +2196,7 @@ button.split-marker:hover:not(:disabled) {
 
 .preview-frame.page img {
   max-width: min(100%, 760px);
-  max-height: calc(100% - 28px);
+  max-height: calc(100vh - 346px);
 }
 
 /* 実寸（free）モードはサイドカーが倍率付きで描画した画像を等倍で表示する。
