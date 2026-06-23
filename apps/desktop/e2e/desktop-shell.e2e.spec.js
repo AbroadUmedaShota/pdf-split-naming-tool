@@ -995,25 +995,18 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     expect(pageErrors, 'ブランド整理・ヒント追加で JS 例外が発生しない').toEqual([]);
   });
 
-  test('TC-E2E-D5 ヘッダーサマリは split/input のみ表示し import/output では畳む', async ({ page }) => {
-    // Risk: ヘッダーサマリが取込設定カード/出力summary-stripと二重表示になる
+  test('TC-E2E-D5 ヘッダーサマリは全ステップで撤去され潰れない', async ({ page }) => {
+    // Risk: 潰れやすく本文と重複するヘッダーサマリが残り、ヘッダーがごちゃつく
     const pageErrors = [];
     page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
 
-    await openDevStep(page, 'import');
-    await expect(page.locator('.app-header .header-summary')).toHaveCount(0);
-    await expect(page.locator('.app-header.no-summary')).toBeVisible();
+    for (const step of ['import', 'split', 'input', 'output']) {
+      await openDevStep(page, step);
+      await expect(page.locator('.app-header .header-summary')).toHaveCount(0);
+      await expect(page.locator('.app-header.no-summary')).toBeVisible();
+    }
 
-    await openDevStep(page, 'split');
-    await expect(page.locator('.app-header .header-summary')).toBeVisible();
-
-    await openDevStep(page, 'input');
-    await expect(page.locator('.app-header .header-summary')).toBeVisible();
-
-    await openDevStep(page, 'output');
-    await expect(page.locator('.app-header .header-summary')).toHaveCount(0);
-
-    expect(pageErrors, 'ヘッダーサマリ表示制御で JS 例外が発生しない').toEqual([]);
+    expect(pageErrors, 'ヘッダーサマリ撤去で JS 例外が発生しない').toEqual([]);
   });
 
   test('TC-E2E-D6 最小幅1200でSTEP2/STEP3の主要操作面が画面内に収まる', async ({ page }) => {

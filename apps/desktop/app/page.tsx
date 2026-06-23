@@ -2884,16 +2884,6 @@ export default function Page() {
   const activeStepIndex = steps.findIndex((step) => step.id === activeStep);
   const activeStepMeta = steps[activeStepIndex] ?? steps[0];
   const ActiveStepIcon = activeStepMeta.icon;
-  const splitHeaderSummary =
-    activeStep === "split"
-      ? [
-          { label: "表示PDF", value: currentFile ? basename(currentFile.path) : "未選択" },
-          { label: "ページ位置", value: currentFile ? `${currentPage} / ${currentFile.pageCount}` : "-" },
-          { label: "セグメント", value: `${allSegments.length}件` },
-          { label: "選択範囲", value: currentVisibleSegment?.pages ?? "-" }
-        ]
-      : null;
-
   function renderImportList() {
     return (
       <div className="pane stack">
@@ -4376,7 +4366,7 @@ export default function Page() {
 
   return (
     <main className={activeStep === "split" || activeStep === "input" ? "app-shell split-screen-shell" : "app-shell"}>
-      <header className={activeStep === "split" || activeStep === "input" ? "app-header" : "app-header no-summary"}>
+      <header className="app-header no-summary">
         <div className="brand-row compact-brand">
           <span className="brand-mark">PDF</span>
           <div>
@@ -4393,22 +4383,9 @@ export default function Page() {
             <small>{activeStepMeta.hint}</small>
           </span>
         </div>
-        {/* ヘッダーサマリは split/input でのみ表示する。import は取込設定カード、
-            output は出力確認の summary-strip が同じ情報を持つため重複を避ける（D1/D3）。 */}
-        {activeStep === "split" || activeStep === "input" ? (
-          <section className={splitHeaderSummary ? "header-summary split-header-summary" : "header-summary"} aria-label="作業状況">
-            {splitHeaderSummary ? (
-              splitHeaderSummary.map((item) => <StatLine key={item.label} label={item.label} value={item.value} />)
-            ) : (
-              <>
-                <StatLine label="PDF" value={`${pdfFiles.length}件`} />
-                <StatLine label="分割" value={`${allSegments.length}件`} />
-                <StatLine label="入力" value={allSegments.length ? `${readySegments}件 OK` : "未確認"} />
-                <StatLine label="出力先" value={outputDir ? "設定済み" : "未設定"} />
-              </>
-            )}
-          </section>
-        ) : null}
+        {/* ヘッダーのサマリ(表示PDF/ページ位置/セグメント/選択範囲・PDF/分割/入力/出力先)は
+            幅が足りず潰れやすく、いずれもプレビューツールバー・右パネル・各ステップ本文に
+            同じ情報があるため撤去した。ヘッダーは brand / 現在ステップ / 操作 の3要素に統一。 */}
         <div className="header-actions">
           {renderDevPreviewSwitcher()}
           <div className={`update-card ${updateTone}`}>
