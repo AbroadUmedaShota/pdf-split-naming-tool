@@ -2047,16 +2047,21 @@ export default function Page() {
     }, 180);
   }
 
-  // ステップ2では、プレビュー・ページ状態一覧・各ボタンのどこをクリックしても、キーボード
-  // ショートカット（Space=分割／←→=ページ移動）が効き続けるようにする。クリックでフォーカスが
-  // ボタンや行へ移ると window ショートカットが Space/Enter を奪われるため、中立なプレビュー枠へ
-  // フォーカスを逃がす。ページ番号などのテキスト入力をクリックした時だけは通常どおり入力に渡す。
+  // ステップ2では、プレビューや余白など「操作できない場所」をクリックした時に、中立なプレビュー枠へ
+  // フォーカスを逃がし、キーボードショートカット（Space=分割／←→=ページ移動）を効かせ続ける。
+  // 一方、ボタン・行・リンク等の操作可能要素のクリックでは**フォーカスを奪わない**（キーボード/支援
+  // 技術ユーザーの自然なフォーカス順を壊さないため・WCAG 2.4.3）。操作要素にフォーカスが残っても、
+  // window ショートカットハンドラ側の preventDefault で Space の二重発火は防げる。
+  // ページ番号などのテキスト入力をクリックした時も通常どおり入力に渡す。
   function keepSplitShortcutsFocus(event: React.MouseEvent): void {
     if (activeStep !== "split" || isEditableKeyboardTarget(event.target)) {
       return;
     }
-    // mousedown の preventDefault はフォーカス移動だけを止め、click は発火させる（各ボタンの
-    // onClick は通常どおり動く）。既存のテキスト転記バー（onMouseDown で preventDefault）と同手法。
+    const target = event.target;
+    if (target instanceof Element && target.closest('button, [role="button"], a[href], label, input, select, textarea')) {
+      return;
+    }
+    // 非操作要素のみ：preventDefault でフォーカス移動だけ止め、中立枠へ退避（click は発火する）。
     event.preventDefault();
     previewFrameRef.current?.focus({ preventScroll: true });
   }
@@ -3779,12 +3784,12 @@ export default function Page() {
           </div>
         ) : null}
         {preflightChecks.length ? (
-          <div className="check-table">
-            <div className="check-head">
-              <span>ページ</span>
-              <span>予定ファイル名</span>
-              <span>既存</span>
-              <span>状態</span>
+          <div className="check-table" role="table" aria-label="出力予定の一覧">
+            <div className="check-head" role="row">
+              <span role="columnheader">ページ</span>
+              <span role="columnheader">予定ファイル名</span>
+              <span role="columnheader">既存</span>
+              <span role="columnheader">状態</span>
             </div>
             {preflightChecks.map((check, index) => {
               // 状態文（「同名ファイルが既存です…」等の回復手順）は長く、列幅で見切れると
@@ -3799,12 +3804,13 @@ export default function Page() {
                         ? "check-row"
                         : "check-row error"
                   }
+                  role="row"
                   key={`${check.pdf_path}-${check.pages}-${index}`}
                 >
-                  <span>{check.pages}</span>
-                  <span>{check.filename || check.requested_filename || "-"}</span>
-                  <span>{check.has_existing_output ? "あり" : "なし"}</span>
-                  <span className="check-state-cell" title={stateText}>{stateText}</span>
+                  <span role="cell">{check.pages}</span>
+                  <span role="cell">{check.filename || check.requested_filename || "-"}</span>
+                  <span role="cell">{check.has_existing_output ? "あり" : "なし"}</span>
+                  <span role="cell" className="check-state-cell" title={stateText}>{stateText}</span>
                 </div>
               );
             })}
