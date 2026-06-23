@@ -973,4 +973,25 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
 
     expect(pageErrors, '表セマンティクス/フォーカス保持で JS 例外が発生しない').toEqual([]);
   });
+
+  test('TC-E2E-D4 ブランド整理・状態ボタン説明・ショートカット一覧が揃う', async ({ page }) => {
+    // Risk: ブランド冗長表記/状態ボタンの用途不明/ショートカット非発見
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+
+    await openDevStep(page, 'import');
+    // D4: 見出しは「PDF整理ツール」のみ。副ラベルは廃止。
+    await expect(page.locator('.brand-row h1')).toHaveText('PDF整理ツール');
+    await expect(page.locator('.brand-row .section-label')).toHaveCount(0);
+    // E1: 状態ボタンに用途の説明(title)が付く。
+    await expect(page.getByRole('button', { name: '状態を復元' })).toHaveAttribute('title', /復元します/);
+
+    // E3: STEP2にショートカット一覧（折りたたみ）がある。
+    await openDevStep(page, 'split');
+    await expect(page.locator('.shortcut-help summary')).toHaveText('キーボードショートカット');
+    await page.locator('.shortcut-help summary').click();
+    await expect(page.locator('.shortcut-help')).toContainText('現在ページの前で分割');
+
+    expect(pageErrors, 'ブランド整理・ヒント追加で JS 例外が発生しない').toEqual([]);
+  });
 });
