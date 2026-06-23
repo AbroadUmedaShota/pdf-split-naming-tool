@@ -4302,7 +4302,7 @@ export default function Page() {
 
   return (
     <main className={activeStep === "split" || activeStep === "input" ? "app-shell split-screen-shell" : "app-shell"}>
-      <header className="app-header">
+      <header className={activeStep === "split" || activeStep === "input" ? "app-header" : "app-header no-summary"}>
         <div className="brand-row compact-brand">
           <span className="brand-mark">PDF</span>
           <div>
@@ -4319,18 +4319,22 @@ export default function Page() {
             <small>{activeStepMeta.hint}</small>
           </span>
         </div>
-        <section className={splitHeaderSummary ? "header-summary split-header-summary" : "header-summary"} aria-label="作業状況">
-          {splitHeaderSummary ? (
-            splitHeaderSummary.map((item) => <StatLine key={item.label} label={item.label} value={item.value} />)
-          ) : (
-            <>
-              <StatLine label="PDF" value={`${pdfFiles.length}件`} />
-              <StatLine label="分割" value={`${allSegments.length}件`} />
-              <StatLine label="入力" value={allSegments.length ? `${readySegments}件 OK` : "未確認"} />
-              <StatLine label="出力先" value={outputDir ? "設定済み" : "未設定"} />
-            </>
-          )}
-        </section>
+        {/* ヘッダーサマリは split/input でのみ表示する。import は取込設定カード、
+            output は出力確認の summary-strip が同じ情報を持つため重複を避ける（D1/D3）。 */}
+        {activeStep === "split" || activeStep === "input" ? (
+          <section className={splitHeaderSummary ? "header-summary split-header-summary" : "header-summary"} aria-label="作業状況">
+            {splitHeaderSummary ? (
+              splitHeaderSummary.map((item) => <StatLine key={item.label} label={item.label} value={item.value} />)
+            ) : (
+              <>
+                <StatLine label="PDF" value={`${pdfFiles.length}件`} />
+                <StatLine label="分割" value={`${allSegments.length}件`} />
+                <StatLine label="入力" value={allSegments.length ? `${readySegments}件 OK` : "未確認"} />
+                <StatLine label="出力先" value={outputDir ? "設定済み" : "未設定"} />
+              </>
+            )}
+          </section>
+        ) : null}
         <div className="header-actions">
           {renderDevPreviewSwitcher()}
           <div className={`update-card ${updateTone}`}>

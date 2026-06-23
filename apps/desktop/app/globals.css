@@ -127,6 +127,12 @@ input:focus-visible {
   min-width: 0;
 }
 
+/* ヘッダーサマリを出さないステップ（import/output）は3カラムに畳み、
+   header-actions を右端へ寄せる（空セルの 330px ギャップを作らない）。 */
+.app-header.no-summary {
+  grid-template-columns: minmax(180px, 0.65fr) minmax(150px, auto) minmax(320px, 1fr);
+}
+
 .header-actions {
   display: flex;
   flex-wrap: wrap;
