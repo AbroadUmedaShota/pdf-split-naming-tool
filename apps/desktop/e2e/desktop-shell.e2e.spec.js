@@ -949,4 +949,28 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
 
     expect(pageErrors, 'a11yラベル確認で JS 例外が発生しない').toEqual([]);
   });
+
+  test('TC-E2E-D3 出力表のテーブルセマンティクスと操作要素のフォーカス保持', async ({ page }) => {
+    // Risk: 出力表が表として読めない／フォーカス退避が操作要素のフォーカスを奪う
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+
+    // B3: STEP4出力表が table/columnheader/cell として読める。
+    await openDevStep(page, 'output');
+    await expect(page.getByRole('table', { name: '出力予定の一覧' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: '状態' })).toBeVisible();
+    await expect(
+      page.getByRole('cell', { name: '同名ファイルが既存です。出力先を変更するか既存ファイルを削除してください' })
+    ).toBeVisible();
+
+    // B6: STEP2で操作要素（ボタン）をクリックしてもフォーカスは奪われず、ショートカットも効く。
+    await openDevStep(page, 'split');
+    const fit = page.getByRole('button', { name: '幅合わせ' });
+    await fit.click();
+    await expect(fit).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(async () => await readCurrentPage(page)).toBe('5');
+
+    expect(pageErrors, '表セマンティクス/フォーカス保持で JS 例外が発生しない').toEqual([]);
+  });
 });
