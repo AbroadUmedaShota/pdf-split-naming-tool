@@ -2982,6 +2982,7 @@ export default function Page() {
                     }}
                     role="button"
                     tabIndex={0}
+                    aria-label={`${page.pageNo}ページを選択`}
                   >
                     <span className="page-thumb mini">
                       {pageThumbnails[`${currentPdf}#${page.pageNo}`]
@@ -3058,12 +3059,13 @@ export default function Page() {
                 (segment.metadata.binder_no && segment.metadata.binder_no !== (commonMetadata.binder_no ?? ""));
               return (
                 <button
+                  aria-label={`${segment.pages}ページ、${missing.length ? "未入力" : outputName}`}
                   className={segment.key === selectedSegment?.key ? "mini-row selected" : "mini-row"}
                   key={segment.key}
                   onClick={() => void selectSegmentForPreview(segment)}
                   type="button"
                 >
-                  <span>
+                  <span title={`${segment.pages}ページ / ${basename(segment.pdfPath)}`}>
                     <strong>{segment.pages}</strong>
                     <small>{basename(segment.pdfPath)}</small>
                   </span>
@@ -3434,7 +3436,8 @@ export default function Page() {
           </small>
         ) : null}
         {transcribeArmed && targetDef ? (
-          <div className="ocr-transcribe-bar" role="status">
+          // role="status" は常設の操作バーには不適切（4.1.3）。誤った live region を外す。
+          <div className="ocr-transcribe-bar">
             <span>
               選択を「追加項目{targetIndex + 1}（{targetDef.position === "prefix" ? "先頭" : "末尾"}）」へ
             </span>
@@ -4157,7 +4160,7 @@ export default function Page() {
             )}
           </div>
           <div className="search-command-row">
-            <button onClick={openSearchTermModal} type="button">
+            <button aria-haspopup="dialog" onClick={openSearchTermModal} type="button">
               用語を選択
             </button>
             <button
