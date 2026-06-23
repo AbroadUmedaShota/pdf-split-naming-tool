@@ -2332,6 +2332,51 @@ button.split-marker:hover:not(:disabled) {
   color: var(--warning);
 }
 
+.state-text.muted {
+  background: var(--surface-3);
+  color: var(--muted);
+}
+
+/* mini-row は div[role=button] なのでカーソルを補う（button 既定の代替）。 */
+.mini-row[role="button"] {
+  cursor: pointer;
+}
+
+/* 状態列: 状態テキスト＋除外/復帰トグルを横並びに。 */
+.mini-row-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.exclude-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-1);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--muted);
+}
+
+.exclude-toggle:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* 除外したセグメント: 出力されないことを薄さで示す（命名列は「（出力しない）」表記）。 */
+.mini-row.excluded {
+  opacity: 0.6;
+}
+
+.mini-row.excluded.selected {
+  opacity: 0.82;
+}
+
 .output-list {
   max-height: calc(100vh - 252px);
   overflow: auto;
