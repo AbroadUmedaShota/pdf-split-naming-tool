@@ -3279,10 +3279,19 @@ export default function Page() {
         </div>
         <div className="workbench-footer">
           <div className="aux-actions" aria-label="補助操作">
-            <button onClick={() => void loadState()} type="button">
+            <button
+              onClick={() => void loadState()}
+              title="前回保存した作業内容（PDF一覧・分割点・命名）を復元します"
+              type="button"
+            >
               <IconLabel icon={RotateCcw}>状態を復元</IconLabel>
             </button>
-            <button disabled={isSavingState} onClick={() => void saveState()} type="button">
+            <button
+              disabled={isSavingState}
+              onClick={() => void saveState()}
+              title="現在の作業内容を保存し、次回起動時に復元できるようにします"
+              type="button"
+            >
               <IconLabel icon={Save}>{isSavingState ? "保存中…" : "状態を保存"}</IconLabel>
             </button>
           </div>
@@ -4103,6 +4112,16 @@ export default function Page() {
     return (
       <aside className="right-panel legacy-split-right stack" aria-label="STEP2詳細操作">
         <PaneHeader title="分割設定" />
+        <details className="shortcut-help">
+          <summary>キーボードショートカット</summary>
+          <ul>
+            <li><kbd>←</kbd> <kbd>→</kbd> ページ移動</li>
+            <li><kbd>Alt</kbd>+<kbd>←</kbd> <kbd>→</kbd> PDF切替</li>
+            <li><kbd>Space</kbd> / <kbd>Ctrl</kbd>+<kbd>Enter</kbd> 現在ページの前で分割</li>
+            <li><kbd>Delete</kbd> 選択中の分割点を削除</li>
+            <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> 元に戻す / やり直し</li>
+          </ul>
+        </details>
         <div className="legacy-panel-section current-page-section">
           <span className="group-label">現在ページ</span>
           <div className="current-page-detail">
@@ -4287,7 +4306,6 @@ export default function Page() {
         <div className="brand-row compact-brand">
           <span className="brand-mark">PDF</span>
           <div>
-            <p className="section-label">PDF分割命名ツール</p>
             <h1>PDF整理ツール</h1>
           </div>
         </div>
