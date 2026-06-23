@@ -3731,6 +3731,11 @@ export default function Page() {
           <StatLine label="既存あり" value={`${existingOutputs}件`} />
           <StatLine label="出力先" value={outputDir || "未設定"} />
         </div>
+        {outputIssues > 0 ? (
+          <p className="output-issue-hint">
+            要修正の行があります。「出力先を変更」するか、既存ファイルを削除して「再チェック」してください。
+          </p>
+        ) : null}
         {exportResult ? (
           <div className={exportHasFailure ? "log-box has-failures" : "log-box is-complete"}>
             <strong>{exportHasFailure ? "出力結果（失敗あり）" : "出力結果"}</strong>
@@ -3778,23 +3783,28 @@ export default function Page() {
               <span>既存</span>
               <span>状態</span>
             </div>
-            {preflightChecks.map((check, index) => (
-              <div
-                className={
-                  isOutputItemCreated(check)
-                    ? "check-row created"
-                    : isOutputCheckOk(check)
-                      ? "check-row"
-                      : "check-row error"
-                }
-                key={`${check.pdf_path}-${check.pages}-${index}`}
-              >
-                <span>{check.pages}</span>
-                <span>{check.filename || check.requested_filename || "-"}</span>
-                <span>{check.has_existing_output ? "あり" : "なし"}</span>
-                <span>{outputDetailStateText(check)}</span>
-              </div>
-            ))}
+            {preflightChecks.map((check, index) => {
+              // 状態文（「同名ファイルが既存です…」等の回復手順）は長く、列幅で見切れると
+              // 何をすべきか読めなくなる。折り返し可にし、title でフルテキストも保持する。
+              const stateText = outputDetailStateText(check);
+              return (
+                <div
+                  className={
+                    isOutputItemCreated(check)
+                      ? "check-row created"
+                      : isOutputCheckOk(check)
+                        ? "check-row"
+                        : "check-row error"
+                  }
+                  key={`${check.pdf_path}-${check.pages}-${index}`}
+                >
+                  <span>{check.pages}</span>
+                  <span>{check.filename || check.requested_filename || "-"}</span>
+                  <span>{check.has_existing_output ? "あり" : "なし"}</span>
+                  <span className="check-state-cell" title={stateText}>{stateText}</span>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <EmptyState action={renderOutputEmptyAction()} icon={Download} title="出力前チェック待ちです">
@@ -3804,6 +3814,9 @@ export default function Page() {
         <div className="workbench-footer">
           <button disabled={!canRunPreflight || isPreflighting || isExporting} onClick={runPreflight} type="button">
             <IconLabel icon={ClipboardCheck}>{isPreflighting ? "チェック中…" : "再チェック"}</IconLabel>
+          </button>
+          <button disabled={isPreflighting || isExporting} onClick={() => void chooseOutputDir()} type="button">
+            <IconLabel icon={FolderOpen}>出力先を変更</IconLabel>
           </button>
           <button disabled={!outputDir} onClick={() => void openOutputDir()} type="button">
             <IconLabel icon={FolderOpen}>出力フォルダを開く</IconLabel>
