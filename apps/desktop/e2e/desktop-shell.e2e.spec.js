@@ -1015,4 +1015,26 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
 
     expect(pageErrors, 'ヘッダーサマリ表示制御で JS 例外が発生しない').toEqual([]);
   });
+
+  test('TC-E2E-D6 最小幅1200でSTEP2/STEP3の主要操作面が画面内に収まる', async ({ page }) => {
+    // Risk: minWidth(=1200)でも左右ペインや操作群が画面外に押し出される
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await page.setViewportSize({ width: 1200, height: 720 });
+
+    await openDevStep(page, 'split');
+    await expectNoHorizontalOverflow(page, 'STEP2 1200px');
+    await expectInsideViewport(page.locator('.split-list'), 'STEP2 左ペイン');
+    await expectInsideViewport(page.locator('.split-work'), 'STEP2 プレビュー');
+    await expectInsideViewport(page.getByLabel('STEP2詳細操作'), 'STEP2 右ペイン');
+    await expect(page.getByRole('button', { name: '現在ページの前で分割' })).toBeVisible();
+
+    await openDevStep(page, 'input');
+    await expectNoHorizontalOverflow(page, 'STEP3 1200px');
+    await expectInsideViewport(page.locator('.pane.stack').first(), 'STEP3 セグメント一覧');
+    await expectInsideViewport(page.getByLabel('STEP3命名入力'), 'STEP3 命名入力');
+    await expect(page.locator('.filename-preview strong')).toBeVisible();
+
+    expect(pageErrors, '最小幅1200確認で JS 例外が発生しない').toEqual([]);
+  });
 });
