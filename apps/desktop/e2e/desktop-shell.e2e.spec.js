@@ -1096,4 +1096,28 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
 
     expect(pageErrors, 'セグメント除外で JS 例外が発生しない').toEqual([]);
   });
+
+  test('TC-E2E-D9 検索ヒットのページ前で一括分割できる', async ({ page }) => {
+    // Risk: 「契約書」等で検索しても、その各ページの前で自動分割する手段がない
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+    await openDevStep(page, 'split');
+
+    // 用語検索を実行（dev preview は 4・8ページにヒット）。
+    await page.getByRole('button', { name: '検索/ハイライト' }).click();
+    await expect(page.locator('.search-result-row')).toHaveCount(2);
+
+    // 既存の分割を全解除（確認ダイアログを承認）。
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: '分割を全解除' }).click();
+    await expect(page.locator('.page-state-row.split-before')).toHaveCount(0);
+
+    // 検索ヒットのページ前で一括分割 → 4・8ページの前に分割点が付く。
+    await page.getByRole('button', { name: /ヒットのページ前で一括分割/ }).click();
+    await expect(page.locator('.page-state-row.split-before')).toHaveCount(2);
+    await expect(page.locator('.page-state-row.split-before').filter({ hasText: '4ページ' })).toHaveCount(1);
+    await expect(page.locator('.page-state-row.split-before').filter({ hasText: '8ページ' })).toHaveCount(1);
+
+    expect(pageErrors, '検索ヒット一括分割で JS 例外が発生しない').toEqual([]);
+  });
 });

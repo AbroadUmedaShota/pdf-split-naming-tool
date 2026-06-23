@@ -1118,6 +1118,22 @@ button.primary:hover:not(:disabled) {
   overflow: auto;
 }
 
+/* 検索ヒットのページ前で一括分割するボタン（検索結果の直下・全幅）。 */
+.search-split-apply {
+  margin-top: 6px;
+  width: 100%;
+  justify-content: center;
+  border-color: rgba(8, 127, 115, 0.4);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.search-split-apply:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: #d8f4ee;
+}
+
 .search-result-row,
 .blank-candidate-row,
 .index-candidate-row {
