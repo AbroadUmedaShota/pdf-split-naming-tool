@@ -931,4 +931,22 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
 
     expect(pageErrors, 'STEP4出力UXで JS 例外が発生しない').toEqual([]);
   });
+
+  test('TC-E2E-D2 主要行・ダイアログ起動ボタンにアクセシブルネームが付く', async ({ page }) => {
+    // Risk: ページ行/命名行/モーダル起動が支援技術に役割・対象を伝えられない
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
+
+    await openDevStep(page, 'split');
+    // B1: STEP2ページ行が「Nページを選択」で識別できる。
+    await expect(page.getByRole('button', { name: '4ページを選択' })).toBeVisible();
+    // B4: 用語を選択ボタンがダイアログ起動であることを支援技術へ通知する。
+    await expect(page.getByRole('button', { name: '用語を選択' })).toHaveAttribute('aria-haspopup', 'dialog');
+
+    await openDevStep(page, 'input');
+    // B2: STEP3命名行が「範囲＋ファイル名」で識別できる（色のみ状態に依存しない）。
+    await expect(page.getByRole('button', { name: '4-7ページ、01_01_002.pdf' })).toBeVisible();
+
+    expect(pageErrors, 'a11yラベル確認で JS 例外が発生しない').toEqual([]);
+  });
 });
