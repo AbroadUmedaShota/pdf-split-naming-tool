@@ -248,24 +248,19 @@ input:focus-visible {
 }
 
 .update-card {
+  /* 内容（「最新版です。」＋更新確認ボタン）に合わせて縮む。以前は min-width:220px＋
+     flex-grow で短文でも約383px幅を占めて大きすぎたため、content-sized に変更。 */
   display: flex;
-  flex: 1 1 220px;
+  flex: 0 0 auto;
   align-items: center;
   gap: var(--space-2);
-  max-width: 340px;
-  min-width: 220px;
+  max-width: 300px;
   border: 1px solid rgba(212, 224, 229, 0.96);
   border-radius: var(--radius-2);
   background: rgba(255, 255, 255, 0.86);
   box-shadow: var(--shadow-soft);
-  padding: 6px 8px;
+  padding: 5px 8px;
   font-size: 12px;
-}
-
-.split-screen-shell .update-card {
-  grid-template-columns: minmax(180px, 1fr) auto;
-  max-width: 420px;
-  padding: 6px 8px;
 }
 
 .update-card.ok {
