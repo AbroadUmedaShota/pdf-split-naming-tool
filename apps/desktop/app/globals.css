@@ -582,6 +582,16 @@ input:focus-visible {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* STEP1 取込: コンテンツ行を残り高さいっぱいに広げ、2カードを縦中央に置いて
+   下半分が空く間延びを解消する。safe center で多数PDF時は上詰め＋スクロール。 */
+.app-shell.import-shell {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.import-shell .import-single-layout {
+  align-content: safe center;
+}
+
 .task-layout.split-focused-layout {
   grid-template-columns: minmax(218px, 258px) minmax(0, 1fr) minmax(260px, 312px);
 }
