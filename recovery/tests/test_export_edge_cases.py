@@ -195,6 +195,49 @@ def test_pdf_service_publish_file_exclusive_does_not_overwrite_existing_path(tmp
     assert output.read_bytes() == b"existing"
 
 
+def test_pdf_service_publish_file_exclusive_overwrites_when_flag_set(tmp_path: Path) -> None:
+    source = tmp_path / "source.tmp"
+    output = tmp_path / "output.pdf"
+    source.write_bytes(b"new")
+    output.write_bytes(b"existing")
+
+    PdfService.publish_file_exclusive(source, output, overwrite=True)
+
+    # 既存は新内容に置き換わり、temp(source) はアトミック置換で消費される。
+    assert output.read_bytes() == b"new"
+    assert not source.exists()
+
+
+def test_sidecar_preflight_and_export_overwrite_existing_when_flag_set(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    make_pdf(source, 2)
+    existing_path = output_dir / "01_02_003.pdf"
+    existing_path.write_bytes(b"existing")
+    request = {
+        "output_dir": str(output_dir),
+        "segments": [segment(source, 1, 2)],
+        "overwrite": True,
+    }
+
+    preflight_response = handle_request({"command": "preflight", **request})
+    export_response = handle_request({"command": "export", **request})
+
+    # 上書き許可で preflight は通り、既存衝突の行は will_overwrite として扱われる。
+    assert preflight_response["can_run"] is True
+    overwrite_checks = [c for c in preflight_response["checks"] if c["will_overwrite"]]
+    assert len(overwrite_checks) == 1
+    assert "output_will_overwrite" in overwrite_checks[0]["messages"]
+    # 別名(_2)へ逃がさず、同名のまま上書きする。
+    assert export_response["ok"] is True
+    assert export_response["summary"] == {"created": 1, "failed": 0}
+    assert not (output_dir / "01_02_003_2.pdf").exists()
+    # 既存ファイルが実際に新しいPDFへ置き換わっている。
+    assert existing_path.read_bytes() != b"existing"
+    assert "Page 1" in pdf_text(existing_path)
+
+
 def test_sidecar_export_partial_failure_includes_export_incomplete_in_messages(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -208,12 +251,12 @@ def test_sidecar_export_partial_failure_includes_export_incomplete_in_messages(
     call_count = 0
     original_split_pdf = PdfProcessor.split_pdf
 
-    def split_pdf_fail_on_second(seg: object, dest: object) -> object:
+    def split_pdf_fail_on_second(seg: object, dest: object, overwrite: bool = False) -> object:
         nonlocal call_count
         call_count += 1
         if call_count == 2:
             raise RuntimeError("simulated write failure")
-        return original_split_pdf(seg, dest)
+        return original_split_pdf(seg, dest, overwrite=overwrite)
 
     monkeypatch.setattr(PdfProcessor, "split_pdf", staticmethod(split_pdf_fail_on_second))
 
@@ -263,7 +306,7 @@ def test_sidecar_export_all_failure_does_not_include_export_incomplete(
     output_dir = tmp_path / "output"
     make_pdf(source, 1)
 
-    def split_pdf_always_fail(seg: object, dest: object) -> object:
+    def split_pdf_always_fail(seg: object, dest: object, overwrite: bool = False) -> object:
         raise RuntimeError("simulated total failure")
 
     monkeypatch.setattr(PdfProcessor, "split_pdf", staticmethod(split_pdf_always_fail))

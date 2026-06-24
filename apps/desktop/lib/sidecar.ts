@@ -72,6 +72,7 @@ export type SidecarPreflightRequest = {
   segments: SidecarSegment[];
   affix_defs?: AppAffixDef[];
   seq_digits?: number;
+  overwrite?: boolean;
 };
 
 export type SidecarExportRequest = {
@@ -80,6 +81,7 @@ export type SidecarExportRequest = {
   segments: SidecarSegment[];
   affix_defs?: AppAffixDef[];
   seq_digits?: number;
+  overwrite?: boolean;
 };
 
 export type SidecarResponse =
@@ -259,6 +261,7 @@ export type SidecarOutputCheck = {
   requested_path: string;
   existing_path: string;
   has_existing_output: boolean;
+  will_overwrite?: boolean;
   metadata: Record<string, string>;
   pages: string;
   pdf_path: string;

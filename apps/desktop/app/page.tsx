@@ -63,12 +63,14 @@ import {
 import {
   formatTopLevelMessage,
   isOutputCheckOk,
+  isOutputCheckOverwrite,
   isOutputCheckRenamed,
   isOutputItemCreated,
   mergeRetriedExport,
   outputDetailStateText,
   outputIssueCount,
-  outputListStateText
+  outputListStateText,
+  unresolvedExistingCount
 } from "../lib/output-state";
 import { hasPreviewImageData, loadPagePreview } from "../lib/preview-flow";
 import { createPreviewRequestGate, previewCache } from "../lib/preview-cache";
@@ -590,6 +592,8 @@ export default function Page() {
   const [selectedSegmentKey, setSelectedSegmentKey] = useState("");
   const [preflightChecks, setPreflightChecks] = useState<SidecarOutputCheck[]>([]);
   const [exportResult, setExportResult] = useState<SidecarExportResponse | null>(null);
+  // 同名の既存ファイルを上書きして出力するか（STEP4 で明示的に許可した場合のみ true）。
+  const [overwriteExisting, setOverwriteExisting] = useState(false);
   const [isPreflighting, setIsPreflighting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isImportingPdfs, setIsImportingPdfs] = useState(false);
@@ -748,12 +752,15 @@ export default function Page() {
   const readySegments = Math.max(0, outputSegments.length - incompleteSegments);
   const outputIssues = outputIssueCount(preflightChecks);
   const existingOutputs = preflightChecks.filter((check) => check.has_existing_output).length;
+  // 上書き許可済みを除いた、出力をブロックする未解消の既存衝突。
+  const unresolvedExisting = unresolvedExistingCount(preflightChecks);
+  const overwriteOutputs = preflightChecks.filter((check) => isOutputCheckOverwrite(check)).length;
   const canContinueFromImport = pdfFiles.length > 0 && Boolean(outputDir);
   const canRunPreflight = outputSegments.length > 0 && Boolean(outputDir);
   const canExport =
     preflightChecks.length > 0 &&
     outputIssues === 0 &&
-    existingOutputs === 0 &&
+    unresolvedExisting === 0 &&
     // 全件成功後の再クリックによる _2 複製を防ぐ。再出力は「再チェック」経由（exportResult がクリアされる）。
     (exportResult === null || exportResult.summary.failed > 0);
   const totalSplitPointCount = useMemo(
@@ -790,7 +797,19 @@ export default function Page() {
     setPreflightChecks([]);
     setExportResult(null);
     preflightSignatureRef.current = "";
+    // 内容が変わったら上書き許可も解除し、意図しない上書きを防ぐ（毎バッチで明示確認）。
+    setOverwriteExisting(false);
   }
+
+  // 上書き許可のトグルを変えたら、出力前チェックを取り直して衝突行の判定を更新する
+  // （許可ON→既存衝突が「上書きして出力」になり出力可能、OFF→再びブロック）。
+  useEffect(() => {
+    if (activeStep === "output" && preflightChecks.length > 0 && !preflightInFlightRef.current) {
+      void runPreflight();
+    }
+    // overwriteExisting の変化だけに反応させる（runPreflight/checks を依存に入れるとループする）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overwriteExisting]);
 
   // 指定PDFにユーザーが入力した内容（分割点・手動入力値）があるか。
   // 自動採番された seq は再現可能なので「入力済みデータ」とみなさない（手動上書きは対象）。
@@ -2548,7 +2567,8 @@ export default function Page() {
         output_dir: outputDir,
         segments: requestSegments(),
         affix_defs: affixDefs,
-        seq_digits: seqDigits
+        seq_digits: seqDigits,
+        overwrite: overwriteExisting
       });
       // エラー応答（checks なし）はここで弾き、不正な形を state に入れない。
       if (!response.ok || response.command !== "preflight" || !("checks" in response)) {
@@ -2563,8 +2583,11 @@ export default function Page() {
       setExportResult(null);
       preflightSignatureRef.current = requestSignature;
       const renamedCount = result.checks.filter((check) => isOutputCheckRenamed(check)).length;
+      const overwriteCount = result.checks.filter((check) => isOutputCheckOverwrite(check)).length;
       if (!result.can_run) {
         setStatus("修正が必要な項目があります。", "warning");
+      } else if (overwriteCount) {
+        setStatus(`出力できます。同名の既存ファイル${overwriteCount}件を上書きします。`, "warning");
       } else if (renamedCount) {
         setStatus(`出力できます。バッチ内で同名のため別名（_2 形式）を採番した行が${renamedCount}件あります。`, "warning");
       } else {
@@ -2598,7 +2621,8 @@ export default function Page() {
         output_dir: outputDir,
         segments: requestSegments(),
         affix_defs: affixDefs,
-        seq_digits: seqDigits
+        seq_digits: seqDigits,
+        overwrite: overwriteExisting
       });
       // ok:false でも summary/items を持つ部分失敗レポートは正常応答として扱う。
       // summary/items を欠くエラー応答だけをここで弾く。
@@ -3818,6 +3842,19 @@ export default function Page() {
           <p className="output-issue-hint">
             要修正の行があります。「出力先を変更」するか、既存ファイルを削除して「再チェック」してください。
           </p>
+        ) : null}
+        {existingOutputs > 0 ? (
+          <label className={overwriteExisting ? "overwrite-toggle is-on" : "overwrite-toggle"}>
+            <input
+              type="checkbox"
+              checked={overwriteExisting}
+              onChange={(event) => setOverwriteExisting(event.target.checked)}
+            />
+            <span>
+              同名の既存ファイル（{existingOutputs}件）を上書きして出力する
+              {overwriteExisting ? "（既存ファイルは新しい内容に置き換わります）" : ""}
+            </span>
+          </label>
         ) : null}
         {exportResult ? (
           <div className={exportHasFailure ? "log-box has-failures" : "log-box is-complete"}>

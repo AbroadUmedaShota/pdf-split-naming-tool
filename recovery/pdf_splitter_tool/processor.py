@@ -94,8 +94,8 @@ class PdfProcessor:
         return PdfService.calculate_sha256(path)
 
     @staticmethod
-    def split_pdf(segment: Segment, output_path: Path) -> Path:
-        return PdfService.split_pdf(segment, output_path)
+    def split_pdf(segment: Segment, output_path: Path, overwrite: bool = False) -> Path:
+        return PdfService.split_pdf(segment, output_path, overwrite=overwrite)
 
     @staticmethod
     def build_segments_by_n_pages(pdf_path: Path, page_count: int, pages_per_segment: int) -> list[Segment]:
