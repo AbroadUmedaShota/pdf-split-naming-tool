@@ -3289,7 +3289,9 @@ export default function Page() {
               <strong>{pdfFiles.length ? `${pdfFiles.length}件 / ${totalPages}ページ` : "未選択"}</strong>
             </div>
             <div className="action-row import-actions">
-              <button className="primary" disabled={isImportingPdfs} onClick={choosePdfs} type="button">
+              {/* CTA は状態で1つに絞る: 未選択なら「PDFを選択」を primary、選択済みなら
+                  副次に降格して「分割へ進む」を唯一の primary にする（緑の競合を避ける）。 */}
+              <button className={pdfFiles.length ? "" : "primary"} disabled={isImportingPdfs} onClick={choosePdfs} type="button">
                 <IconLabel icon={Upload}>{isImportingPdfs ? "選択中" : "PDFを選択"}</IconLabel>
               </button>
               <button className="ghost danger" disabled={!pdfFiles.length || isImportingPdfs} onClick={() => void clearPdfSelection()} type="button">
@@ -4365,7 +4367,15 @@ export default function Page() {
   }
 
   return (
-    <main className={activeStep === "split" || activeStep === "input" ? "app-shell split-screen-shell" : "app-shell"}>
+    <main
+      className={
+        activeStep === "split" || activeStep === "input"
+          ? "app-shell split-screen-shell"
+          : activeStep === "import"
+            ? "app-shell import-shell"
+            : "app-shell"
+      }
+    >
       <header className="app-header no-summary">
         <div className="brand-row compact-brand">
           <span className="brand-mark">PDF</span>

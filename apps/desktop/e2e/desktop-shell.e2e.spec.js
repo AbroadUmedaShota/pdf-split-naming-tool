@@ -1095,4 +1095,16 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
 
     expect(pageErrors, 'セグメント除外で JS 例外が発生しない').toEqual([]);
   });
+
+  test('TC-E2E-D10 STEP1 の主CTAは状態で1つに絞られる', async ({ page }) => {
+    // Risk: 「PDF選択」と「分割へ進む」が両方 primary(緑)で視線が割れる
+    await openDevStep(page, 'import');
+
+    // PDF 読込済み: 主CTAは「分割へ進む」だけが primary、追加ボタンは副次。
+    const proceed = page.locator('.import-work button.primary');
+    await expect(proceed).toHaveCount(1);
+    await expect(proceed).toContainText('分割へ進む');
+    await expect(page.locator('.import-work .import-actions button').first()).not.toHaveClass(/primary/);
+    await expect(page.locator('.import-work .import-actions button').first()).toContainText('PDFを選択');
+  });
 });
