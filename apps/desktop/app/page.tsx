@@ -752,6 +752,54 @@ export default function Page() {
     [outputSegments]
   );
   const readySegments = Math.max(0, outputSegments.length - incompleteSegments);
+  // 同じ箱No・バインダーNo の中で連番が重複/欠番していないかを出力前に検査する。
+  // 自動採番では隙間は出ないので、主に手動で連番を上書きした場合の取り違えを拾う。
+  const seqWarnings = useMemo(() => {
+    const groups = new Map<string, { counts: Map<string, number>; nums: number[] }>();
+    for (const segment of outputSegments) {
+      const box = (segment.metadata.box_no ?? "").trim();
+      const binder = (segment.metadata.binder_no ?? "").trim();
+      const raw = String(segment.metadata.seq ?? "").trim();
+      if (!raw) {
+        continue;
+      }
+      const num = Number.parseInt(raw, 10);
+      // "3" と "03" は最終ファイル名では同じ番号になるため、数値として正規化して突き合わせる。
+      const norm = Number.isFinite(num) ? String(num) : raw;
+      const key = `${box} ${binder}`;
+      const group = groups.get(key) ?? { counts: new Map<string, number>(), nums: [] };
+      group.counts.set(norm, (group.counts.get(norm) ?? 0) + 1);
+      if (Number.isFinite(num)) {
+        group.nums.push(num);
+      }
+      groups.set(key, group);
+    }
+    const warnings: string[] = [];
+    for (const [key, group] of groups) {
+      const [box, binder] = key.split(" ");
+      const label = `箱${box || "?"}・バインダー${binder || "?"}`;
+      const dups = [...group.counts.entries()]
+        .filter(([, count]) => count > 1)
+        .map(([seq]) => seq)
+        .sort((a, b) => Number(a) - Number(b));
+      if (dups.length) {
+        warnings.push(`${label}：連番 ${dups.join("・")} が重複`);
+      }
+      if (group.nums.length > 1) {
+        const uniq = [...new Set(group.nums)].sort((a, b) => a - b);
+        const missing: number[] = [];
+        for (let value = uniq[0]; value <= uniq[uniq.length - 1]; value += 1) {
+          if (!uniq.includes(value)) {
+            missing.push(value);
+          }
+        }
+        if (missing.length) {
+          warnings.push(`${label}：連番 ${missing.join("・")} が欠番`);
+        }
+      }
+    }
+    return warnings;
+  }, [outputSegments]);
   const outputIssues = outputIssueCount(preflightChecks);
   const existingOutputs = preflightChecks.filter((check) => check.has_existing_output).length;
   // 上書き許可済みを除いた、出力をブロックする未解消の既存衝突。
@@ -3117,6 +3165,18 @@ export default function Page() {
           title="セグメント一覧"
           description={`${readySegments}件 OK / ${incompleteSegments}件 未入力${excludedSegmentCount ? ` / ${excludedSegmentCount}件 除外` : ""}　（↑↓で移動）`}
         />
+        {seqWarnings.length ? (
+          <div className="seq-integrity-warning" role="status">
+            <AlertTriangle aria-hidden="true" size={14} />
+            <div>
+              <strong>連番の重複・欠番があります</strong>
+              {seqWarnings.slice(0, 3).map((warning) => (
+                <span key={warning}>{warning}</span>
+              ))}
+              {seqWarnings.length > 3 ? <span>ほか {seqWarnings.length - 3} 件</span> : null}
+            </div>
+          </div>
+        ) : null}
         {allSegments.length ? (
           <>
             <div className="action-row">

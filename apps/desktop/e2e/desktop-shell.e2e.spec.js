@@ -1149,4 +1149,21 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await page.getByRole('button', { name: '入力へ進む' }).click();
     await expect(page.locator('.mini-row')).toHaveCount(4);
   });
+
+  test('TC-E2E-D14 STEP3 連番の重複・欠番を出力前に警告する', async ({ page }) => {
+    // Risk: 手動で連番を取り違えると倉庫採番が破綻するが出力まで気づけない
+    await openDevStep(page, 'input');
+
+    // 既定(同一箱・バインダーで 1,2,3)は連番が整っているので警告なし。
+    await expect(page.locator('.seq-integrity-warning')).toHaveCount(0);
+
+    // 2番目(4-7・連番2)を 1 に変える → 1 が重複し 2 が欠番になる。
+    await page.locator('.mini-row').nth(1).click();
+    await page.locator('input[name="seq"]').fill('1');
+
+    const warning = page.locator('.seq-integrity-warning');
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText('重複');
+    await expect(warning).toContainText('欠番');
+  });
 });

@@ -2506,6 +2506,29 @@ button.split-marker:hover:not(:disabled) {
   white-space: nowrap;
 }
 
+.seq-integrity-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(161, 92, 7, 0.22);
+  border-radius: var(--radius-2);
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: var(--font-size-caption);
+}
+
+.seq-integrity-warning svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.seq-integrity-warning > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .log-box {
   border-left: 3px solid var(--accent);
   background: var(--surface-2);
