@@ -628,6 +628,8 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
 
     await openDevStep(page, 'split');
+    // 検索結果は「検索・補助ツール」アコーディオンに畳まれているので先に開く。
+    await page.locator('.assist-accordion > summary').click();
 
     // 前提: 初期表示は 4 ページ目で、検索ハイライトが描画されている。
     await expect
@@ -793,6 +795,8 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
 
     await openDevStep(page, 'split');
+    // 検索・候補・白紙は「検索・補助ツール」アコーディオンに畳まれているので先に開く。
+    await page.locator('.assist-accordion > summary').click();
 
     const selectedTerms = page.getByLabel('選択中のハイライト用語');
     await expect(selectedTerms).toContainText('契約書');
@@ -824,6 +828,8 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`));
 
     await openDevStep(page, 'split');
+    // 候補・白紙は「検索・補助ツール」アコーディオンに畳まれているので先に開く。
+    await page.locator('.assist-accordion > summary').click();
 
     await page.getByRole('button', { name: '候補取得' }).click();
     await expect(page.locator('[role="status"]')).toContainText('DEVプレビューの候補検索結果を表示しました。');
@@ -941,6 +947,8 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     // B1: STEP2ページ行が「Nページを選択」で識別できる。
     await expect(page.getByRole('button', { name: '4ページを選択' })).toBeVisible();
     // B4: 用語を選択ボタンがダイアログ起動であることを支援技術へ通知する。
+    // 「検索・補助ツール」アコーディオンに畳まれているので先に開く。
+    await page.locator('.assist-accordion > summary').click();
     await expect(page.getByRole('button', { name: '用語を選択' })).toHaveAttribute('aria-haspopup', 'dialog');
 
     await openDevStep(page, 'input');
@@ -1165,5 +1173,17 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await expect(warning).toBeVisible();
     await expect(warning).toContainText('重複');
     await expect(warning).toContainText('欠番');
+  });
+
+  test('TC-E2E-D15 STEP2 補助ツールは既定で畳まれ完了操作まで画面内に収まる', async ({ page }) => {
+    // Risk: 右パネルが長すぎてデフォルトサイズで「入力へ進む」等が見切れる
+    await openDevStep(page, 'split');
+
+    // 検索・候補・白紙は「検索・補助ツール」アコーディオンに既定で畳まれている。
+    await expect(page.locator('.assist-accordion')).toHaveCount(1);
+    await expect(page.getByRole('button', { name: '用語を選択' })).not.toBeVisible();
+
+    // 核となる「入力へ進む」がスクロールせず画面内に表示される。
+    await expect(page.getByRole('button', { name: '入力へ進む' })).toBeInViewport();
   });
 });

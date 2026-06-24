@@ -796,8 +796,8 @@ button.primary:hover:not(:disabled) {
 
 .input-controls .ocr-text-scroll {
   flex: 0 0 auto;
-  min-height: 96px;
-  max-height: 160px;
+  min-height: 76px;
+  max-height: 108px;
   height: auto;
 }
 
@@ -1388,6 +1388,21 @@ button.primary:hover:not(:disabled) {
   font-family: var(--font-ui);
   font-size: 11px;
   text-align: center;
+}
+
+/* 検索・候補・白紙の補助系をまとめて畳む折りたたみ。既定は閉じ、核となる
+   分割操作・「入力へ進む」をデフォルトサイズで見切れさせない。 */
+.assist-accordion > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: var(--font-size-caption);
+  padding: 4px 0;
+  list-style-position: inside;
+}
+
+.assist-accordion[open] > summary {
+  margin-bottom: 6px;
 }
 
 .ghost {
