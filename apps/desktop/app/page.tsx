@@ -3691,7 +3691,23 @@ export default function Page() {
         {selectedSegment ? (
           <div className="legacy-panel-section">
             <span className="group-label">命名項目</span>
-            <div className="field-grid three">
+            <div
+              className="field-grid three"
+              onKeyDown={(event) => {
+                // Enter で次のセグメントへ。入力欄は同一要素のためフォーカスは保持され、
+                // 続けて次の書類の値を確認・入力できる（大量処理のマウス往復を省く）。
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.ctrlKey &&
+                  !event.altKey &&
+                  !event.metaKey
+                ) {
+                  event.preventDefault();
+                  moveSegmentSelection(1);
+                }
+              }}
+            >
               <label>
                 箱No
                 <input
@@ -3747,6 +3763,7 @@ export default function Page() {
                 ) : null}
               </label>
             </div>
+            <small className="muted-line field-grid-hint">Enter で次のセグメントへ（項目間の移動は Tab）</small>
             <details className="seq-rule-accordion">
               <summary className="accordion-summary">
                 <ChevronRight aria-hidden="true" className="accordion-chevron" size={14} />

@@ -1119,4 +1119,20 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     const checkbox = toggle.locator('input[type="checkbox"]');
     await expect(checkbox).not.toBeChecked();
   });
+
+  test('TC-E2E-D12 STEP3 で命名欄から Enter を押すと次のセグメントへ移動する', async ({ page }) => {
+    // Risk: 大量処理で「一覧クリック→入力→一覧クリック」のマウス往復が積み上がる
+    await openDevStep(page, 'input');
+
+    // 先頭セグメントを選択し、出力名プレビューを記録。
+    await page.locator('.mini-row').first().click();
+    const preview = page.locator('.filename-preview strong');
+    const before = (await preview.textContent())?.trim() ?? '';
+    expect(before.length).toBeGreaterThan(0);
+
+    // 命名欄(箱No)で Enter → 次セグメントへ。出力名プレビューが変わる。
+    await page.locator('input[name="box_no"]').focus();
+    await page.keyboard.press('Enter');
+    await expect(preview).not.toHaveText(before);
+  });
 });

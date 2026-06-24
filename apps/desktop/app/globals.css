@@ -2477,6 +2477,11 @@ button.split-marker:hover:not(:disabled) {
   border-color: rgba(161, 92, 7, 0.22);
 }
 
+.field-grid-hint {
+  display: block;
+  margin-top: 4px;
+}
+
 .log-box {
   border-left: 3px solid var(--accent);
   background: var(--surface-2);
