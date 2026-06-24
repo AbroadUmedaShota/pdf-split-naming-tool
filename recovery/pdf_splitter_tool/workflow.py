@@ -28,6 +28,7 @@ class SegmentOutputCheck:
     requested_path: Path | None = None
     existing_path: Path | None = None
     has_existing_output: bool = False
+    will_overwrite: bool = False
 
 
 def error_messages(errors: tuple[str, ...]) -> tuple[str, ...]:
@@ -68,6 +69,7 @@ def check_segment_outputs(
     processor: PdfProcessor | None = None,
     affix_defs: object = (),
     seq_digits: object = DEFAULT_SEQ_DIGITS,
+    overwrite: bool = False,
 ) -> list[SegmentOutputCheck]:
     processor = processor or PdfProcessor()
     affix_defs = normalize_affix_defs(affix_defs)
@@ -100,6 +102,25 @@ def check_segment_outputs(
                         requested_path=requested_path,
                         existing_path=requested_path if has_existing_output else None,
                         has_existing_output=has_existing_output,
+                    )
+                )
+            elif has_existing_output and overwrite:
+                # Overwrite mode: the user explicitly accepted replacing the existing
+                # file with the same archival name. Reserve the exact path (no _2 rename)
+                # so a sibling segment cannot also claim it within this batch.
+                export_policy.reserved.add(requested_path)
+                checks.append(
+                    SegmentOutputCheck(
+                        segment=segment,
+                        ok=True,
+                        filename=requested_path.name,
+                        output_path=requested_path,
+                        messages=("output_will_overwrite",),
+                        requested_filename=result.normalized_filename,
+                        requested_path=requested_path,
+                        existing_path=requested_path,
+                        has_existing_output=True,
+                        will_overwrite=True,
                     )
                 )
             elif has_existing_output:

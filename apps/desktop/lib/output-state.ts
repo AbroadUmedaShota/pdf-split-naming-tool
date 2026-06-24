@@ -26,6 +26,16 @@ export function outputIssueCount(checks: OutputCheckLike[]): number {
   return checks.filter((check) => !isOutputCheckOk(check)).length;
 }
 
+// ユーザーが上書きを許可し、同名の既存ファイルを置き換えて出力する行か。
+export function isOutputCheckOverwrite(check: OutputCheckLike): boolean {
+  return Boolean(check.will_overwrite);
+}
+
+// 未解消の既存衝突（上書き許可されていない、出力をブロックする既存ファイル）の件数。
+export function unresolvedExistingCount(checks: OutputCheckLike[]): number {
+  return checks.filter((check) => check.has_existing_output && !check.will_overwrite).length;
+}
+
 export function formatTopLevelMessage(msg: string): string {
   if (msg === "export_incomplete") {
     return "一部のファイルが出力できませんでした。出力フォルダの内容が不完全な可能性があります";
@@ -40,14 +50,23 @@ function formatMessage(msg: string): string {
   if (msg === "output_path_too_long") {
     return "出力パスが長すぎます（260文字以内に収まるよう出力先を浅くするか項目を短くしてください）";
   }
+  if (msg === "output_will_overwrite") {
+    return "同名の既存ファイルを上書きします";
+  }
   return msg;
 }
 
 export function outputListStateText(check: OutputCheckLike): string {
   if (isOutputItemCreated(check)) {
+    if (isOutputCheckOverwrite(check)) {
+      return "上書き出力済み";
+    }
     return isOutputCheckRenamed(check) ? "作成済み（別名採番）" : "作成済み";
   }
   if (isOutputCheckOk(check)) {
+    if (isOutputCheckOverwrite(check)) {
+      return "上書きして出力";
+    }
     return isOutputCheckRenamed(check) ? "同名のため別名採番" : "出力可能";
   }
   if (check.has_existing_output) {
@@ -58,9 +77,15 @@ export function outputListStateText(check: OutputCheckLike): string {
 
 export function outputDetailStateText(check: OutputCheckLike): string {
   if (isOutputItemCreated(check)) {
+    if (isOutputCheckOverwrite(check)) {
+      return `同名の既存ファイルを上書きして出力済み（${check.filename}）`;
+    }
     return isOutputCheckRenamed(check) ? `作成済み（別名「${check.filename}」で採番）` : "作成済み";
   }
   if (isOutputCheckOk(check)) {
+    if (isOutputCheckOverwrite(check)) {
+      return "同名の既存ファイルを上書きして出力します";
+    }
     return isOutputCheckRenamed(check) ? `バッチ内で同名のため「${check.filename}」を採番` : "出力可能";
   }
   if (isExportItem(check) && check.status === "failed") {

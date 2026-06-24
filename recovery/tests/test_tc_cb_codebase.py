@@ -1008,12 +1008,12 @@ def test_tc_cb_074_export_partial_failure_export_incomplete(tmp_path: Path, monk
     call_count = 0
     original_split = PdfProcessor.split_pdf
 
-    def split_fail_on_second(seg: object, dest: object) -> object:
+    def split_fail_on_second(seg: object, dest: object, overwrite: bool = False) -> object:
         nonlocal call_count
         call_count += 1
         if call_count == 2:
             raise RuntimeError("simulated write failure")
-        return original_split(seg, dest)
+        return original_split(seg, dest, overwrite=overwrite)
 
     monkeypatch.setattr(PdfProcessor, "split_pdf", staticmethod(split_fail_on_second))
 
@@ -1039,7 +1039,7 @@ def test_tc_cb_075_export_all_failure_created_zero(tmp_path: Path, monkeypatch: 
     make_pdf(source, 1)
     output_dir = tmp_path / "output"
 
-    def split_always_fail(seg: object, dest: object) -> object:
+    def split_always_fail(seg: object, dest: object, overwrite: bool = False) -> object:
         raise RuntimeError("simulated total failure")
 
     monkeypatch.setattr(PdfProcessor, "split_pdf", staticmethod(split_always_fail))
@@ -1647,12 +1647,12 @@ def test_tc_cb_144_export_partial_failure_messages_observable(
     call_count = 0
     original_split = PdfProcessor.split_pdf
 
-    def split_fail_on_second(seg: object, dest: object) -> object:
+    def split_fail_on_second(seg: object, dest: object, overwrite: bool = False) -> object:
         nonlocal call_count
         call_count += 1
         if call_count == 2:
             raise RuntimeError("observable failure")
-        return original_split(seg, dest)
+        return original_split(seg, dest, overwrite=overwrite)
 
     monkeypatch.setattr(PdfProcessor, "split_pdf", staticmethod(split_fail_on_second))
 

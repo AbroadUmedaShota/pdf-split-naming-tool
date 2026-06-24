@@ -2453,6 +2453,30 @@ button.split-marker:hover:not(:disabled) {
   font-size: var(--font-size-caption);
 }
 
+.overwrite-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  font-size: var(--font-size-caption);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.overwrite-toggle input {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.overwrite-toggle.is-on {
+  color: var(--warning);
+  background: var(--warning-bg);
+  border-color: rgba(161, 92, 7, 0.22);
+}
+
 .log-box {
   border-left: 3px solid var(--accent);
   background: var(--surface-2);

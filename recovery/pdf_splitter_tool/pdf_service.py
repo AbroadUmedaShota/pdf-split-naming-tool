@@ -375,7 +375,7 @@ class PdfService:
         return digest.hexdigest()
 
     @staticmethod
-    def split_pdf(segment: Segment, output_path: Path) -> Path:
+    def split_pdf(segment: Segment, output_path: Path, overwrite: bool = False) -> Path:
         fitz_module = PdfService._require_fitz()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = output_path.with_name(f".{output_path.name}.{uuid4().hex}.tmp")
@@ -389,13 +389,18 @@ class PdfService:
                 dst.insert_pdf(src, from_page=start_index, to_page=end_index)
                 dst.save(temp_path)
         try:
-            PdfService.publish_file_exclusive(temp_path, output_path)
+            PdfService.publish_file_exclusive(temp_path, output_path, overwrite=overwrite)
         finally:
             temp_path.unlink(missing_ok=True)
         return output_path
 
     @staticmethod
-    def publish_file_exclusive(source_path: Path, output_path: Path) -> None:
+    def publish_file_exclusive(source_path: Path, output_path: Path, overwrite: bool = False) -> None:
+        if overwrite:
+            # アトミック置換。新ファイルは temp(source_path) に書き終えてあるので、
+            # 既存の出力は置換が成立する瞬間まで残る（書き込み途中で原本を壊さない）。
+            os.replace(source_path, output_path)
+            return
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
         try:
             fd = os.open(output_path, flags)

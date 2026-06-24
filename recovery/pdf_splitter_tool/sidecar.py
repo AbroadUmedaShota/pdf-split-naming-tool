@@ -297,6 +297,7 @@ def export(request: dict[str, Any]) -> dict[str, Any]:
             "items": [],
             "messages": ["no_segments"],
         }
+    overwrite = bool(request.get("overwrite", False))
     invalid_checks = [check for check in checks if not check.ok]
     if invalid_checks:
         items = []
@@ -323,7 +324,7 @@ def export(request: dict[str, Any]) -> dict[str, Any]:
             summary["failed"] += 1
         else:
             try:
-                final_path = processor.split_pdf(check.segment, check.output_path)
+                final_path = processor.split_pdf(check.segment, check.output_path, overwrite=overwrite)
                 item["status"] = "created"
                 item["output_path"] = str(final_path)
                 item["sha256"] = processor.calculate_sha256(final_path)
@@ -387,6 +388,7 @@ def _build_checks(request: dict[str, Any], output_dir: Path) -> list[SegmentOutp
         output_dir,
         affix_defs=request.get("affix_defs", ()),
         seq_digits=request.get("seq_digits", DEFAULT_SEQ_DIGITS),
+        overwrite=bool(request.get("overwrite", False)),
     )
 
 
@@ -400,6 +402,7 @@ def _check_to_dict(check: SegmentOutputCheck) -> dict[str, Any]:
         "requested_path": str(check.requested_path) if check.requested_path else "",
         "existing_path": str(check.existing_path) if check.existing_path else "",
         "has_existing_output": check.has_existing_output,
+        "will_overwrite": check.will_overwrite,
         "metadata": dict(check.segment.metadata),
         "pages": check.segment.page_label,
         "pdf_path": str(check.segment.pdf_path),

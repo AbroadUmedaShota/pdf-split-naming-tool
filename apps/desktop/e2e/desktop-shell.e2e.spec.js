@@ -1107,4 +1107,16 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await expect(page.locator('.import-work .import-actions button').first()).not.toHaveClass(/primary/);
     await expect(page.locator('.import-work .import-actions button').first()).toContainText('PDFを選択');
   });
+
+  test('TC-E2E-D11 STEP4 で既存衝突があれば上書きして出力できるチェックボックスが出る', async ({ page }) => {
+    // Risk: 同名既存ファイルの解消手段が「出力先変更/手動削除」しかなく動線が長い
+    await openDevStep(page, 'output');
+
+    // 既存衝突(devサンプルに1件)があるので上書きトグルが表示され、既定はオフ。
+    const toggle = page.locator('.overwrite-toggle');
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toContainText('上書きして出力');
+    const checkbox = toggle.locator('input[type="checkbox"]');
+    await expect(checkbox).not.toBeChecked();
+  });
 });
