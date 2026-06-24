@@ -1060,6 +1060,12 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     const widthMode = await measure(tall);
     expect(widthMode.ih, '幅合わせは縦長ページで枠の縦を超える').toBeGreaterThan(widthMode.fh);
 
+    // STEP3(入力)も STEP2 と同じ全体表示フィットであること（input 専用の上書きで
+    // 挙動が食い違う退行を防ぐ）。
+    await openDevStep(page, 'input');
+    const inputFit = await measure(tall);
+    expect(inputFit.ih, 'STEP3 の全体表示でも画像高さが枠の内寸に収まる').toBeLessThanOrEqual(inputFit.fh + 1);
+
     expect(pageErrors, '全体表示フィット確認で JS 例外が発生しない').toEqual([]);
   });
 

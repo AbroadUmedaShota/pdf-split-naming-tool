@@ -2207,25 +2207,10 @@ button.split-marker:hover:not(:disabled) {
   max-width: none;
 }
 
-/* STEP3 入力プレビュー: 全体表示で画像が縦に確実に収まるようにフィットさせる */
-.input-work .preview-frame.page .preview-page-layer {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-  margin: 0;
-}
-
-.input-work .preview-frame.page .preview-page-layer img {
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
-  object-fit: contain;
-}
+/* STEP3 入力プレビューも STEP2 と同じ全体表示フィットを使う。
+   以前ここに input-work 専用の height:100% フィット試行があったが、高さチェーンが
+   解決せず画像が原寸のままになり STEP2 と挙動が食い違っていた。共通の
+   .preview-frame.page img（viewport 基準の max-height）に統一して削除した。 */
 
 /* 手動ズーム(実寸/free): スライダー倍率に応じて原寸表示し、枠内でスクロールできる */
 .preview-frame.free {
