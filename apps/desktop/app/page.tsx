@@ -4402,6 +4402,8 @@ export default function Page() {
           </div>
           <small className="muted-line">既存の分割点は置き換わります。定型ページ数の書類向け（例外は分割後に手動で調整）。</small>
         </div>
+        <details className="assist-accordion">
+          <summary>検索・補助ツール（用語ハイライト / 候補 / 白紙）</summary>
         <div className="legacy-panel-section assist-section">
           <span className="group-label">検索</span>
           <div className="selected-search-terms" aria-label="選択中のハイライト用語">
@@ -4518,6 +4520,7 @@ export default function Page() {
             )}
           </div>
         </div>
+        </details>
         {renderOcrTextPanel()}
         <div className="legacy-panel-section completion-section">
           <span className="group-label">完了操作</span>
