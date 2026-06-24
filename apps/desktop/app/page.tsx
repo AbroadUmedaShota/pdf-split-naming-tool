@@ -766,7 +766,7 @@ export default function Page() {
       const num = Number.parseInt(raw, 10);
       // "3" と "03" は最終ファイル名では同じ番号になるため、数値として正規化して突き合わせる。
       const norm = Number.isFinite(num) ? String(num) : raw;
-      const key = `${box} ${binder}`;
+      const key = `${box} ${binder}`;
       const group = groups.get(key) ?? { counts: new Map<string, number>(), nums: [] };
       group.counts.set(norm, (group.counts.get(norm) ?? 0) + 1);
       if (Number.isFinite(num)) {
@@ -776,7 +776,7 @@ export default function Page() {
     }
     const warnings: string[] = [];
     for (const [key, group] of groups) {
-      const [box, binder] = key.split(" ");
+      const [box, binder] = key.split(" ");
       const label = `箱${box || "?"}・バインダー${binder || "?"}`;
       const dups = [...group.counts.entries()]
         .filter(([, count]) => count > 1)
