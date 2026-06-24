@@ -2482,6 +2482,30 @@ button.split-marker:hover:not(:disabled) {
   margin-top: 4px;
 }
 
+.interval-split-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.interval-split-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: var(--font-size-caption);
+  color: var(--muted);
+}
+
+.interval-split-field input {
+  width: 56px;
+}
+
+.interval-split-row button {
+  flex: 1 1 auto;
+  white-space: nowrap;
+}
+
 .log-box {
   border-left: 3px solid var(--accent);
   background: var(--surface-2);

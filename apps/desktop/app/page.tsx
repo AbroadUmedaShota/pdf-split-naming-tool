@@ -581,6 +581,8 @@ export default function Page() {
   const [outputDir, setOutputDir] = useState("");
   const [commonMetadata, setCommonMetadata] = useState<Record<string, string>>(defaultCommonMetadata);
   const [splitPointsByPdf, setSplitPointsByPdf] = useState<Record<string, number[]>>({});
+  // 「Nページごとに一括分割」の入力値（定型ページ数の書類向け。空編集を許すため文字列で保持）。
+  const [intervalPages, setIntervalPages] = useState("2");
   const [segmentMetadata, setSegmentMetadata] = useState<SegmentMetadata>({});
   const [affixDefs, setAffixDefs] = useState<AffixDef[]>([]);
   const [seqStart, setSeqStart] = useState(1);
@@ -983,6 +985,28 @@ export default function Page() {
       ...current,
       [pdfPath]: nextPoints
     }));
+  }
+
+  // 現在のPDFを N ページごとに一括分割する（各書類の先頭ページ = N+1, 2N+1, ... に分割点を引く）。
+  // 既存の分割点は置き換える。履歴に積むので Ctrl+Z で戻せる。例外は分割後に手動で直す前提。
+  function applyIntervalSplit(): void {
+    if (!currentFile) {
+      return;
+    }
+    const pageCount = currentFile.pageCount;
+    const size = Number.parseInt(intervalPages, 10);
+    if (!Number.isFinite(size) || size < 1) {
+      setStatus("1以上のページ数を入力してください。", "warning");
+      return;
+    }
+    updateCurrentPdfSplitPoints(() => {
+      const points: number[] = [];
+      for (let start = size + 1; start <= pageCount; start += size) {
+        points.push(start);
+      }
+      return points;
+    });
+    setStatus(`${size}ページごとに分割しました（分割後の例外は手動で調整できます）。`, "ok");
   }
 
   async function selectPageForPreview(pdfPath: string, pageNo: number): Promise<void> {
@@ -4290,6 +4314,33 @@ export default function Page() {
               <IconLabel icon={Trash2}>選択分割を削除</IconLabel>
             </button>
           </div>
+        </div>
+        <div className="legacy-panel-section interval-split-section">
+          <span className="group-label">一括分割</span>
+          <div className="interval-split-row">
+            <label className="interval-split-field">
+              1書類
+              <input
+                disabled={!currentFile}
+                inputMode="numeric"
+                min={1}
+                name="interval_pages"
+                onChange={(event) => setIntervalPages(event.target.value)}
+                type="number"
+                value={intervalPages}
+              />
+              ページ
+            </label>
+            <button
+              disabled={!currentFile}
+              onClick={applyIntervalSplit}
+              title="指定したページ数ごとに分割点を引き直します（既存の分割点は置き換わります）"
+              type="button"
+            >
+              <IconLabel icon={Split}>このページ数で分割</IconLabel>
+            </button>
+          </div>
+          <small className="muted-line">既存の分割点は置き換わります。定型ページ数の書類向け（例外は分割後に手動で調整）。</small>
         </div>
         <div className="legacy-panel-section assist-section">
           <span className="group-label">検索</span>
