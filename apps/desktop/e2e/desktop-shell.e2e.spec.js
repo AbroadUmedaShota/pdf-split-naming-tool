@@ -1135,4 +1135,18 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await page.keyboard.press('Enter');
     await expect(preview).not.toHaveText(before);
   });
+
+  test('TC-E2E-D13 STEP2 で N ページごとに一括分割できる', async ({ page }) => {
+    // Risk: 定型ページ数の書類を1件ずつ手で分割するのは時間の無駄
+    await openDevStep(page, 'split');
+
+    // dev は 11ページ。3ページごと → 分割点 4,7,10 → 4書類。
+    await page.locator('input[name="interval_pages"]').fill('3');
+    await page.getByRole('button', { name: 'このページ数で分割' }).click();
+    await expect(page.locator('.status-pill')).toContainText('3ページごとに分割しました');
+
+    // STEP3 でセグメント数が 4 になっていることを確認。
+    await page.getByRole('button', { name: '入力へ進む' }).click();
+    await expect(page.locator('.mini-row')).toHaveCount(4);
+  });
 });
