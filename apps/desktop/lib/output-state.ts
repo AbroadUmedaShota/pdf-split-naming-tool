@@ -97,6 +97,28 @@ export function outputDetailStateText(check: OutputCheckLike): string {
   return check.messages.map(formatMessage).join(" / ");
 }
 
+// 「失敗分のみ再出力」で再送する確定ファイル名(basename)を出力item から取り出す。
+// 初回 export が確定した output_path の basename を第一候補、空なら採番後の filename を使う。
+// 再出力時にこの名前を output_filename として明示指定すると、サーバ側が命名を再計算せず
+// この確定名を使うため、上書きモードでも兄弟セグメントの本命ファイル名を横取りしない（#130）。
+// output_path は成功時=実パス、失敗時=予約済みパス（どちらも採番反映済み）が入る。
+export function pinnedOutputFilename(item: SidecarOutputItem): string {
+  const fromPath = basename(item.output_path);
+  if (fromPath) {
+    return fromPath;
+  }
+  return basename(item.filename);
+}
+
+// Windows(\\) と POSIX(/) 両方の区切りに対応して末尾のファイル名要素を返す。
+function basename(pathOrName: string): string {
+  if (!pathOrName) {
+    return "";
+  }
+  const parts = pathOrName.split(/[\\/]/);
+  return parts[parts.length - 1] ?? "";
+}
+
 // 「失敗分のみ再出力」の結果を元の出力結果へマージする。
 // base.items は初回出力の全行、retry.items は失敗indexのみを再出力した結果（failedIndices と同順）。
 // 成功済み行は温存し、失敗していた位置だけ retry の結果で差し替え、サマリ・ok・messages を再計算する。

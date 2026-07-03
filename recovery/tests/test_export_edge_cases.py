@@ -365,3 +365,274 @@ def test_sidecar_export_all_failure_does_not_include_export_incomplete(
     assert response["summary"]["created"] == 0
     assert response["summary"]["failed"] == 1
     assert "export_incomplete" not in response["messages"]
+
+
+# --- issue #130: 「失敗分のみ再出力」で output_filename(確定名)を指定する経路 ---
+
+
+def test_pinned_output_filename_bypasses_name_generation(tmp_path: Path) -> None:
+    """output_filename を指定した行は命名生成をスキップし、その名前で出力される。
+
+    metadata は本来 01_02_003.pdf を生むが、確定名 pinned.pdf を指定すると出力は
+    pinned.pdf になり、命名生成由来の 01_02_003.pdf は作られないこと。
+    """
+    source = tmp_path / "source.pdf"
+    output_dir = tmp_path / "output"
+    make_pdf(source, 1)
+
+    seg = segment(source, 1, 1)
+    seg["output_filename"] = "pinned.pdf"
+    response = handle_request(
+        {"command": "export", "output_dir": str(output_dir), "segments": [seg]}
+    )
+
+    assert response["ok"] is True
+    assert response["summary"] == {"created": 1, "failed": 0}
+    assert Path(response["items"][0]["output_path"]).name == "pinned.pdf"
+    assert (output_dir / "pinned.pdf").exists()
+    assert not (output_dir / "01_02_003.pdf").exists()
+
+
+def test_pinned_output_filename_overwrites_existing_when_flag_set(tmp_path: Path) -> None:
+    """本 issue の主目的: 確定名 + overwrite=True で既存ファイルを上書き再出力できる。
+
+    上書きモードで一部失敗した後の「失敗分のみ再出力」を模す。初回に作られた X.pdf を
+    確定名で再送し、overwrite=True で置換されること（sha256 が新内容と一致）。
+    """
+    source = tmp_path / "source.pdf"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    make_pdf(source, 1)
+    existing_path = output_dir / "01_02_003.pdf"
+    existing_path.write_bytes(b"stale contents from a failed first attempt")
+
+    seg = segment(source, 1, 1)
+    seg["output_filename"] = "01_02_003.pdf"
+    response = handle_request(
+        {
+            "command": "export",
+            "output_dir": str(output_dir),
+            "segments": [seg],
+            "overwrite": True,
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["summary"] == {"created": 1, "failed": 0}
+    assert response["items"][0]["will_overwrite"] is True
+    assert "output_will_overwrite" in response["items"][0]["messages"]
+    # 既存の中身が実PDFへ置き換わっている（_2 に逃げていない）。
+    assert existing_path.read_bytes() != b"stale contents from a failed first attempt"
+    assert "Page 1" in pdf_text(existing_path)
+    assert not (output_dir / "01_02_003_2.pdf").exists()
+
+
+def test_pinned_output_retry_does_not_clobber_sibling(tmp_path: Path) -> None:
+    """回帰の核: 確定名での再出力が兄弟セグメントの本命ファイルを侵さない。
+
+    初回に本命 X.pdf(item[0]) と別名 X_2.pdf(item[1]) が作られ、item[1] だけ書き込み
+    失敗した状況を模す。失敗行の確定名 X_2.pdf のみを overwrite=True で再送しても、
+    本命 X.pdf はバイト不変であること（issue #130 で禁止した誤爆が起きない）。
+    """
+    source = tmp_path / "source.pdf"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    make_pdf(source, 2)
+    # 本命は既に正しく作られている（別内容で存在、上書き対象ではない）。
+    primary = output_dir / "01_02_003.pdf"
+    primary.write_bytes(b"the correct primary file, must not be touched")
+    primary_before = primary.read_bytes()
+
+    # 失敗していた2つ目(確定名 _2)だけを再出力する。
+    seg = segment(source, 2, 2)
+    seg["output_filename"] = "01_02_003_2.pdf"
+    response = handle_request(
+        {
+            "command": "export",
+            "output_dir": str(output_dir),
+            "segments": [seg],
+            "overwrite": True,
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["summary"] == {"created": 1, "failed": 0}
+    assert Path(response["items"][0]["output_path"]).name == "01_02_003_2.pdf"
+    assert (output_dir / "01_02_003_2.pdf").exists()
+    # 本命ファイルは一切変更されていない（誤爆していないことの明示的アサート）。
+    assert primary.read_bytes() == primary_before
+
+
+def test_pinned_output_filename_duplicate_within_batch_blocks(tmp_path: Path) -> None:
+    """同一バッチ内で確定名が重複した場合は duplicate_output_in_batch でブロック（#126整合）。"""
+    source = tmp_path / "source.pdf"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    make_pdf(source, 2)
+    existing_path = output_dir / "dup.pdf"
+    existing_path.write_bytes(b"existing")
+
+    seg1 = segment(source, 1, 1)
+    seg1["output_filename"] = "dup.pdf"
+    seg2 = segment(source, 2, 2)
+    seg2["output_filename"] = "dup.pdf"
+    response = handle_request(
+        {
+            "command": "export",
+            "output_dir": str(output_dir),
+            "segments": [seg1, seg2],
+            "overwrite": True,
+        }
+    )
+
+    assert response["ok"] is False
+    assert response["messages"] == ["preflight_failed"]
+    assert response["summary"] == {"created": 0, "failed": 2}
+    assert response["items"][0]["ok"] is True
+    assert response["items"][1]["ok"] is False
+    assert "duplicate_output_in_batch" in response["items"][1]["messages"]
+    # ブロックされたので既存は触られない。
+    assert existing_path.read_bytes() == b"existing"
+
+
+def test_pinned_output_filename_creates_when_absent_without_overwrite(tmp_path: Path) -> None:
+    """確定名がディスクに無ければ overwrite=False でも新規作成できる（手動削除後の再出力）。"""
+    source = tmp_path / "source.pdf"
+    output_dir = tmp_path / "output"
+    make_pdf(source, 1)
+
+    seg = segment(source, 1, 1)
+    seg["output_filename"] = "01_02_003.pdf"
+    response = handle_request(
+        {"command": "export", "output_dir": str(output_dir), "segments": [seg]}
+    )
+
+    assert response["ok"] is True
+    assert response["summary"] == {"created": 1, "failed": 0}
+    assert response["items"][0]["will_overwrite"] is False
+    assert (output_dir / "01_02_003.pdf").exists()
+
+
+@pytest.mark.parametrize("evil_name", ["../evil.pdf", "sub/x.pdf", "sub\\x.pdf"])
+def test_pinned_output_filename_rejects_path_traversal(tmp_path: Path, evil_name: str) -> None:
+    """確定名がパス区切り・親参照を含む場合は invalid_output_filename でブロック（信頼境界）。"""
+    source = tmp_path / "source.pdf"
+    output_dir = tmp_path / "output"
+    make_pdf(source, 1)
+
+    seg = segment(source, 1, 1)
+    seg["output_filename"] = evil_name
+    response = handle_request(
+        {
+            "command": "export",
+            "output_dir": str(output_dir),
+            "segments": [seg],
+            "overwrite": True,
+        }
+    )
+
+    assert response["ok"] is False
+    assert response["messages"] == ["preflight_failed"]
+    assert response["items"][0]["ok"] is False
+    assert "invalid_output_filename" in response["items"][0]["messages"]
+    # 出力ディレクトリ外にも中にも不正ファイルが作られていない。
+    assert_no_pdfs(output_dir)
+    assert not (tmp_path / "evil.pdf").exists()
+
+
+def test_pinned_output_filename_rejects_nonexistent_page(tmp_path: Path) -> None:
+    """確定名指定でもページ範囲は検証する（存在しないページの再出力を弾く）。"""
+    source = tmp_path / "source.pdf"
+    output_dir = tmp_path / "output"
+    make_pdf(source, 1)
+
+    seg = segment(source, 1, 2)  # PDFは1ページ
+    seg["output_filename"] = "01_02_003.pdf"
+    response = handle_request(
+        {"command": "export", "output_dir": str(output_dir), "segments": [seg]}
+    )
+
+    assert response["ok"] is False
+    assert response["summary"] == {"created": 0, "failed": 1}
+    assert response["items"][0]["status"] == "failed"
+    assert "PDFは1ページ" in response["items"][0]["messages"][0]
+    assert_no_pdfs(output_dir)
+
+
+def test_pinned_output_filename_end_to_end_retry_over_overwrite_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """end-to-end: 上書きモードで部分失敗 → 失敗分のみ再出力が成功する（本 issue の再現→解消）。
+
+    1) 既存 X.pdf と Y.pdf を上書き対象として置く。
+    2) overwrite=True で2セグメント export、2つ目だけ split_pdf が失敗する。
+    3) 失敗した2つ目の確定名(items[1].output_path の basename)を overwrite=True で再送。
+    4) 全件成功し、Y.pdf が新内容へ置き換わる。X.pdf は初回 export で置換済みで不変。
+    """
+    from pdf_splitter_tool.processor import PdfProcessor
+
+    source = tmp_path / "source.pdf"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    make_pdf(source, 2)
+    x_path = output_dir / "01_02_001.pdf"
+    y_path = output_dir / "01_02_002.pdf"
+    x_path.write_bytes(b"old X")
+    y_path.write_bytes(b"old Y")
+
+    call_count = 0
+    original_split_pdf = PdfProcessor.split_pdf
+
+    def split_pdf_fail_on_second(seg: object, dest: object, overwrite: bool = False) -> object:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise RuntimeError("simulated write failure on second segment")
+        return original_split_pdf(seg, dest, overwrite=overwrite)
+
+    monkeypatch.setattr(PdfProcessor, "split_pdf", staticmethod(split_pdf_fail_on_second))
+
+    first = handle_request(
+        {
+            "command": "export",
+            "output_dir": str(output_dir),
+            "segments": [
+                segment(source, 1, 1, "1"),
+                segment(source, 2, 2, "2"),
+            ],
+            "overwrite": True,
+        }
+    )
+
+    assert first["ok"] is False
+    assert first["summary"] == {"created": 1, "failed": 1}
+    assert first["items"][0]["status"] == "created"
+    assert first["items"][1]["status"] == "failed"
+    # 初回で X は上書き済み、Y は失敗したので旧内容のまま。
+    assert x_path.read_bytes() != b"old X"
+    x_after_first = x_path.read_bytes()
+    assert y_path.read_bytes() == b"old Y"
+
+    # split_pdf を通常動作へ戻して失敗分だけ再出力する。
+    monkeypatch.setattr(PdfProcessor, "split_pdf", staticmethod(original_split_pdf))
+    pinned = Path(first["items"][1]["output_path"]).name
+    assert pinned == "01_02_002.pdf"
+    retry_seg = segment(source, 2, 2, "2")
+    retry_seg["output_filename"] = pinned
+    retry = handle_request(
+        {
+            "command": "export",
+            "output_dir": str(output_dir),
+            "segments": [retry_seg],
+            "overwrite": True,
+        }
+    )
+
+    assert retry["ok"] is True
+    assert retry["summary"] == {"created": 1, "failed": 0}
+    assert retry["items"][0]["will_overwrite"] is True
+    # Y が新内容へ置換され、X は初回のまま不変。
+    assert y_path.read_bytes() != b"old Y"
+    assert "Page 2" in pdf_text(y_path)
+    assert x_path.read_bytes() == x_after_first
+    assert not (output_dir / "01_02_002_2.pdf").exists()

@@ -70,6 +70,7 @@ import {
   outputDetailStateText,
   outputIssueCount,
   outputListStateText,
+  pinnedOutputFilename,
   unresolvedExistingCount
 } from "../lib/output-state";
 import { hasPreviewImageData, loadPagePreview } from "../lib/preview-flow";
@@ -2781,7 +2782,14 @@ export default function Page() {
     if (!failedIndices.length) {
       return;
     }
-    const retrySegments = failedIndices.map((index) => segments[index]);
+    // 失敗行は初回 export で確定した出力名(output_path の basename / なければ filename)を
+    // output_filename として明示指定する。サーバ側は命名を再計算せずこの確定名を使うため、
+    // 上書きモードでも兄弟セグメントの本命ファイル名を横取りしない（issue #130）。
+    const retrySegments = failedIndices.map((index) => {
+      const item = baseItems[index];
+      const pinnedName = pinnedOutputFilename(item);
+      return pinnedName ? { ...segments[index], output_filename: pinnedName } : segments[index];
+    });
 
     exportInFlightRef.current = true;
     setIsExporting(true);
@@ -2792,7 +2800,10 @@ export default function Page() {
         output_dir: outputDir,
         segments: retrySegments,
         affix_defs: affixDefs,
-        seq_digits: seqDigits
+        seq_digits: seqDigits,
+        // 確定名スロットに限り上書きを許可する。overwrite の効力は output_filename 指定行に
+        // 閉じるため、初回に正しく作られた兄弟ファイルを壊すことはない（issue #130）。
+        overwrite: overwriteExisting
       });
       if (response.command !== "export" || !("summary" in response) || !("items" in response)) {
         throw new Error(response.ok ? "再出力に失敗しました。" : sidecarError(response));

@@ -279,4 +279,9 @@ export type SidecarSegment = {
   start_page: number;
   end_page: number;
   metadata?: Record<string, string>;
+  // 出力ファイル名(basename)の明示指定。指定時はサーバ側で命名生成をスキップし、
+  // この名前を確定名として使う(output_dir 配下に配置)。「失敗分のみ再出力」で1回目に
+  // 確定した名前をそのまま再利用し、兄弟セグメントの名前を再計算で横取りする誤爆を
+  // 防ぐために使う。未指定なら従来どおり metadata から命名する。
+  output_filename?: string;
 };

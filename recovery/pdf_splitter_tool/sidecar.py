@@ -382,13 +382,28 @@ def state_save(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_checks(request: dict[str, Any], output_dir: Path) -> list[SegmentOutputCheck]:
-    segments = [Segment.from_dict(item) for item in request.get("segments", []) if isinstance(item, dict)]
+    raw_segments = [item for item in request.get("segments", []) if isinstance(item, dict)]
+    segments = [Segment.from_dict(item) for item in raw_segments]
+    # 各セグメントの確定名(output_filename)を segments と同順・同長で抽出する。指定行は
+    # サーバ側の命名生成をスキップし、この basename を確定名として使う（issue #130・
+    # 「失敗分のみ再出力」で1回目に確定した名前をそのまま再利用し、兄弟の名前を横取り
+    # する誤爆を防ぐ）。未指定行は None（従来の命名生成パス）。
+    output_filenames: list[str | None] = []
+    has_pinned = False
+    for item in raw_segments:
+        raw_name = item.get("output_filename")
+        if isinstance(raw_name, str) and raw_name:
+            output_filenames.append(raw_name)
+            has_pinned = True
+        else:
+            output_filenames.append(None)
     return check_segment_outputs(
         segments,
         output_dir,
         affix_defs=request.get("affix_defs", ()),
         seq_digits=request.get("seq_digits", DEFAULT_SEQ_DIGITS),
         overwrite=bool(request.get("overwrite", False)),
+        output_filenames=output_filenames if has_pinned else None,
     )
 
 

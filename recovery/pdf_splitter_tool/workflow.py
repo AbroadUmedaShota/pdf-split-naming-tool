@@ -70,13 +70,20 @@ def check_segment_outputs(
     affix_defs: object = (),
     seq_digits: object = DEFAULT_SEQ_DIGITS,
     overwrite: bool = False,
+    output_filenames: list[str | None] | None = None,
 ) -> list[SegmentOutputCheck]:
     processor = processor or PdfProcessor()
     affix_defs = normalize_affix_defs(affix_defs)
     seq_digits = coerce_seq_digits(seq_digits)
     checks: list[SegmentOutputCheck] = []
     export_policy = ExportPathPolicy()
-    for segment in segments:
+    for index, segment in enumerate(segments):
+        pinned_name = output_filenames[index] if output_filenames and index < len(output_filenames) else None
+        if pinned_name:
+            checks.append(
+                _check_pinned_output(segment, pinned_name, output_dir, processor, export_policy, overwrite)
+            )
+            continue
         result = processor.build_yoshida_filename(segment.metadata, affix_defs, seq_digits)
         messages = [*error_messages(result.errors), *segment_page_errors(segment, processor)]
         if result.ok and not messages:
@@ -189,6 +196,103 @@ def check_segment_outputs(
                 )
             )
     return checks
+
+
+def _check_pinned_output(
+    segment: Segment,
+    pinned_name: str,
+    output_dir: Path,
+    processor: PdfProcessor,
+    export_policy: ExportPathPolicy,
+    overwrite: bool,
+) -> SegmentOutputCheck:
+    # 確定名(output_filename)が指定された行。初回 export が既に確定した basename を
+    # そのまま再利用する経路で、命名生成(build_yoshida_filename)を呼ばない。兄弟セグメントの
+    # 名前を再計算で横取りする誤爆(issue #130)を構造的に防ぐため、_2 逃がしをしない。
+    # ページ範囲の妥当性だけは通常どおり検証する（存在しないページの再出力を弾く）。
+    page_messages = segment_page_errors(segment, processor)
+    if page_messages:
+        return SegmentOutputCheck(
+            segment=segment,
+            ok=False,
+            filename=pinned_name,
+            output_path=None,
+            messages=tuple(page_messages),
+            requested_filename=pinned_name,
+        )
+    # 信頼境界: 確定名は output_dir 配下の単純 basename でなければならない。パス区切りや
+    # 親参照(..)を含む値はディレクトリトラバーサルの恐れがあるためブロックする。
+    if not pinned_name or Path(pinned_name).name != pinned_name:
+        return SegmentOutputCheck(
+            segment=segment,
+            ok=False,
+            filename=pinned_name,
+            output_path=None,
+            messages=("invalid_output_filename",),
+            requested_filename=pinned_name,
+        )
+    requested_path = output_dir / pinned_name
+    path_too_long = len(str(requested_path)) >= MAX_OUTPUT_PATH_LENGTH
+    has_existing_output = requested_path.exists()
+    if path_too_long:
+        block_messages: tuple[str, ...] = ("output_path_too_long",)
+        if has_existing_output:
+            block_messages = ("output_path_too_long", "output_exists")
+        return SegmentOutputCheck(
+            segment=segment,
+            ok=False,
+            filename=pinned_name,
+            output_path=None,
+            messages=block_messages,
+            requested_filename=pinned_name,
+            requested_path=requested_path,
+            existing_path=requested_path if has_existing_output else None,
+            has_existing_output=has_existing_output,
+        )
+    if requested_path in export_policy.reserved:
+        # 同一バッチ内で別の行が既にこの確定名を確保済み。確定名は動かさない設計なので
+        # _2 へ逃がさず、#126 と同じく duplicate_output_in_batch でブロックする。
+        return SegmentOutputCheck(
+            segment=segment,
+            ok=False,
+            filename=pinned_name,
+            output_path=None,
+            messages=("duplicate_output_in_batch",),
+            requested_filename=pinned_name,
+            requested_path=requested_path,
+            existing_path=requested_path if has_existing_output else None,
+            has_existing_output=has_existing_output,
+        )
+    if has_existing_output and not overwrite:
+        # 既存ファイルがあるが上書き許可がない。確定名は動かさないため output_exists で
+        # 素直にブロックする（_2 採番はしない）。
+        return SegmentOutputCheck(
+            segment=segment,
+            ok=False,
+            filename=pinned_name,
+            output_path=None,
+            messages=("output_exists",),
+            requested_filename=pinned_name,
+            requested_path=requested_path,
+            existing_path=requested_path,
+            has_existing_output=True,
+        )
+    # ここまで来たら書き込み可能。確定名スロットを予約する（同一バッチ内の確定名重複を
+    # 上の reserved 判定で弾けるようにするため）。既存があれば overwrite=True の行なので
+    # will_overwrite=True、無ければ新規作成。
+    export_policy.reserved.add(requested_path)
+    return SegmentOutputCheck(
+        segment=segment,
+        ok=True,
+        filename=requested_path.name,
+        output_path=requested_path,
+        messages=("output_will_overwrite",) if has_existing_output else (),
+        requested_filename=pinned_name,
+        requested_path=requested_path,
+        existing_path=requested_path if has_existing_output else None,
+        has_existing_output=has_existing_output,
+        will_overwrite=has_existing_output,
+    )
 
 
 def unique_output_path(path: Path, reserved: set[Path]) -> Path:
