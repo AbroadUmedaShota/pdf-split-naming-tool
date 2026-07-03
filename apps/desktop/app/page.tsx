@@ -151,6 +151,9 @@ const steps: Array<{ id: StepId; label: string; hint: string; icon: LucideIcon }
 ];
 
 const defaultCommonMetadata = { box_no: "1", binder_no: "1" };
+// バージョンの単一ソースは package.json。next.config.mjs がビルド時に NEXT_PUBLIC_APP_VERSION へ注入する。
+// Tauri 実行時は getVersion() の値が優先され、これはブラウザプレビュー等の取得失敗時フォールバックに使う。
+const FALLBACK_APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "0.1.5";
 const SEARCH_TERM_PRESET_STORAGE_KEY = "pdf-organizer.step2SearchTerms.v1";
 const CONTRACT_SEARCH_TERMS = [
   "契約書",
@@ -272,6 +275,12 @@ function basename(path: string): string {
 
 // サムネイルを自動取得する最大ページ数。超過分はページ番号のみ表示し、一覧に省略注記を出す。
 const MAX_THUMBNAILS = 60;
+
+// 連番の欠番検査で全番号を列挙する最大レンジ幅。手動連番に極端な値を入れても
+// レンダーが固まらないよう、これを超えたら個別列挙をやめて範囲の要約に切り替える。
+const SEQ_GAP_MAX_RANGE = 10_000;
+// 欠番を警告文に列挙する上限件数。超えた分は「…他N件」に畳んで巨大文字列を作らない。
+const SEQ_GAP_DISPLAY_LIMIT = 10;
 
 // 状態復元時の affix_defs 検証。壊れた要素（key/position 不正）を捨て、key 重複を除き、
 // 上限件数に切り詰める。state ファイル直接編集や旧データ由来の不正値で
@@ -611,7 +620,7 @@ export default function Page() {
   });
   // 分割ステップを一度でも開いたか（分割点ゼロ運用でもステッパーを「完了」にするための訪問フラグ）。
   const [splitStepVisited, setSplitStepVisited] = useState(false);
-  const [currentVersion, setCurrentVersion] = useState("0.1.4");
+  const [currentVersion, setCurrentVersion] = useState(FALLBACK_APP_VERSION);
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
   const [updateMessage, setUpdateMessage] = useState("更新未確認");
   const [updateProgress, setUpdateProgress] = useState("");
@@ -755,7 +764,9 @@ export default function Page() {
   // 同じ箱No・バインダーNo の中で連番が重複/欠番していないかを出力前に検査する。
   // 自動採番では隙間は出ないので、主に手動で連番を上書きした場合の取り違えを拾う。
   const seqWarnings = useMemo(() => {
-    const groups = new Map<string, { counts: Map<string, number>; nums: number[] }>();
+    // 箱No・バインダーNo はそのまま group に保持する。キーへ連結すると値に含まれる空白で
+    // 別グループが衝突するため（例 ["A B","01"] と ["A","B 01"]）、JSON 化して一意に保つ。
+    const groups = new Map<string, { binder: string; box: string; counts: Map<string, number>; nums: number[] }>();
     for (const segment of outputSegments) {
       const box = (segment.metadata.box_no ?? "").trim();
       const binder = (segment.metadata.binder_no ?? "").trim();
@@ -766,8 +777,8 @@ export default function Page() {
       const num = Number.parseInt(raw, 10);
       // "3" と "03" は最終ファイル名では同じ番号になるため、数値として正規化して突き合わせる。
       const norm = Number.isFinite(num) ? String(num) : raw;
-      const key = `${box} ${binder}`;
-      const group = groups.get(key) ?? { counts: new Map<string, number>(), nums: [] };
+      const key = JSON.stringify([box, binder]);
+      const group = groups.get(key) ?? { binder, box, counts: new Map<string, number>(), nums: [] };
       group.counts.set(norm, (group.counts.get(norm) ?? 0) + 1);
       if (Number.isFinite(num)) {
         group.nums.push(num);
@@ -775,9 +786,8 @@ export default function Page() {
       groups.set(key, group);
     }
     const warnings: string[] = [];
-    for (const [key, group] of groups) {
-      const [box, binder] = key.split(" ");
-      const label = `箱${box || "?"}・バインダー${binder || "?"}`;
+    for (const group of groups.values()) {
+      const label = `箱${group.box || "?"}・バインダー${group.binder || "?"}`;
       const dups = [...group.counts.entries()]
         .filter(([, count]) => count > 1)
         .map(([seq]) => seq)
@@ -787,14 +797,26 @@ export default function Page() {
       }
       if (group.nums.length > 1) {
         const uniq = [...new Set(group.nums)].sort((a, b) => a - b);
-        const missing: number[] = [];
-        for (let value = uniq[0]; value <= uniq[uniq.length - 1]; value += 1) {
-          if (!uniq.includes(value)) {
-            missing.push(value);
+        const min = uniq[0];
+        const max = uniq[uniq.length - 1];
+        if (max - min > SEQ_GAP_MAX_RANGE) {
+          // 連番の幅が広すぎる（多くは手動入力の桁ミス）。全番号の列挙はレンダーを固めるので要約に切り替える。
+          warnings.push(`${label}：連番の範囲が広すぎます（最小${min}〜最大${max}）`);
+        } else {
+          // Set 照合で欠番を O(1) 判定する（includes の線形走査を避ける）。
+          const present = new Set(uniq);
+          const missing: number[] = [];
+          for (let value = min; value <= max; value += 1) {
+            if (!present.has(value)) {
+              missing.push(value);
+            }
           }
-        }
-        if (missing.length) {
-          warnings.push(`${label}：連番 ${missing.join("・")} が欠番`);
+          if (missing.length) {
+            const shown = missing.slice(0, SEQ_GAP_DISPLAY_LIMIT).join("・");
+            const rest = missing.length - SEQ_GAP_DISPLAY_LIMIT;
+            const detail = rest > 0 ? `${shown}…他${rest}件` : shown;
+            warnings.push(`${label}：連番 ${detail} が欠番`);
+          }
         }
       }
     }
@@ -1115,7 +1137,7 @@ export default function Page() {
       })
       .catch(() => {
         if (!disposed) {
-          setCurrentVersion("0.1.4");
+          setCurrentVersion(FALLBACK_APP_VERSION);
         }
       });
 
