@@ -208,6 +208,48 @@ def test_pdf_service_publish_file_exclusive_overwrites_when_flag_set(tmp_path: P
     assert not source.exists()
 
 
+def test_sidecar_preflight_and_export_block_duplicate_overwrite_within_batch(tmp_path: Path) -> None:
+    # 同名になる2セグメント × overwrite=ON × 同名の既存ファイルあり。
+    # 先行セグメントが上書き予約したパスへ後続セグメントも到達すると、同一ファイルへ
+    # 二重書き込み(後勝ち)になり created=2 でも1ファイルしか残らない。後続行は
+    # duplicate_output_in_batch でブロックし、export を preflight_failed で止める。
+    source = tmp_path / "source.pdf"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    make_pdf(source, 4)
+    existing_path = output_dir / "01_02_003.pdf"
+    existing_path.write_bytes(b"existing")
+    request = {
+        "output_dir": str(output_dir),
+        "segments": [
+            segment(source, 1, 2),
+            segment(source, 3, 4),
+        ],
+        "overwrite": True,
+    }
+
+    preflight_response = handle_request({"command": "preflight", **request})
+    export_response = handle_request({"command": "export", **request})
+
+    # 1行目は上書き予約(will_overwrite)、2行目は同名重複でブロック。
+    assert preflight_response["ok"] is True
+    assert preflight_response["can_run"] is False
+    checks = preflight_response["checks"]
+    assert checks[0]["ok"] is True
+    assert checks[0]["will_overwrite"] is True
+    assert "output_will_overwrite" in checks[0]["messages"]
+    assert checks[1]["ok"] is False
+    assert checks[1]["will_overwrite"] is False
+    assert "duplicate_output_in_batch" in checks[1]["messages"]
+
+    # export は止まり、既存ファイルは触られない（サイレント消失が起きない）。
+    assert export_response["ok"] is False
+    assert export_response["messages"] == ["preflight_failed"]
+    assert export_response["summary"] == {"created": 0, "failed": 2}
+    assert existing_path.read_bytes() == b"existing"
+    assert_no_pdfs(output_dir / "01_02_003_2.pdf")
+
+
 def test_sidecar_preflight_and_export_overwrite_existing_when_flag_set(tmp_path: Path) -> None:
     source = tmp_path / "source.pdf"
     output_dir = tmp_path / "output"

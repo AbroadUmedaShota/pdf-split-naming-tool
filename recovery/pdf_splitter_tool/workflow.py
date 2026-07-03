@@ -104,7 +104,7 @@ def check_segment_outputs(
                         has_existing_output=has_existing_output,
                     )
                 )
-            elif has_existing_output and overwrite:
+            elif has_existing_output and overwrite and requested_path not in export_policy.reserved:
                 # Overwrite mode: the user explicitly accepted replacing the existing
                 # file with the same archival name. Reserve the exact path (no _2 rename)
                 # so a sibling segment cannot also claim it within this batch.
@@ -121,6 +121,26 @@ def check_segment_outputs(
                         existing_path=requested_path,
                         has_existing_output=True,
                         will_overwrite=True,
+                    )
+                )
+            elif has_existing_output and overwrite:
+                # Overwrite mode, but a preceding segment in this batch already reserved
+                # this exact path. Overwriting to the same archival name means the two
+                # segments would write to one file (last write wins), silently dropping
+                # one document while reporting created=2. Block with ok=False instead of
+                # escaping to a _2 name: the overwrite intent is to keep the precise
+                # archival name, so a duplicate name is a user error to fix.
+                checks.append(
+                    SegmentOutputCheck(
+                        segment=segment,
+                        ok=False,
+                        filename=result.normalized_filename,
+                        output_path=None,
+                        messages=("duplicate_output_in_batch",),
+                        requested_filename=result.normalized_filename,
+                        requested_path=requested_path,
+                        existing_path=requested_path,
+                        has_existing_output=True,
                     )
                 )
             elif has_existing_output:

@@ -53,6 +53,9 @@ function formatMessage(msg: string): string {
   if (msg === "output_will_overwrite") {
     return "同名の既存ファイルを上書きします";
   }
+  if (msg === "duplicate_output_in_batch") {
+    return "バッチ内で同じ出力名が重複しています。連番を修正してください";
+  }
   return msg;
 }
 
