@@ -28,6 +28,15 @@ GitHub Actions でビルドする場合だけ、private key の内容を
 
 ## リリースごとに行う作業
 
+### 資産チェックの役割分担（CI とローカルで別スクリプト）
+
+生成物の検証は2本に分かれています。何を検証するかで使い分けます。
+
+- `check-bundle-assets.mjs`（`release:check-bundle`）— **CI 用**。`.github/workflows/release.yml` から呼ばれ、`build:bundle` が生成する成果物、つまり PyInstaller 製 sidecar exe（`src-tauri/resources/sidecar/pdf-splitter-sidecar.exe`）と Next.js の静的エクスポート（`out/`）だけを検証します。`build:bundle` は `tauri build` も署名も `latest.json` 生成も行わないため、installer・`.sig`・`latest.json` はここでは検証しません。`workflow_dispatch` でタグを打つ前のリハーサル実行にも使えます。
+- `check-release-assets.mjs`（`release:check`）— **ローカル用**。下記手順5（`tauri build` と `release:manifest` の実行後）で使い、`src-tauri\target\release\bundle\release-assets` にある NSIS installer・`.sig`・`latest.json` の3点セットと、manifest 内の version・署名・URL の整合まで検証します。`tauri build` を実行しない CI では成立しないため、CI からは呼びません。
+
+まとめると、CI は「バンドルの材料が揃っているか」まで、installer・署名・manifest の検証はローカルの手順5が受け持ちます。
+
 1. `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、
    `..\..\recovery\pyproject.toml`、
    `..\..\recovery\pdf_splitter_tool\app_metadata.py` の version を同じ SemVer に揃えます。

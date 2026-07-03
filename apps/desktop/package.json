@@ -25,7 +25,8 @@
     "test:installed-updater": "node scripts/installed-updater-smoke.mjs",
     "tauri": "tauri",
     "release:manifest": "node scripts/create-updater-manifest.mjs",
-    "release:check": "node scripts/check-release-assets.mjs"
+    "release:check": "node scripts/check-release-assets.mjs",
+    "release:check-bundle": "node scripts/check-bundle-assets.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",

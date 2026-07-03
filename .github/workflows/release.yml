@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+  # Allow a tag-less rehearsal run so the pipeline can be validated before a
+  # real v* tag is pushed.
+  workflow_dispatch:
 
 jobs:
   # ------------------------------------------------------------------
@@ -47,6 +50,9 @@ jobs:
         run: npm run build:bundle
         timeout-minutes: 20
 
-      - name: Verify release assets
+      - name: Verify bundle assets
         working-directory: apps/desktop
-        run: node scripts/check-release-assets.mjs
+        # check-bundle-assets.mjs verifies only what build:bundle produces
+        # (sidecar exe + Next.js export). Installer/.sig/latest.json are checked
+        # locally by check-release-assets.mjs after `tauri build`.
+        run: node scripts/check-bundle-assets.mjs
