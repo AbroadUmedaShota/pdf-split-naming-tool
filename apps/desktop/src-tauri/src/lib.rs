@@ -12,6 +12,18 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        // The single-instance plugin must be registered before all others so a
+        // second launch is intercepted and routed to the running instance instead
+        // of opening a new window that would share the same state file (issue #131).
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // Bring the existing main window to the foreground: restore it if it
+            // was minimized, then focus it. Errors are non-fatal (the window may
+            // be mid-teardown), so we intentionally ignore the results.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())

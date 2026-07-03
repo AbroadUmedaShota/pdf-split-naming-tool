@@ -359,6 +359,17 @@ function isMetadataExcluded(metadata: Record<string, string> | undefined): boole
   return metadata?.excluded === "1";
 }
 
+// 手動連番が数値なのに 1 未満（0・負値）か。この値は _000 / 0-5 のような不正名を生むため出力前に弾く。
+// 非数（"abc" 等）はそのまま出力する現行仕様のため対象外（false を返す）。
+function isInvalidManualSeq(seq: string | undefined): boolean {
+  const trimmed = String(seq ?? "").trim();
+  if (!trimmed) {
+    return false;
+  }
+  const parsed = Number(trimmed);
+  return Number.isInteger(parsed) && parsed < 1;
+}
+
 function normalizeSearchTerm(term: string): string {
   return term.trim();
 }
@@ -760,6 +771,11 @@ export default function Page() {
     () => outputSegments.filter((segment) => missingMetadata(segment.metadata).length > 0).length,
     [outputSegments]
   );
+  // 手動連番が 0/負値のセグメント数。不正名（_000 等）の出力を防ぐため、出力前チェックの前提条件にする。
+  const invalidSeqSegments = useMemo(
+    () => outputSegments.filter((segment) => isInvalidManualSeq(segment.metadata.seq)).length,
+    [outputSegments]
+  );
   const readySegments = Math.max(0, outputSegments.length - incompleteSegments);
   // 同じ箱No・バインダーNo の中で連番が重複/欠番していないかを出力前に検査する。
   // 自動採番では隙間は出ないので、主に手動で連番を上書きした場合の取り違えを拾う。
@@ -828,7 +844,7 @@ export default function Page() {
   const unresolvedExisting = unresolvedExistingCount(preflightChecks);
   const overwriteOutputs = preflightChecks.filter((check) => isOutputCheckOverwrite(check)).length;
   const canContinueFromImport = pdfFiles.length > 0 && Boolean(outputDir);
-  const canRunPreflight = outputSegments.length > 0 && Boolean(outputDir);
+  const canRunPreflight = outputSegments.length > 0 && Boolean(outputDir) && invalidSeqSegments === 0;
   const canExport =
     preflightChecks.length > 0 &&
     outputIssues === 0 &&
@@ -3187,6 +3203,15 @@ export default function Page() {
           title="セグメント一覧"
           description={`${readySegments}件 OK / ${incompleteSegments}件 未入力${excludedSegmentCount ? ` / ${excludedSegmentCount}件 除外` : ""}　（↑↓で移動）`}
         />
+        {invalidSeqSegments ? (
+          <div className="seq-integrity-warning" role="status">
+            <AlertTriangle aria-hidden="true" size={14} />
+            <div>
+              <strong>連番が 1 以上でないセグメントが {invalidSeqSegments} 件あります</strong>
+              <span>この値では出力できません。連番を 1 以上に直してください。</span>
+            </div>
+          </div>
+        ) : null}
         {seqWarnings.length ? (
           <div className="seq-integrity-warning" role="status">
             <AlertTriangle aria-hidden="true" size={14} />
@@ -3310,6 +3335,9 @@ export default function Page() {
     }
     if (incompleteSegments) {
       missing.push(`未入力 ${incompleteSegments}件`);
+    }
+    if (invalidSeqSegments) {
+      missing.push(`連番エラー ${invalidSeqSegments}件`);
     }
     return missing;
   }
@@ -3862,7 +3890,11 @@ export default function Page() {
                     updateMetadata(selectedSegment, "seq", event.target.value);
                   }}
                 />
-                {String(selectedSegment.metadata.seq ?? "").trim().length > seqDigits ? (
+                {isInvalidManualSeq(selectedSegment.metadata.seq) ? (
+                  <small className="seq-digit-warning">
+                    連番は 1 以上にしてください。この値では出力できません。
+                  </small>
+                ) : String(selectedSegment.metadata.seq ?? "").trim().length > seqDigits ? (
                   <small className="seq-digit-warning">
                     桁数({seqDigits})を超えています。この番号はそのまま出力されます（並び順が崩れる場合があります）。
                   </small>
