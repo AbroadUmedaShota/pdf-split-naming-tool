@@ -2207,6 +2207,15 @@ export default function Page() {
     previewFrameRef.current?.focus({ preventScroll: true });
   }
 
+  function scrollPreviewByPage(direction: -1 | 1): void {
+    const frame = previewFrameRef.current;
+    if (!frame) {
+      return;
+    }
+    const distance = Math.max(120, Math.round(frame.clientHeight * 0.8));
+    frame.scrollBy({ behavior: "smooth", top: direction * distance });
+  }
+
   step2KeyHandlerRef.current = (event: KeyboardEvent): void => {
     if (activeStep !== "split" || isEditableKeyboardTarget(event.target)) {
       return;
@@ -2240,6 +2249,17 @@ export default function Page() {
       if (event.key === "Enter" && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
         event.preventDefault();
         addSplitBeforeCurrentPage();
+        return;
+      }
+      if (
+        event.key === "Enter" &&
+        event.target === previewFrameRef.current &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey
+      ) {
+        event.preventDefault();
+        scrollPreviewByPage(event.shiftKey ? -1 : 1);
         return;
       }
       if (event.key.toLowerCase() === "z" && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
@@ -3634,7 +3654,13 @@ export default function Page() {
   function renderPreviewFrame() {
     const previewClassName = `preview-frame ${previewFitMode}`;
     return (
-      <div className={previewClassName} ref={previewFrameRef} tabIndex={-1}>
+      <div
+        aria-label="PDFページプレビュー"
+        className={previewClassName}
+        ref={previewFrameRef}
+        tabIndex={activeStep === "split" ? 0 : -1}
+        title={activeStep === "split" ? "Enterで下へ、Shift+Enterで上へスクロール" : undefined}
+      >
         {isPreviewLoading ? (
           <div aria-live="polite" className="preview-loading-indicator" role="status">
             読み込み中…
@@ -3843,6 +3869,8 @@ export default function Page() {
                 // 続けて次の書類の値を確認・入力できる（大量処理のマウス往復を省く）。
                 if (
                   event.key === "Enter" &&
+                  !event.nativeEvent.isComposing &&
+                  event.keyCode !== 229 &&
                   !event.shiftKey &&
                   !event.ctrlKey &&
                   !event.altKey &&
@@ -4328,7 +4356,7 @@ export default function Page() {
                 aria-label="追加する検索用語"
                 onChange={(event) => setCustomSearchTermInput(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") {
+                  if (event.key === "Enter" && !event.nativeEvent.isComposing && event.keyCode !== 229) {
                     event.preventDefault();
                     addDraftCustomSearchTerm();
                   }
@@ -4386,6 +4414,7 @@ export default function Page() {
           <ul>
             <li><kbd>←</kbd> <kbd>→</kbd> ページ移動</li>
             <li><kbd>Alt</kbd>+<kbd>←</kbd> <kbd>→</kbd> PDF切替</li>
+            <li><kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd> プレビューを下 / 上へスクロール（プレビュー選択時）</li>
             <li><kbd>Space</kbd> / <kbd>Ctrl</kbd>+<kbd>Enter</kbd> 現在ページの前で分割</li>
             <li><kbd>Delete</kbd> 選択中の分割点を削除</li>
             <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> 元に戻す / やり直し</li>
