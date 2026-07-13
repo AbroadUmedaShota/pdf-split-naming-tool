@@ -84,7 +84,7 @@ gh release create $tag `
   --repo $repo `
   --target main `
   --title "PDF整理ツール $tag" `
-  --notes "PDF整理ツール $version" `
+  --notes-file "..\..\docs\releases\v${version}.md" `
   --draft
 ```
 
