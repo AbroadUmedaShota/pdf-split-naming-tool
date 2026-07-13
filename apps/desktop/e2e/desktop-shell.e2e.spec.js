@@ -715,6 +715,31 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     expect(pageErrors, 'ズーム操作で JS 例外が発生しない').toEqual([]);
   });
 
+  test('TC-E2E-B7 STEP2プレビューを通常ホイールとEnterで縦スクロールできる', async ({ page }) => {
+    await openDevStep(page, 'split');
+
+    const previewFrame = page.getByLabel('PDFページプレビュー');
+    await page.getByRole('button', { name: '実寸' }).click();
+    await page.getByLabel('ズーム倍率').fill('2.4');
+    // dev preview は sidecar の倍率別再描画を行わないため、拡大時と同じ縦overflowを再現する。
+    await previewFrame.locator('.preview-page-layer').evaluate((element) => {
+      element.style.minHeight = '1600px';
+    });
+    await expect.poll(async () => previewFrame.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+
+    await previewFrame.hover();
+    await page.mouse.wheel(0, 480);
+    await expect.poll(async () => previewFrame.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+    await previewFrame.evaluate((element) => { element.scrollTop = 0; });
+    await previewFrame.focus();
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => previewFrame.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+    await page.keyboard.press('Shift+Enter');
+    await expect.poll(async () => previewFrame.evaluate((element) => element.scrollTop)).toBe(0);
+  });
+
   test('TC-E2E-B8 STEP2/STEP3の矢印ナビと入力欄フォーカス中のガードが動作する', async ({ page }) => {
     // TC: manual B8 | Risk: キーボード操作がページ/セグメント移動と入力編集で衝突する
     const pageErrors = [];
@@ -999,6 +1024,7 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await expect(page.locator('.shortcut-help summary')).toHaveText('キーボードショートカット');
     await page.locator('.shortcut-help summary').click();
     await expect(page.locator('.shortcut-help')).toContainText('現在ページの前で分割');
+    await expect(page.locator('.shortcut-help')).toContainText('プレビューを下 / 上へスクロール');
 
     expect(pageErrors, 'ブランド整理・ヒント追加で JS 例外が発生しない').toEqual([]);
   });
@@ -1142,6 +1168,26 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await page.locator('input[name="box_no"]').focus();
     await page.keyboard.press('Enter');
     await expect(preview).not.toHaveText(before);
+  });
+
+  test('TC-E2E-D12-IME IME変換確定中のEnterでは次セグメントへ移動しない', async ({ page }) => {
+    await openDevStep(page, 'input');
+
+    await page.locator('.mini-row').first().click();
+    const selectedRow = page.locator('.mini-row.selected');
+    await expect(selectedRow).toContainText('1-3');
+
+    const boxInput = page.locator('input[name="box_no"]');
+    await boxInput.focus();
+    await boxInput.dispatchEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      isComposing: true,
+      key: 'Enter',
+      keyCode: 229,
+    });
+
+    await expect(selectedRow).toContainText('1-3');
   });
 
   test('TC-E2E-D13 STEP2 で N ページごとに一括分割できる', async ({ page }) => {
