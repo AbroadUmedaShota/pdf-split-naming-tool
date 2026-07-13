@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -193,6 +194,59 @@ def test_pdf_service_publish_file_exclusive_does_not_overwrite_existing_path(tmp
         PdfService.publish_file_exclusive(source, output)
 
     assert output.read_bytes() == b"existing"
+
+
+def test_pdf_service_publish_file_exclusive_atomically_publishes_completed_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.tmp"
+    output = tmp_path / "output.pdf"
+    completed_pdf = b"complete-pdf-contents"
+    source.write_bytes(completed_pdf)
+    calls: list[str] = []
+
+    if os.name == "nt":
+        original_publish = os.rename
+
+        def record_publish(src: str | bytes | Path, dst: str | bytes | Path) -> None:
+            calls.append("rename")
+            assert not output.exists()
+            original_publish(src, dst)
+
+        monkeypatch.setattr(os, "rename", record_publish)
+    else:
+        original_publish = os.link
+
+        def record_publish(src: str | bytes | Path, dst: str | bytes | Path) -> None:
+            calls.append("link")
+            assert not output.exists()
+            original_publish(src, dst)
+
+        monkeypatch.setattr(os, "link", record_publish)
+
+    PdfService.publish_file_exclusive(source, output)
+
+    assert calls == (["rename"] if os.name == "nt" else ["link"])
+    assert output.read_bytes() == completed_pdf
+
+
+def test_pdf_service_publish_file_exclusive_failure_leaves_no_final_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.tmp"
+    output = tmp_path / "output.pdf"
+    source.write_bytes(b"complete-pdf-contents")
+
+    def fail_publish(*_args: object) -> None:
+        raise OSError("simulated atomic publication failure")
+
+    monkeypatch.setattr(os, "rename" if os.name == "nt" else "link", fail_publish)
+
+    with pytest.raises(OSError, match="simulated atomic publication failure"):
+        PdfService.publish_file_exclusive(source, output)
+
+    assert not output.exists()
+    assert source.read_bytes() == b"complete-pdf-contents"
 
 
 def test_pdf_service_publish_file_exclusive_overwrites_when_flag_set(tmp_path: Path) -> None:
