@@ -48,7 +48,9 @@ jobs:
         # build:sidecar: PyInstaller で pdf-splitter-sidecar.exe を生成
         # build: Next.js 本番ビルド
         run: npm run build:bundle
-        timeout-minutes: 20
+        # PyInstaller --clean --onefile はWindows実機で20分を超える場合がある。
+        # 正常完了をタイムアウト扱いにしないよう、実測値に余裕を持たせる。
+        timeout-minutes: 40
 
       - name: Verify bundle assets
         working-directory: apps/desktop
