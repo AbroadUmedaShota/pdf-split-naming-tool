@@ -43,6 +43,24 @@ const hashPdfKey = segmentKey(hashPdfPath, 1, 2);
 assert.deepEqual(splitPointsFor(5, [5, 2, 5, 1, 0, 6]), [2, 5]);
 
 {
+  const segments = buildSegments(
+    [
+      { path: "C:\\docs\\empty.pdf", pageCount: 0 },
+      { path: otherPdfPath, pageCount: 3 },
+    ],
+    {},
+    {},
+    { box_no: "01", binder_no: "02" },
+  );
+
+  assert.deepEqual(
+    segments.map((segment) => segment.key),
+    [otherPdfKey],
+  );
+  assert.equal(segments.some((segment) => segment.pages === "1-0"), false);
+}
+
+{
   const metadata = {
     [hashPdfKey]: { box_no: "hash-box", binder_no: "hash-binder", seq: "old-hash", note: "keep-hash" },
   };
