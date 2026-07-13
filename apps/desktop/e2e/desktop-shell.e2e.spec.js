@@ -147,6 +147,14 @@ async function expectInsideViewport(locator, label) {
   expect(box.x + box.width, `${label} の右端が画面外にはみ出さない`).toBeLessThanOrEqual(viewport.width + 1);
 }
 
+async function expectNoVerticalOverlap(upperLocator, lowerLocator, label) {
+  const upper = await upperLocator.boundingBox();
+  const lower = await lowerLocator.boundingBox();
+  expect(upper, `${label} の上側要素が表示領域を持つ`).not.toBeNull();
+  expect(lower, `${label} の下側要素が表示領域を持つ`).not.toBeNull();
+  expect(upper.y + upper.height, `${label} が縦方向に重ならない`).toBeLessThanOrEqual(lower.y + 1);
+}
+
 // 対象: apps/desktop（Next.js）http://localhost:3000 を STEP1 ハーネス（?e2e=step1）と
 // dev preview モード（?dev=<stepId>）で検証する。
 //
@@ -1061,6 +1069,11 @@ test.describe('PDF分割くん デスクトップ UI（dev preview）', () => {
     await expectInsideViewport(page.locator('.pane.stack').first(), 'STEP3 セグメント一覧');
     await expectInsideViewport(page.getByLabel('STEP3命名入力'), 'STEP3 命名入力');
     await expect(page.locator('.filename-preview strong')).toBeVisible();
+    await expectNoVerticalOverlap(
+      page.locator('.input-controls .ocr-text-panel'),
+      page.locator('.input-controls .completion-section'),
+      'STEP3 OCR本文と完了サマリー',
+    );
 
     expect(pageErrors, '最小幅1200確認で JS 例外が発生しない').toEqual([]);
   });
