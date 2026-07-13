@@ -6,6 +6,8 @@ use std::os::windows::process::CommandExt;
 /// Number of recent stderr lines kept for diagnostics when the sidecar fails.
 const STDERR_TAIL_MAX_LINES: usize = 50;
 const BUNDLED_SIDECAR_RESOURCE_PATH: &str = "resources/sidecar/pdf-splitter-sidecar.exe";
+const SIDECAR_SPAWN_MAX_ATTEMPTS: usize = 6;
+const SIDECAR_SPAWN_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -328,6 +330,46 @@ fn sidecar_command(spec: &SidecarProcessSpec) -> std::process::Command {
     command
 }
 
+fn spawn_sidecar_with_retry<T, F>(spawn: F) -> std::io::Result<T>
+where
+    F: FnMut() -> std::io::Result<T>,
+{
+    spawn_sidecar_with_retry_and_delay(spawn, SIDECAR_SPAWN_RETRY_DELAY)
+}
+
+fn spawn_sidecar_with_retry_and_delay<T, F>(
+    mut spawn: F,
+    retry_delay: std::time::Duration,
+) -> std::io::Result<T>
+where
+    F: FnMut() -> std::io::Result<T>,
+{
+    let mut attempt = 1;
+    loop {
+        match spawn() {
+            Ok(value) => return Ok(value),
+            Err(error)
+                if attempt < SIDECAR_SPAWN_MAX_ATTEMPTS
+                    && is_retryable_sidecar_spawn_error(&error) =>
+            {
+                std::thread::sleep(retry_delay);
+                attempt += 1;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn is_retryable_sidecar_spawn_error(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(32)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_retryable_sidecar_spawn_error(_error: &std::io::Error) -> bool {
+    false
+}
+
 fn run_sidecar_resident(
     lane: &SidecarLaneState,
     runtime: &SidecarRuntime,
@@ -382,11 +424,12 @@ fn run_sidecar_resident(
 fn spawn_resident_sidecar(
     spec: &SidecarProcessSpec,
 ) -> Result<ResidentSidecar, String> {
-    let child = sidecar_command(spec)
+    let mut command = sidecar_command(spec);
+    command
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
+        .stderr(std::process::Stdio::piped());
+    let child = spawn_sidecar_with_retry(|| command.spawn())
         .map_err(|error| format!("failed to start Python sidecar: {error}"))?;
     attach_resident_sidecar(child)
 }
@@ -611,11 +654,12 @@ fn run_sidecar_oneshot(
     timeout: std::time::Duration,
 ) -> Result<serde_json::Value, String> {
     let spec = sidecar_process_spec(runtime, SidecarMode::Oneshot);
-    let mut child = sidecar_command(&spec)
+    let mut command = sidecar_command(&spec);
+    command
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
+        .stderr(std::process::Stdio::piped());
+    let mut child = spawn_sidecar_with_retry(|| command.spawn())
         .map_err(|error| format!("failed to start Python sidecar: {error}"))?;
 
     {
@@ -1048,6 +1092,57 @@ mod tests {
 
         assert!(interactive_lane.request_slot.try_lock().is_ok());
         assert!(bulk_lane.request_slot.try_lock().is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn sidecar_spawn_retries_windows_sharing_violation_until_success() {
+        let mut attempts = 0;
+        let result = spawn_sidecar_with_retry_and_delay(
+            || {
+                attempts += 1;
+                if attempts < 3 {
+                    Err(std::io::Error::from_raw_os_error(32))
+                } else {
+                    Ok("started")
+                }
+            },
+            std::time::Duration::ZERO,
+        );
+
+        assert_eq!(result.unwrap(), "started");
+        assert_eq!(attempts, 3);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn sidecar_spawn_stops_after_sharing_violation_retry_limit() {
+        let mut attempts = 0;
+        let result: std::io::Result<()> = spawn_sidecar_with_retry_and_delay(
+            || {
+                attempts += 1;
+                Err(std::io::Error::from_raw_os_error(32))
+            },
+            std::time::Duration::ZERO,
+        );
+
+        assert_eq!(result.unwrap_err().raw_os_error(), Some(32));
+        assert_eq!(attempts, SIDECAR_SPAWN_MAX_ATTEMPTS);
+    }
+
+    #[test]
+    fn sidecar_spawn_does_not_retry_non_sharing_errors() {
+        let mut attempts = 0;
+        let result: std::io::Result<()> = spawn_sidecar_with_retry_and_delay(
+            || {
+                attempts += 1;
+                Err(std::io::Error::from_raw_os_error(2))
+            },
+            std::time::Duration::ZERO,
+        );
+
+        assert_eq!(result.unwrap_err().raw_os_error(), Some(2));
+        assert_eq!(attempts, 1);
     }
 
     #[test]
