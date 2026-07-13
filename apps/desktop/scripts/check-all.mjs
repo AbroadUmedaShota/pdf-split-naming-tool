@@ -13,6 +13,7 @@ const checks = [
   "check-output-state.mjs",
   "check-segment-state.mjs",
   "check-step-layout.mjs",
+  "check-color-contrast.mjs",
 ];
 
 for (const check of checks) {
