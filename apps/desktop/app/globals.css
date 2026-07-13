@@ -782,7 +782,7 @@ button.primary:hover:not(:disabled) {
   flex-direction: column;
   gap: 8px;
   /* 補助情報(連番ルール/追加項目)を格納し、OCRを固定高さにしたため、
-     残りがあふれる場合はパネル全体をスクロールさせる（完了CTAはsticky）。 */
+     残りがあふれる場合はパネル全体をスクロールさせる。 */
   overflow-y: auto;
 }
 
@@ -1026,6 +1026,16 @@ button.primary:hover:not(:disabled) {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), #ffffff 22%);
   box-shadow: 0 -14px 22px rgba(21, 34, 39, 0.06);
   padding-bottom: 0;
+}
+
+/* STEP3 はOCR本文と完了条件が同じスクロール領域にある。sticky にすると
+   本文下端を覆うため、入力ペイン内だけ通常フローへ戻す。 */
+.input-controls .completion-section {
+  position: static;
+  z-index: auto;
+  flex: 0 0 auto;
+  background: #ffffff;
+  box-shadow: none;
 }
 
 .legacy-panel-section .vertical {
