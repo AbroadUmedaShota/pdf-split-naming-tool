@@ -1,6 +1,6 @@
 [project]
 name = "pdf-split-naming-tool-recovery"
-version = "0.1.6"
+version = "0.1.7"
 description = "Recovered PDF split and naming tool with preset-based naming."
 requires-python = ">=3.11"
 dependencies = [

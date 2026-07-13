@@ -6,7 +6,8 @@ use std::os::windows::process::CommandExt;
 /// Number of recent stderr lines kept for diagnostics when the sidecar fails.
 const STDERR_TAIL_MAX_LINES: usize = 50;
 const BUNDLED_SIDECAR_RESOURCE_PATH: &str = "resources/sidecar/pdf-splitter-sidecar.exe";
-const SIDECAR_SPAWN_MAX_ATTEMPTS: usize = 6;
+// Updater/antivirus file locks can outlive the installer process by several seconds.
+const SIDECAR_SPAWN_MAX_ATTEMPTS: usize = 31;
 const SIDECAR_SPAWN_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
