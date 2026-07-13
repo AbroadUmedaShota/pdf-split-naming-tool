@@ -104,6 +104,8 @@ def _error_response(command: str, exc: Exception) -> dict[str, Any]:
 def pdf_info(request: dict[str, Any]) -> dict[str, Any]:
     pdf_path = Path(str(request.get("pdf_path", "")))
     page_count = PdfProcessor.page_count(pdf_path)
+    if page_count < 1:
+        raise ValueError("ページがないPDFは読み込めません。1ページ以上のPDFを選択してください。")
     return {
         "ok": True,
         "command": "pdf_info",
