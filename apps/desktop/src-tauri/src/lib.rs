@@ -27,9 +27,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(SidecarState(std::sync::Arc::new(std::sync::Mutex::new(
-            None,
-        ))))
+        .manage(SidecarState::new())
         .invoke_handler(tauri::generate_handler![run_sidecar, reveal_path])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -39,24 +37,54 @@ pub fn run() {
             // Secondary shutdown path. The primary path is pipe closure on app
             // process exit, which makes the Python side see stdin EOF and quit.
             let state = app_handle.state::<SidecarState>();
-            let mut slot = state
-                .0
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let _ = kill_resident_sidecar(&mut slot);
+            kill_resident_sidecars_for_shutdown(&state);
         }
     });
 }
 
-/// Shared slot holding the resident Python sidecar process, if any.
-///
-/// The `Mutex` also serializes requests: only one request is in flight at a
-/// time, matching the JSON Lines protocol (one request line, one response
-/// line). The `Arc` lets the slot move into `spawn_blocking` closures.
-struct SidecarState(std::sync::Arc<std::sync::Mutex<Option<ResidentSidecar>>>);
+/// Two resident processes keep long scans/exports from blocking interactive
+/// preview work. Each lane remains serialized so the JSON Lines request/response
+/// protocol and export duplicate-prevention behavior stay unchanged.
+struct SidecarState {
+    interactive: SharedSidecarLane,
+    bulk: SharedSidecarLane,
+}
+
+type SharedChild = std::sync::Arc<std::sync::Mutex<std::process::Child>>;
+type SharedSidecarLane = std::sync::Arc<SidecarLaneState>;
+
+struct SidecarLaneState {
+    request_slot: std::sync::Mutex<Option<ResidentSidecar>>,
+    active_child: std::sync::Mutex<Option<SharedChild>>,
+}
+
+impl SidecarLaneState {
+    fn new() -> Self {
+        Self {
+            request_slot: std::sync::Mutex::new(None),
+            active_child: std::sync::Mutex::new(None),
+        }
+    }
+}
+
+impl SidecarState {
+    fn new() -> Self {
+        Self {
+            interactive: std::sync::Arc::new(SidecarLaneState::new()),
+            bulk: std::sync::Arc::new(SidecarLaneState::new()),
+        }
+    }
+
+    fn lane_for(&self, lane: SidecarLane) -> SharedSidecarLane {
+        std::sync::Arc::clone(match lane {
+            SidecarLane::Interactive => &self.interactive,
+            SidecarLane::Bulk => &self.bulk,
+        })
+    }
+}
 
 struct ResidentSidecar {
-    child: std::process::Child,
+    child: SharedChild,
     stdin: std::process::ChildStdin,
     /// Lines read from the child's stdout by a dedicated reader thread.
     /// Channel disconnection signals that the process died (stdout EOF).
@@ -73,6 +101,12 @@ struct ResidentSidecar {
 enum SidecarMode {
     Resident,
     Oneshot,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SidecarLane {
+    Interactive,
+    Bulk,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,7 +136,7 @@ async fn run_sidecar(
     let timeout = resolve_command_timeout(&request);
     let mode_override = std::env::var("PDF_ORGANIZER_SIDECAR_MODE").ok();
     let mode = sidecar_mode_from(mode_override.as_deref());
-    let shared_slot = std::sync::Arc::clone(&state.0);
+    let shared_lane = state.lane_for(sidecar_lane(&request));
 
     tauri::async_runtime::spawn_blocking(move || match mode {
         SidecarMode::Oneshot => {
@@ -111,7 +145,7 @@ async fn run_sidecar(
             run_sidecar_oneshot(&runtime, &request_text, timeout)
         }
         SidecarMode::Resident => run_sidecar_resident(
-            &shared_slot,
+            &shared_lane,
             &runtime,
             &request,
             timeout,
@@ -295,24 +329,40 @@ fn sidecar_command(spec: &SidecarProcessSpec) -> std::process::Command {
 }
 
 fn run_sidecar_resident(
-    shared_slot: &std::sync::Mutex<Option<ResidentSidecar>>,
+    lane: &SidecarLaneState,
     runtime: &SidecarRuntime,
     request: &serde_json::Value,
     timeout: std::time::Duration,
 ) -> Result<serde_json::Value, String> {
-    let mut slot = shared_slot
+    let mut slot = lane
+        .request_slot
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let needs_spawn = match slot.as_mut() {
         None => true,
         // A process that already exited is unusable; replace it lazily.
-        Some(sidecar) => !matches!(sidecar.child.try_wait(), Ok(None)),
+        Some(sidecar) => {
+            let mut child = sidecar
+                .child
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            !matches!(child.try_wait(), Ok(None))
+        }
     };
     if needs_spawn {
-        let _ = kill_resident_sidecar(&mut slot);
+        let _ = kill_resident_sidecar(&mut slot, &lane.active_child);
         let spec = sidecar_process_spec(runtime, SidecarMode::Resident);
-        *slot = Some(spawn_resident_sidecar(&spec)?);
+        // Hold the lifecycle handle lock across spawn and registration so the
+        // exit hook cannot miss a child in the narrow creation window.
+        let mut active_child = lane
+            .active_child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sidecar = spawn_resident_sidecar(&spec)?;
+        *active_child = Some(std::sync::Arc::clone(&sidecar.child));
+        drop(active_child);
+        *slot = Some(sidecar);
     }
 
     let sidecar = slot
@@ -323,7 +373,7 @@ fn run_sidecar_resident(
         Err(message) => {
             // Timeout, process death, or protocol desync: kill the process and
             // clear the slot so the next request re-spawns a fresh sidecar.
-            let stderr_tail = kill_resident_sidecar(&mut slot);
+            let stderr_tail = kill_resident_sidecar(&mut slot, &lane.active_child);
             Err(append_stderr_tail(message, &stderr_tail))
         }
     }
@@ -384,7 +434,7 @@ fn attach_resident_sidecar(mut child: std::process::Child) -> Result<ResidentSid
     });
 
     Ok(ResidentSidecar {
-        child,
+        child: std::sync::Arc::new(std::sync::Mutex::new(child)),
         stdin,
         stdout_rx,
         stderr_tail,
@@ -455,19 +505,51 @@ fn parse_sidecar_response_line(
 /// child.wait() は kill 後に別スレッドへデタッチする。kill が失敗/遅延した場合でも
 /// 呼び出し元スレッドが Mutex を保持したまま wait() でブロックするのを防ぐため。
 /// stderr_tail のスナップショットは wait() の前に取得する（wait() 後はアクセス不可）。
-fn kill_resident_sidecar(slot: &mut Option<ResidentSidecar>) -> String {
+fn kill_resident_sidecar(
+    slot: &mut Option<ResidentSidecar>,
+    active_child: &std::sync::Mutex<Option<SharedChild>>,
+) -> String {
     match slot.take() {
-        Some(mut sidecar) => {
+        Some(sidecar) => {
             // wait() 前にスナップショットを取る（move 後はアクセス不可になるため）
             let tail = stderr_tail_snapshot(&sidecar.stderr_tail);
-            let _ = sidecar.child.kill();
+            *active_child
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+            let child = std::sync::Arc::clone(&sidecar.child);
+            let _ = child
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .kill();
             // wait() をバックグラウンドスレッドにデタッチして呼び出し元をブロックしない
             std::thread::spawn(move || {
-                let _ = sidecar.child.wait();
+                let _ = child
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .wait();
             });
             tail
         }
         None => String::new(),
+    }
+}
+
+/// Kills both lane processes without waiting for their request locks. The child
+/// handle is intentionally tracked outside the request slot so an in-flight
+/// export cannot delay app shutdown or leave a sidecar process behind.
+fn kill_resident_sidecars_for_shutdown(state: &SidecarState) {
+    for lane in [&state.interactive, &state.bulk] {
+        let child = lane
+            .active_child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(child) = child {
+            let _ = child
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .kill();
+        }
     }
 }
 
@@ -498,23 +580,26 @@ fn append_stderr_tail(message: String, stderr_tail: &str) -> String {
 /// - 短時間コマンド（page_preview 等）:
 ///   既定 30,000 ms。環境変数 `PDF_ORGANIZER_SIDECAR_TIMEOUT_MS` で上書き可。
 ///
-/// NOTE: Mutex を使った head-of-line blocking 問題（長時間コマンドが後続を詰まらせる件）
-/// は今回スコープ外。タイムアウト別枠化で「export が kill される」実害のみ解消する。
 fn resolve_command_timeout(request: &serde_json::Value) -> std::time::Duration {
-    let command = request
-        .get("command")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    let is_long = matches!(
-        command,
-        "export" | "blank_candidates" | "index_candidates" | "search_text"
-    );
-    if is_long {
+    if sidecar_lane(request) == SidecarLane::Bulk {
         let override_val = std::env::var("PDF_ORGANIZER_LONG_TIMEOUT_MS").ok();
         sidecar_timeout_from_with_default(override_val.as_deref(), 300_000)
     } else {
         let override_val = std::env::var("PDF_ORGANIZER_SIDECAR_TIMEOUT_MS").ok();
         sidecar_timeout_from(override_val.as_deref())
+    }
+}
+
+fn sidecar_lane(request: &serde_json::Value) -> SidecarLane {
+    match request
+        .get("command")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+    {
+        "preflight" | "export" | "blank_candidates" | "index_candidates" | "search_text" => {
+            SidecarLane::Bulk
+        }
+        _ => SidecarLane::Interactive,
     }
 }
 
@@ -880,7 +965,7 @@ mod tests {
     // #104: コマンド別タイムアウトのテスト
     #[test]
     fn resolve_command_timeout_long_commands_use_300s() {
-        for cmd in &["export", "blank_candidates", "index_candidates", "search_text"] {
+        for cmd in &["preflight", "export", "blank_candidates", "index_candidates", "search_text"] {
             let request = serde_json::json!({ "command": cmd });
             let timeout = resolve_command_timeout(&request);
             assert_eq!(
@@ -893,7 +978,7 @@ mod tests {
 
     #[test]
     fn resolve_command_timeout_short_commands_use_30s() {
-        for cmd in &["page_preview", "page_thumbnail", "page_text", "pdf_info", "preflight"] {
+        for cmd in &["page_preview", "page_thumbnail", "page_text", "pdf_info"] {
             let request = serde_json::json!({ "command": cmd });
             let timeout = resolve_command_timeout(&request);
             assert_eq!(
@@ -916,6 +1001,65 @@ mod tests {
         let request = serde_json::json!({ "foo": "bar" });
         let timeout = resolve_command_timeout(&request);
         assert_eq!(timeout, std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn long_running_commands_use_the_bulk_lane() {
+        for command in [
+            "preflight",
+            "export",
+            "blank_candidates",
+            "index_candidates",
+            "search_text",
+        ] {
+            assert_eq!(
+                sidecar_lane(&serde_json::json!({ "command": command })),
+                SidecarLane::Bulk,
+                "command={command} should not block interactive requests"
+            );
+        }
+    }
+
+    #[test]
+    fn preview_and_other_short_commands_use_the_interactive_lane() {
+        for command in [
+            "page_preview",
+            "page_thumbnail",
+            "page_text",
+            "search_highlights",
+            "pdf_info",
+            "state_load",
+            "state_save",
+        ] {
+            assert_eq!(
+                sidecar_lane(&serde_json::json!({ "command": command })),
+                SidecarLane::Interactive,
+                "command={command} should stay responsive during bulk work"
+            );
+        }
+    }
+
+    #[test]
+    fn sidecar_lanes_have_independent_locks() {
+        let state = SidecarState::new();
+        let bulk_lane = state.lane_for(SidecarLane::Bulk);
+        let interactive_lane = state.lane_for(SidecarLane::Interactive);
+        let _bulk_guard = bulk_lane.request_slot.lock().unwrap();
+
+        assert!(interactive_lane.request_slot.try_lock().is_ok());
+        assert!(bulk_lane.request_slot.try_lock().is_err());
+    }
+
+    #[test]
+    fn shutdown_does_not_wait_for_a_busy_lane() {
+        let state = SidecarState::new();
+        let bulk_lane = state.lane_for(SidecarLane::Bulk);
+        let _bulk_guard = bulk_lane.request_slot.lock().unwrap();
+        let started_at = std::time::Instant::now();
+
+        kill_resident_sidecars_for_shutdown(&state);
+
+        assert!(started_at.elapsed() < std::time::Duration::from_millis(100));
     }
 
     #[test]
@@ -1081,6 +1225,21 @@ for line in sys.stdin:
     sys.stdout.flush()
 "#;
 
+    const FAKE_SLOW_ECHO_SIDECAR: &str = r#"
+import json
+import sys
+import time
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    envelope = json.loads(line)
+    time.sleep(1.5)
+    reply = {"id": envelope["id"], "response": {"ok": True, "echo": envelope["request"]}}
+    sys.stdout.write(json.dumps(reply, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+"#;
+
     fn spawn_fake_sidecar(python_body: &str) -> ResidentSidecar {
         let child = std::process::Command::new("py")
             .args(["-3.12", "-c", python_body])
@@ -1112,8 +1271,85 @@ for line in sys.stdin:
         }
         assert_eq!(sidecar.next_id, 4);
 
-        let _ = sidecar.child.kill();
-        let _ = sidecar.child.wait();
+        stop_test_sidecar(&sidecar);
+    }
+
+    #[test]
+    #[ignore = "requires py -3.12 launcher; run with -- --ignored locally"]
+    fn resident_lanes_exchange_requests_concurrently() {
+        let state = SidecarState::new();
+        install_fake_sidecar(&state.bulk, FAKE_SLOW_ECHO_SIDECAR);
+        install_fake_sidecar(&state.interactive, FAKE_ECHO_SIDECAR);
+
+        let bulk_lane = state.lane_for(SidecarLane::Bulk);
+        let bulk_worker = std::thread::spawn(move || {
+            let runtime = test_sidecar_runtime();
+            run_sidecar_resident(
+                &bulk_lane,
+                &runtime,
+                &serde_json::json!({"command": "export"}),
+                std::time::Duration::from_secs(10),
+            )
+        });
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        let interactive_started_at = std::time::Instant::now();
+        let response = run_sidecar_resident(
+            &state.interactive,
+            &test_sidecar_runtime(),
+            &serde_json::json!({"command": "page_preview"}),
+            std::time::Duration::from_secs(10),
+        )
+        .unwrap();
+
+        assert!(response["ok"].as_bool().unwrap());
+        assert!(interactive_started_at.elapsed() < std::time::Duration::from_secs(1));
+        assert!(bulk_worker.join().unwrap().is_ok());
+        kill_resident_sidecars_for_shutdown(&state);
+    }
+
+    #[test]
+    #[ignore = "requires py -3.12 launcher; run with -- --ignored locally"]
+    fn shutdown_kills_a_busy_lane_without_waiting_for_the_request() {
+        let state = SidecarState::new();
+        install_fake_sidecar(
+            &state.bulk,
+            "import sys, time\nsys.stdin.readline()\ntime.sleep(60)\n",
+        );
+        let child = state.bulk.active_child.lock().unwrap().clone().unwrap();
+        let bulk_lane = state.lane_for(SidecarLane::Bulk);
+        let bulk_worker = std::thread::spawn(move || {
+            run_sidecar_resident(
+                &bulk_lane,
+                &test_sidecar_runtime(),
+                &serde_json::json!({"command": "export"}),
+                std::time::Duration::from_secs(60),
+            )
+        });
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        let shutdown_started_at = std::time::Instant::now();
+        kill_resident_sidecars_for_shutdown(&state);
+
+        assert!(shutdown_started_at.elapsed() < std::time::Duration::from_secs(1));
+        assert!(bulk_worker.join().unwrap().is_err());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let exited = child
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .try_wait()
+                .unwrap()
+                .is_some();
+            if exited {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "busy sidecar process remained alive after shutdown"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 
     #[test]
@@ -1128,8 +1364,7 @@ for line in sys.stdin:
                 .unwrap_err();
 
         assert!(error.contains("timed out"), "{error}");
-        let _ = sidecar.child.kill();
-        let _ = sidecar.child.wait();
+        stop_test_sidecar(&sidecar);
     }
 
     #[test]
@@ -1160,7 +1395,10 @@ for line in sys.stdin:
         }
 
         let mut slot = Some(sidecar);
-        let stderr_tail = kill_resident_sidecar(&mut slot);
+        let active_child = std::sync::Mutex::new(
+            slot.as_ref().map(|sidecar| std::sync::Arc::clone(&sidecar.child)),
+        );
+        let stderr_tail = kill_resident_sidecar(&mut slot, &active_child);
         assert!(stderr_tail.contains("fake sidecar crashed"), "{stderr_tail}");
         assert!(slot.is_none());
     }
@@ -1176,8 +1414,7 @@ for line in sys.stdin:
                 .unwrap_err();
 
         assert!(error.contains("desync"), "{error}");
-        let _ = sidecar.child.kill();
-        let _ = sidecar.child.wait();
+        stop_test_sidecar(&sidecar);
     }
 
     #[test]
@@ -1188,6 +1425,28 @@ for line in sys.stdin:
         let combined = append_stderr_tail("boom".to_string(), "trace line");
         assert!(combined.starts_with("boom\n"));
         assert!(combined.contains("trace line"));
+    }
+
+    fn test_sidecar_runtime() -> SidecarRuntime {
+        SidecarRuntime::Python {
+            recovery_dir: std::path::PathBuf::from("."),
+            launcher: sidecar_python_launcher_from(None),
+        }
+    }
+
+    fn install_fake_sidecar(lane: &SidecarLaneState, python_body: &str) {
+        let sidecar = spawn_fake_sidecar(python_body);
+        *lane.active_child.lock().unwrap() = Some(std::sync::Arc::clone(&sidecar.child));
+        *lane.request_slot.lock().unwrap() = Some(sidecar);
+    }
+
+    fn stop_test_sidecar(sidecar: &ResidentSidecar) {
+        let mut child = sidecar
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     fn unique_test_dir(name: &str) -> std::path::PathBuf {
