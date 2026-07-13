@@ -72,8 +72,8 @@ npm run release:manifest
 npm run release:check
 ```
 
-6. PR を `main` へ取り込み、公開承認後に Git tag と GitHub Release を作成します。
-   既に tag / Release がある場合は作成をスキップし、asset の差し替えだけ行います。
+6. PR を `main` へ取り込み、公開承認後に Git tag と draft GitHub Release を作成します。
+   この時点では公開しません。既に tag / Release がある場合は作成をスキップし、asset の差し替えだけ行います。
 
 ```powershell
 $repo = "AbroadUmedaShota/pdf-split-naming-tool"
@@ -84,7 +84,8 @@ gh release create $tag `
   --repo $repo `
   --target main `
   --title "PDF整理ツール $tag" `
-  --notes "PDF整理ツール $version"
+  --notes "PDF整理ツール $version" `
+  --draft
 ```
 
 7. GitHub Releases に installer、`.sig`、`latest.json` をアップロードします。
@@ -133,7 +134,30 @@ gh api -X PATCH "repos/$repo/releases/assets/$assetId" -f name="latest.json" | O
 https://github.com/AbroadUmedaShota/pdf-split-naming-tool/releases/latest/download/latest.json
 ```
 
-8. 公開後に配信 URL と manifest の中身を確認します。
+8. draft assetのinstallerを手動導入し、下記「動作確認」の `installed-*-smoke` を実施します。
+   Release workflow の `build-and-check` 成功と手動確認を確認してからdraftを公開し、直ちに旧版から新版への
+   `test:installed-updater` を実施します。updater smokeが失敗した場合は次節のロールバックへ進みます。
+
+```powershell
+$repo = "AbroadUmedaShota/pdf-split-naming-tool"
+$version = "0.1.5"
+$tag = "v$version"
+
+gh release edit $tag --repo $repo --draft=false --latest
+
+$env:PDF_ORGANIZER_UPDATER_OLD_INSTALLER_PATH="C:\path\to\pdf-organizer-desktop_0.1.4_x64-setup.exe"
+$env:PDF_ORGANIZER_UPDATER_OLD_VERSION="0.1.4"
+$env:PDF_ORGANIZER_UPDATER_NEW_VERSION=$version
+try {
+  npm run test:installed-updater
+} finally {
+  $env:PDF_ORGANIZER_UPDATER_OLD_INSTALLER_PATH=$null
+  $env:PDF_ORGANIZER_UPDATER_OLD_VERSION=$null
+  $env:PDF_ORGANIZER_UPDATER_NEW_VERSION=$null
+}
+```
+
+9. 公開後に配信 URL と manifest の中身を確認します。
 
 ```powershell
 $repo = "AbroadUmedaShota/pdf-split-naming-tool"
@@ -202,21 +226,48 @@ v0.1.3 から v0.1.4 への更新、再起動後の `現在のバージョン: 0
 ## 段階配信（デスクトップのカナリア相当）
 
 全ユーザーが単一の `latest.json` を参照するため、`latest.json` を差し替えた瞬間に全員が更新対象になります。
-不良版の影響範囲を絞るため、次の段階で配信します。
+また、アプリの updater endpoint は公開 Release の `releases/latest/download/latest.json` に固定されているため、
+draft / prerelease のまま updater 往復確認はできません。公開前の手動確認と公開直後の updater 確認を分け、
+次の順序で配信します。
 
-1. GitHub Release を **draft / prerelease** で作成し、この時点では `latest.json` を新版へ差し替えない。
-2. 限定の確認者が NSIS installer を手動ダウンロードして実機検証（`installed-*-smoke` 相当・updater 往復）。
-3. 問題なければ Release を publish し、`latest.json` を新版へ差し替えて全体配信に移行する。
+1. GitHub Release を **draft** で作成し、installer、`.sig`、`latest.json` の3 assetを登録する。
+2. 限定の確認端末へ署名済み NSIS installer を手動導入し、`installed-*-smoke` を実施する。この段階では
+   updater 往復確認は未実施として扱う。
+3. 直前の正常版 installer と `latest.json` をロールバック用に確保し、旧版からの updater smoke コマンドを準備する。
+4. 手動確認が成功したら `gh release edit v0.1.5 --draft=false --latest` でdraft Releaseを公開し、
+   明示的に `latest` へ指定する。公開と同時に新版の `latest.json` が全ユーザーから参照可能になる。
+5. 公開直後に限定の確認端末で旧版から新版への updater smoke を実行する。v0.1.5では次の値を指定する。
+
+```powershell
+$env:PDF_ORGANIZER_UPDATER_OLD_INSTALLER_PATH="C:\path\to\pdf-organizer-desktop_0.1.4_x64-setup.exe"
+$env:PDF_ORGANIZER_UPDATER_OLD_VERSION="0.1.4"
+$env:PDF_ORGANIZER_UPDATER_NEW_VERSION="0.1.5"
+npm run test:installed-updater
+```
+
+6. updater smoke が成功したら配信完了とする。失敗した場合は直ちに次節のロールバックを実施し、
+   新規の更新適用を停止する。
 
 ## ロールバック手順（不良版を配信してしまった場合）
 
 ローカルファイル出力のみで DB マイグレーションが無いため、巻き戻しは Release asset の差し替えだけで完結します。
 
-1. 直前の正常版（例: v0.1.4）の installer・`.sig`・`latest.json` を手元に用意する（過去の Release からも取得可）。
-2. `latest.json` を旧版の内容へ戻し、`releases/latest/download/latest.json` の asset を旧版で `--clobber` 上書きする
-   （手順7の content-type 回避と同じやり方）。これで updater は旧版を「最新」と認識し、新規の更新適用を止められる。
-3. 不良版の Release を draft 化または削除し、`latest` が旧版 Release を指す状態にする。
-4. `curl` で `latest.json` の `version` が旧版へ戻ったことを確認する（手順8と同じ）。
+1. 直前の正常版（例: v0.1.4）の installer・`.sig`・`latest.json` を手元に用意し、公開済み旧版Releaseにも
+   3 assetが残っていることを確認する。
+2. 不良版を先にdraftへ戻し、旧版Releaseを明示的に `latest` へ指定する。固定endpointが不良版を指したまま
+   assetだけを差し替える運用は行わない。
+
+```powershell
+$repo = "AbroadUmedaShota/pdf-split-naming-tool"
+$badTag = "v0.1.5"
+$goodTag = "v0.1.4"
+
+gh release edit $badTag --repo $repo --draft
+gh release edit $goodTag --repo $repo --latest
+```
+
+3. 手順9と同じ `curl` で `releases/latest/download/latest.json` の `version` が旧版へ戻り、
+   旧版installer URLがHTTP 200になることを確認する。これで新規の更新適用を停止できる。
 
 所要は手作業で約5〜10分（推定）。**既に不良版へ更新済みのユーザーには、updater は通常ダウングレードしないため、
 旧版 installer の手動再インストールを案内する**。
