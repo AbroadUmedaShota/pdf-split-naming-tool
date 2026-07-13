@@ -3,7 +3,6 @@
 import base64
 import os
 import re
-import shutil
 import time
 from uuid import uuid4
 from hashlib import sha256
@@ -401,14 +400,14 @@ class PdfService:
             # 既存の出力は置換が成立する瞬間まで残る（書き込み途中で原本を壊さない）。
             os.replace(source_path, output_path)
             return
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+
+        # 完成済みtempだけを最終名へ原子的に公開する。Windowsのrenameは既存名を置換せず、
+        # Windows以外では同一ディレクトリ内のhard linkが同じno-replace性を持つ。
+        # コピー途中のプロセス終了で、不完全なPDFが正規名に残ることを避ける。
         try:
-            fd = os.open(output_path, flags)
+            if os.name == "nt":
+                os.rename(source_path, output_path)
+            else:
+                os.link(source_path, output_path)
         except FileExistsError as exc:
             raise FileExistsError(f"Output path already exists: {output_path}") from exc
-        try:
-            with os.fdopen(fd, "wb") as target, source_path.open("rb") as source:
-                shutil.copyfileobj(source, target)
-        except Exception:
-            Path(output_path).unlink(missing_ok=True)
-            raise
