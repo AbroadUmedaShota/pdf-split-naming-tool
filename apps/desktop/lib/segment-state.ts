@@ -36,6 +36,9 @@ export function splitPointsFor(pageCount: number, splitPoints: number[] | undefi
 }
 
 function segmentRangesFor(pdfPath: string, pageCount: number, splitPoints: number[] | undefined): SegmentRange[] {
+  if (pageCount < 1) {
+    return [];
+  }
   const points = splitPointsFor(pageCount, splitPoints);
   const starts = [1, ...points];
   const ends = [...points.map((point) => point - 1), pageCount];

@@ -28,6 +28,23 @@ def make_text_pdf(path: Path, page_texts: list[str]) -> None:
     doc.close()
 
 
+def make_zero_page_pdf(path: Path) -> None:
+    parts = [b"%PDF-1.4\n"]
+    offsets: list[int] = []
+    for number, body in (
+        (1, b"<< /Type /Catalog /Pages 2 0 R >>"),
+        (2, b"<< /Type /Pages /Kids [] /Count 0 >>"),
+    ):
+        offsets.append(sum(map(len, parts)))
+        parts.append(f"{number} 0 obj\n".encode() + body + b"\nendobj\n")
+    xref_offset = sum(map(len, parts))
+    parts.append(b"xref\n0 3\n0000000000 65535 f \n")
+    parts.extend(f"{offset:010d} 00000 n \n".encode() for offset in offsets)
+    parts.append(b"trailer\n<< /Size 3 /Root 1 0 R >>\n")
+    parts.append(f"startxref\n{xref_offset}\n%%EOF\n".encode())
+    path.write_bytes(b"".join(parts))
+
+
 def test_sidecar_pdf_info_returns_import_metadata(tmp_path: Path) -> None:
     source = tmp_path / "source.pdf"
     make_pdf(source, 3)
@@ -40,6 +57,21 @@ def test_sidecar_pdf_info_returns_import_metadata(tmp_path: Path) -> None:
     assert response["page_count"] == 3
     assert response["page_numbers"] == [1, 2, 3]
     assert response["naming_template"] == "{box_no:0>2}_{binder_no:0>2}_{seq:0>3}.pdf"
+
+
+def test_sidecar_pdf_info_rejects_zero_page_pdf(tmp_path: Path) -> None:
+    source = tmp_path / "zero-pages.pdf"
+    make_zero_page_pdf(source)
+
+    with fitz.open(source) as document:
+        assert document.page_count == 0
+
+    response = handle_request({"command": "pdf_info", "pdf_path": str(source)})
+
+    assert response["ok"] is False
+    assert response["command"] == "pdf_info"
+    assert response["error_type"] == "ValueError"
+    assert response["error"] == "ページがないPDFは読み込めません。1ページ以上のPDFを選択してください。"
 
 
 def test_sidecar_page_preview_returns_jpeg_data_url(tmp_path: Path) -> None:
